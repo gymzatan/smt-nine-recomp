@@ -10,6 +10,7 @@ Known coverage limits:
 - Performance in heavy scenes still needs work. Selecting 60 Hz is not a promise that every scene maintains it.
 - The previously unresolved fusion callback is integrated and the original two-demon selector has been reached. Final fusion confirmation/result coverage remains pending.
 - CLOVER viewport/projection corrections are integrated; complete appearance-route visual coverage remains pending.
+- Fixed linear texture generation and texture matrices have native GPU checks. The reported post-hacking second encounter still needs a complete replay with the rebuilt executable.
 - Later hardware/render states can still expose explicit unsupported boundaries. The runtime does not silently turn them into successful operations.
 - Newly edited Chinese text has structural/reference verification, but every scene has not been replayed in game.
 

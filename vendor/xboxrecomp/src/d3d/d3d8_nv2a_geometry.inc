@@ -99,10 +99,11 @@ static const char nv2a_fixed_vertex_source[] =
 " float4 scene,emission;\n"
 " float4 ambient[8],diffuse[8],specular[8];\n"
 " float4 halfVector[8],direction[8],position[8],attenuation[8];\n"
-" float4 material; uint4 fixedFlags,sources,lightModes[2];\n"
+" float4 material; uint4 fixedFlags,sources,lightModes[2],texgen[4],textureMatrix;\n"
 "};\n"
 "struct I { float4 a0:ATTR0,a1:ATTR1,a2:ATTR2,a3:ATTR3,a4:ATTR4,a5:ATTR5,a6:ATTR6,a7:ATTR7,a8:ATTR8,a9:ATTR9,a10:ATTR10,a11:ATTR11,a12:ATTR12; };\n"
 "float4 transform4(float4 p,int base) { return float4(dot(p,C[base]),dot(p,C[base+1]),dot(p,C[base+2]),dot(p,C[base+3])); }\n"
+"float4 fixedTexcoord(I v,float4 eye,uint stage,float4 t) { [unroll] for(uint j=0;j<4;j++) { if(texgen[stage][j]==1) t[j]=dot(C[64+stage*8+j],eye); else if(texgen[stage][j]==2) t[j]=dot(C[64+stage*8+j],v.a0); } if(textureMatrix[stage]!=0) t=transform4(t,68+stage*8);return t; }\n"
 "float3 sourceColour(uint source,float3 constantValue,I v) { return source==0 ? constantValue : source==1 ? v.a3.rgb : v.a4.rgb; }\n"
 "V main_fixed(I v) {\n"
 " V o=(V)0; float4 eye=transform4(v.a0,8); float3 n=transform4(float4(v.a2.xyz,0),12).xyz;\n"
@@ -131,7 +132,7 @@ static const char nv2a_fixed_vertex_source[] =
 " o.p=float4(p.xy/p.w+C[59].xy,p.z/p.w,p.w);\n"
 " o.f=v.a5.x;if(pointFlags.w==0) o.f=saturate(v.a4.a);else if(pointFlags.w==1) o.f=length(eye.xyz);else if(pointFlags.w==2 || pointFlags.w==3) { o.f=dot(C[57].xyz,eye.xyz)+C[57].w;if(pointFlags.w==3) o.f=abs(o.f); }\n"
 " o.sz=max(1,pointSize.x);if(pointFlags.x!=0) { float d=length(eye);float mn=min(pointParams[1].w,63.875),mx=min(pointParams[0].w+mn,63.875);o.sz=clamp((rsqrt(pointParams[0].x+pointParams[0].y*d+pointParams[0].z*d*d)+pointParams[1].z)*pointParams[0].w+pointParams[1].w,mn,mx); }\n"
-" o.t0=v.a9;o.t1=v.a10;o.t2=v.a11;o.t3=v.a12;return o;\n"
+" o.t0=fixedTexcoord(v,eye,0,v.a9);o.t1=fixedTexcoord(v,eye,1,v.a10);o.t2=fixedTexcoord(v,eye,2,v.a11);o.t3=fixedTexcoord(v,eye,3,v.a12);return o;\n"
 "}\n"
 ;
 

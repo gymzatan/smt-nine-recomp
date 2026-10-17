@@ -14,6 +14,8 @@ Track and arrow icons retain the original shared sprite/font paths. The reserved
 
 The controller guide strips (`1353F2`, return `1357E7`) and menu polylines (`148240`, return `1482D5`) use the same color-geometry mapping. Every vertex in each strip is mapped, including the six-vertex formation connector.
 
+The small speech-window connector is rebuilt by `1059A0` and submitted by `105C60` as two four-vertex strips at `105EEC` and `105F08`. Each submitted range shares the existing color UI mapping once, keeping its underline and speaker pointer aligned with the text/background. The captured eight-vertex payload verifies both ranges and preserves the original gradient, Y, depth and RHW.
+
 ## Portrait transitions
 
 The original sprite renderer `145A39` switches to `1450CF` during the strip animation used to show and hide portraits. Its draw return `1452C5` submits 22 vertices rather than the settled four-vertex quad at `14617A`. Every animated vertex uses the same centered horizontal mapping as the settled portrait. Y, depth, RHW, colors and UVs retain the original animation values. This keeps the portrait's proportions consistent through entry, exit and speaker changes.

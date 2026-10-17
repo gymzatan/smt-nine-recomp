@@ -2719,22 +2719,29 @@ static void raster_batch(void)
     /* CSV1 texgen and texture matrices belong to the original fixed vertex
      * path. Program output coordinates must not be generated a second time. */
     struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
+    int fixed_texture=0;
     for(unsigned stage=0;stage<4;stage++) {
         for(unsigned component=0;component<4;component++) {
             uint32_t mask=NV_PGRAPH_CSV1_A_T0_S<<(component*3+(stage%2)*16);
             uint32_t mode=GET_MASK(pg->regs[stage<2?NV_PGRAPH_CSV1_A:NV_PGRAPH_CSV1_B],mask);
             if(mode) {
+#if defined(_WIN32)
+                if(hw_enabled() && mode<=NV_PGRAPH_CSV1_A_T0_S_OBJECT_LINEAR) {fixed_texture=1;continue;}
+#endif
                 fprintf(stderr,"[STOP] fixed vertex texgen requires consumer: stage=%u component=%u mode=%u\n",stage,component,mode);
                 exit(5);
             }
         }
         if(pg->texture_matrix_enable[stage]) {
+#if defined(_WIN32)
+            if(hw_enabled()) {fixed_texture=1;continue;}
+#endif
             fprintf(stderr,"[STOP] fixed vertex texture matrix requires consumer: stage=%u\n",stage);
             exit(5);
         }
     }
 #if defined(_WIN32)
-    if(hw_enabled() && (s_gpu.attr[0].size<4 || (pg->regs[NV_PGRAPH_CSV0_C]&NV_PGRAPH_CSV0_C_LIGHTING) || s_gpu.prim==NV_PRIM_POINTS || !batch_is_screen_space())) {
+    if(hw_enabled() && (fixed_texture || s_gpu.attr[0].size<4 || (pg->regs[NV_PGRAPH_CSV0_C]&NV_PGRAPH_CSV0_C_LIGHTING) || s_gpu.prim==NV_PRIM_POINTS || !batch_is_screen_space())) {
         if((s_gpu.xf_mode&3)!=0 || GET_MASK(pg->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_SKIN)!=0)
             hw_check(E_NOTIMPL,"fixed vertex mode or skinning");
         if(GET_MASK(pg->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_FOGGENMODE)>NV_PGRAPH_CSV0_D_FOGGENMODE_FOG_X)

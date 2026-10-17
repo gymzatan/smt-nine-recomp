@@ -22,12 +22,26 @@ static unsigned char ram[0x10000];
 #define MEM32(a) (*(uint32_t *)(ram+((uint32_t)(a)&0x7fffffffu)))
 #define MEMF(a) (*(float *)(ram+((uint32_t)(a)&0x7fffffffu)))
 #define NINE_TITLE_UI_ORIGIN 0
-static uint32_t g_esp=0x1000,g_esi=0x2000,g_ebx,g_ebp=0x1800;
+static uint32_t g_esp=0x1000,g_esi=0x2000,g_ebx,g_edi,g_ebp=0x1800;
 static float aspect;
 float smt9_game_aspect(void){return aspect;}
 int smt9_is_chinese(void){return 0;}
 unsigned d3d8_RenderScale(void){return 2;}
 '''+helper+r'''
+static void check_dialogue_connector(void) {
+    memset(ram,0,sizeof ram);g_edi=0x2000;MEM32(g_edi+4)=0x3000;MEM32(0x3004)=0x4000;
+    const float xy[8][2]={{250.98828f,261.509f},{56,189.509f},{250.98828f,265.509f},{56,193.509f},{56,189.509f},{276,189.509f},{56,193.509f},{276,193.509f}};
+    for(unsigned i=0;i<8;i++){MEMF(0x4000+i*20)=xy[i][0];MEMF(0x4004+i*20)=xy[i][1];MEM32(0x4008+i*20)=MEM32(0x400c+i*20)=0x3f800000;MEM32(0x4010+i*20)=i%2?0x604040a0:0xfff0f0f0;}
+    unsigned char original[160];memcpy(original,ram+0x4000,160);
+    for(unsigned strip=0;strip<2;strip++) {
+        MEM32(g_esp)=strip?0x00105F08:0x00105EEC;MEM32(g_esp+4)=6;MEM32(g_esp+8)=strip*4;MEM32(g_esp+12)=4;
+        prepare_original_ui_quad();
+        for(unsigned i=0;i<8;i++) {
+            float want=aspect==4.0f/3.0f || i>strip*4+3?xy[i][0]:320+(xy[i][0]-320)*((4.0f/3.0f)/aspect);
+            assert(MEMF(0x4000+i*20)==want);assert(!memcmp(original+i*20+4,ram+0x4004+i*20,16));
+        }
+    }
+}
 static void check(float left,float top,float width,float height,int fullscreen) {
     memset(ram,0,sizeof ram);MEM32(g_esp)=0x001C4A3B;
     MEM32(g_esp+4)=8;MEM32(g_esp+8)=0;MEM32(g_esp+12)=4;
@@ -126,6 +140,7 @@ int main(int argc,char **argv) {
     check(12,285,224,40,0);check(12,0,100,480,0);
     check_rgb(0,1);check_rgb(0.5f,1);check_rgb(32,1);check_rgb(80,1);check_rgb(127.5f,1);check_rgb(80,0);
     check_portrait_strip(352,164,272);check_portrait_strip(171,217,216);check_portrait_strip(202,163,80);
+    check_dialogue_connector();
     const float guide_x[]={426,426,381,384,381,384},guide_y[]={262,265,280,282,319,319};
     check_menu_color(0x001357E7,6,6,20,guide_x,guide_y,1);
     check_menu_color(0x001357E6,6,6,20,guide_x,guide_y,0);

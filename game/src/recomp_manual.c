@@ -57,13 +57,18 @@ static void prepare_original_ui_quad(void)
 {
     uint32_t caller=MEM32(g_esp),buffer=0;int texture=0,extra=1,video=0,background=0,texel_endpoints=0,direct=0;unsigned font_scale=1,vertices=4;
     float texture_width=512,texture_height=512;
-    if(caller==0x001C4A3Bu || caller==0x00110102u || caller==0x001357E7u || caller==0x001482D5u || caller==0x000F4F82u){
+    if(caller==0x001C4A3Bu || caller==0x00110102u || caller==0x001357E7u || caller==0x001482D5u || caller==0x000F4F82u || caller==0x00105EECu || caller==0x00105F08u){
         /* Original color quads and menu guide strips share XYZRHW+diffuse mapping. */
         unsigned stride=20;
         if(smt9_game_aspect()==4.0f/3.0f)return;
         if(caller==0x00110102u){
             if(MEM32(g_esp+4)!=7 || MEM32(g_esp+8)!=4 || MEM32(g_esp+16)!=20){fprintf(stderr,"[STOP] original direct color quad contract\n");exit(5);}
             buffer=MEM32(g_esp+12);
+        }else if(caller==0x00105EECu || caller==0x00105F08u){
+            /* 1059A0 rebuilds eight connector vertices, submitted as two strips. */
+            unsigned first=caller==0x00105EECu?0:4;
+            if(MEM32(g_esp+4)!=6 || MEM32(g_esp+8)!=first || MEM32(g_esp+12)!=4){fprintf(stderr,"[STOP] original dialogue connector contract\n");exit(5);}
+            buffer=(MEM32(MEM32(g_edi+4)+4)|0x80000000u)+first*20;
         }else if(caller==0x000F4F82u){
             /* F4F90 rebuilds this original color VB before each panel draw. */
             if(MEM32(g_esp+4)!=6 || MEM32(g_esp+8)!=0 || MEM32(g_esp+12)!=4){fprintf(stderr,"[STOP] original panel color fill contract\n");exit(5);}

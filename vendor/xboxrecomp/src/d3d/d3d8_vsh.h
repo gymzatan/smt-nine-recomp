@@ -290,6 +290,7 @@ typedef struct NV2ANativeFixed {
     float half_vector[8][4], direction[8][4], position[8][4], attenuation[8][4];
     float material[4];
     uint32_t flags[4], sources[4], light_modes[2][4];
+    uint32_t texgen[4][4], texture_matrix[4];
 } NV2ANativeFixed;
 HRESULT d3d8_vsh_bind_native(const DWORD *microcode, int length, const float *constants, const NV2ANativeGeometry *geometry, D3D11_PRIMITIVE_TOPOLOGY topology, uint32_t *inputs_read);
 HRESULT d3d8_vsh_bind_fixed(const float *constants, const NV2ANativeGeometry *geometry, const NV2ANativeFixed *fixed, D3D11_PRIMITIVE_TOPOLOGY topology);

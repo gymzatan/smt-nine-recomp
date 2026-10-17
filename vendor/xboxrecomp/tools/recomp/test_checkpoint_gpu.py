@@ -3,6 +3,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import os
+import sys
 
 import pytest
 
@@ -930,6 +931,24 @@ static void verify_attribute_offset_work(void) {
         }
     }
 }
+static void verify_fixed_texgen_route(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);
+    for(unsigned row=0;row<16;row++){float value[4]={0};value[row%4]=1;nv2a_vsh_set_constant(row,value);}
+    for(unsigned test=0;test<3;test++) {
+        for(unsigned stage=0;stage<4;stage++) {
+            for(unsigned j=0;j<4;j++)method(NV097_SET_TEXGEN_S+stage*16+j*4,test==2?0:test?NV097_SET_TEXGEN_S_OBJECT_LINEAR:NV097_SET_TEXGEN_S_EYE_LINEAR);
+            method(NV097_SET_TEXTURE_MATRIX_ENABLE+stage*4,test==2);
+            for(unsigned row=0;row<4;row++){float value[4]={0};value[row]=1;nv2a_vsh_set_constant(64+stage*8+row,value);nv2a_vsh_set_constant(68+stage*8+row,value);}
+        }
+        vertices(0.25f);method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+        assert(g_vsh_fixed_cb && BRIDGE_MEM32(s_gpu.color_base)==0xffff0000);
+        NV2ANativeFixed actual;ID3D11Buffer *copy=NULL;D3D11_BUFFER_DESC desc={sizeof actual,D3D11_USAGE_STAGING,0,D3D11_CPU_ACCESS_READ,0,0};
+        assert(SUCCEEDED(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&desc,NULL,&copy)));ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
+        ID3D11DeviceContext_CopyResource(ctx,(ID3D11Resource *)copy,(ID3D11Resource *)g_vsh_fixed_cb);D3D11_MAPPED_SUBRESOURCE mapped;assert(SUCCEEDED(ID3D11DeviceContext_Map(ctx,(ID3D11Resource *)copy,0,D3D11_MAP_READ,0,&mapped)));memcpy(&actual,mapped.pData,sizeof actual);ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource *)copy,0);ID3D11Buffer_Release(copy);
+        for(unsigned stage=0;stage<4;stage++){assert(actual.texture_matrix[stage]==(test==2));for(unsigned j=0;j<4;j++)assert(actual.texgen[stage][j]==(test==2?0:test?2:1));}
+    }
+    fprintf(stderr,"[FIXED TEXGEN] original methods route XYZRHW through fixed vertex consumer; all stage/component and matrix bindings exact; pixels preserved\n");
+}
 int main(int argc,char **argv) {
     assert(argc==6);_putenv_s("RECOMP_GUEST_LOCK","1");_putenv_s("RECOMP_GPU_D3D11",argv[5]);
     const char *render_scale=getenv("RECOMP_RENDER_SCALE");
@@ -940,7 +959,9 @@ int main(int argc,char **argv) {
     NV2AState *gpu=nv2a_init_standalone((void *)xbox_GetMemoryOffset(),0x04000000,
                          (void *)(xbox_GetMemoryOffset()+0xfd700000u),0x100000);assert(gpu);
     gpu->pfifo.method_consumer=nv2a_pb_exec_method;assert(xbox_CheckpointBootstrapBegin());
-    if(!strcmp(argv[1],"vertex-payload")) {
+    if(!strcmp(argv[1],"fixed-texgen")) {
+        verify_fixed_texgen_route();
+    } else if(!strcmp(argv[1],"vertex-payload")) {
         verify_vertex_payloads();
     } else if(!strcmp(argv[1],"clear-transfer")) {
         verify_clear_transfer();
@@ -1032,7 +1053,7 @@ static HRESULT readback_map_for_test(ID3D11DeviceContext *context,ID3D11Resource
 #define ID3D11DeviceContext_Map readback_map_for_test
 #include "d3d8_resources.c"
 ''',encoding='utf-8')
-    libraries=list((root.parents[1]/'build/xboxrecomp/src').glob('*/*.lib'));assert len(libraries)==8
+    libraries=list((root.parents[1]/'build/native/xboxrecomp/src').glob('*/*.lib'));assert len(libraries)==8
     libraries.append(root.parents[1]/'build_dsp_jit/x86_64-pc-windows-msvc/release/dsp56300_emu_ffi.lib')
     result=subprocess.run([compiler,'/nologo','/O2','/Gy','/MD','/utf-8',
         '/DWIN32_LEAN_AND_MEAN','/DNOMINMAX','/D_CRT_SECURE_NO_WARNINGS','/D_USE_MATH_DEFINES',
@@ -1043,8 +1064,10 @@ static HRESULT readback_map_for_test(ID3D11DeviceContext *context,ID3D11Resource
         'xinput.lib','bcrypt.lib','ntdll.lib','userenv.lib','ws2_32.lib'],
         cwd=work,capture_output=True,text=True,errors='replace')
     assert result.returncode==0,result.stdout+result.stderr
-    shutil.copytree(root.parents[1]/'build/backends',work/'backends')
-    return work/'gpu.exe',root/'tools/conformance/test.xbe'
+    shutil.copytree(root.parents[1]/'backends',work/'backends')
+    fixture=work/'fixture.xbe'
+    subprocess.run([sys.executable,str(root/'tools/conformance/mkxbe.py'),str(fixture)],check=True,capture_output=True)
+    return work/'gpu.exe',fixture
 
 
 @pytest.mark.parametrize('hardware,backend,scale',[
@@ -1218,3 +1241,13 @@ def test_original_full_clear_cpu_and_gpu_transfer(native_gpu,tmp_path,backend,sc
     assert result.returncode==0,result.stdout+result.stderr
     for line in result.stderr.splitlines():
         if line.startswith('[CLEAR TRANSFER]'):print(line)
+
+
+@pytest.mark.parametrize('backend',['D3D11','Vulkan'])
+def test_original_linear_texgen_fixed_consumer(native_gpu,tmp_path,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'fixed-texgen',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'3','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=30)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[FIXED TEXGEN]' in result.stderr

@@ -164,12 +164,12 @@ DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
         (xi_state.Gamepad.wButtons & XINPUT_GAMEPAD_X) ? 255 : 0;
     pState->Gamepad.bAnalogButtons[XBOX_BUTTON_Y] =
         (xi_state.Gamepad.wButtons & XINPUT_GAMEPAD_Y) ? 255 : 0;
-    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_BLACK] =
+    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_WHITE] = xi_state.Gamepad.bLeftTrigger;
+    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_BLACK] = xi_state.Gamepad.bRightTrigger;
+    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_LTRIGGER] =
         (xi_state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER) ? 255 : 0;
-    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_WHITE] =
+    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_RTRIGGER] =
         (xi_state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER) ? 255 : 0;
-    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_LTRIGGER] = xi_state.Gamepad.bLeftTrigger;
-    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_RTRIGGER] = xi_state.Gamepad.bRightTrigger;
 
     pState->Gamepad.sThumbLX = xi_state.Gamepad.sThumbLX;
     pState->Gamepad.sThumbLY = xi_state.Gamepad.sThumbLY;
@@ -319,16 +319,15 @@ DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
         SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_X) ? 255 : 0;
     pState->Gamepad.bAnalogButtons[XBOX_BUTTON_Y] =
         SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_Y) ? 255 : 0;
-    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_BLACK] =
-        SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) ? 255 : 0;
-    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_WHITE] =
-        SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) ? 255 : 0;
-
     /* SDL trigger axes are 0..32767 -> Xbox analog button 0..255 */
-    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_LTRIGGER] =
+    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_WHITE] =
         (BYTE)(SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_TRIGGERLEFT) >> 7);
-    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_RTRIGGER] =
+    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_BLACK] =
         (BYTE)(SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) >> 7);
+    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_LTRIGGER] =
+        SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) ? 255 : 0;
+    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_RTRIGGER] =
+        SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) ? 255 : 0;
 
     /* SDL Y axis points down; the Xbox Y axis points up -- invert.
      * Use (-1 - v) so v = -32768 does not overflow SHORT. */

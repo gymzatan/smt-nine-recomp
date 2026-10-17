@@ -959,6 +959,13 @@ static void hw_flush_batch(void)
             fixed.flags[1]=(c&NV_PGRAPH_CSV0_C_NORMALIZATION_ENABLE)!=0;
             fixed.flags[2]=(c&NV_PGRAPH_CSV0_C_LOCALEYE)!=0;
             fixed.flags[3]=(c&NV_PGRAPH_CSV0_C_SEPARATE_SPECULAR)!=0;
+            for(unsigned stage=0;stage<4;stage++) {
+                fixed.texture_matrix[stage]=pg->texture_matrix_enable[stage];
+                for(unsigned component=0;component<4;component++) {
+                    uint32_t mask=NV_PGRAPH_CSV1_A_T0_S<<(component*3+(stage%2)*16);
+                    fixed.texgen[stage][component]=GET_MASK(pg->regs[stage<2?NV_PGRAPH_CSV1_A:NV_PGRAPH_CSV1_B],mask);
+                }
+            }
             fixed.sources[0]=GET_MASK(c,NV_PGRAPH_CSV0_C_EMISSION);
             fixed.sources[1]=GET_MASK(c,NV_PGRAPH_CSV0_C_AMBIENT);
             fixed.sources[2]=GET_MASK(c,NV_PGRAPH_CSV0_C_DIFFUSE);

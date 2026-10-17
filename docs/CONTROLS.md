@@ -14,3 +14,10 @@ Window size offers 640×480, 960×720, 1280×720, 1280×960, 1600×900, 1920×10
 Pause and instant-save requests require the runtime's existing safe boundary. If a request is rejected, the window reports it and no valid instant state is created by that attempt. Keep ordinary saves.
 
 Physical keyboard/controller input is accepted only while the game owns the foreground window. Configuration, saves, language packages and screenshots stay local and are excluded from the repository.
+
+| Modern controller | Original Xbox control | Keyboard |
+| --- | --- | --- |
+| LB / RB | L / R triggers | Q / E |
+| LT / RT | White / Black | 2 / 1 |
+
+The shoulder buttons provide the game's L/R actions. Trigger pressure is retained on the White/Black channels.
