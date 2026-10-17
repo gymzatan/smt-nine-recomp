@@ -979,7 +979,13 @@ void recomp_call_arguments(uint32_t target);
 #ifndef RECOMP_CALL_ARGUMENT_TARGET7
 #define RECOMP_CALL_ARGUMENT_TARGET7 0u
 #endif
-#define RECOMP_BEFORE_CALL(va) do { if((uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET2 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET3 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET4 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET5 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET6 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET7) recomp_call_arguments((uint32_t)(va)); } while(0)
+#ifndef RECOMP_CALL_ARGUMENT_TARGET8
+#define RECOMP_CALL_ARGUMENT_TARGET8 0u
+#endif
+#ifndef RECOMP_CALL_ARGUMENT_TARGET9
+#define RECOMP_CALL_ARGUMENT_TARGET9 0u
+#endif
+#define RECOMP_BEFORE_CALL(va) do { if((uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET2 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET3 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET4 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET5 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET6 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET7 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET8 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET9) recomp_call_arguments((uint32_t)(va)); } while(0)
 #else
 #define RECOMP_BEFORE_CALL(va) ((void)0)
 #endif

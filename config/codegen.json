@@ -98917,8 +98917,59 @@
       "name": "sub_000F7D90",
       "file": "recomp_0035.c",
       "generated_sha256": "f9f59a5681e2ccec9c6d79d6310e05fef8b8590d3b0b6e6cc4b497d9bd24a263",
-      "accepted_sha256": "f9f59a5681e2ccec9c6d79d6310e05fef8b8590d3b0b6e6cc4b497d9bd24a263",
-      "edits": []
+      "accepted_sha256": "4a1783889aecaaa1b70fd481fbeeffcff3b40150502f002d533de9c7bad7db2e",
+      "edits": [
+        [
+          1126,
+          2,
+          ""
+        ],
+        [
+          1129,
+          1,
+          ""
+        ],
+        [
+          1131,
+          1,
+          "C24C"
+        ],
+        [
+          1141,
+          2,
+          ""
+        ],
+        [
+          1144,
+          1,
+          ""
+        ],
+        [
+          1146,
+          1,
+          "C24C"
+        ],
+        [
+          1153,
+          1,
+          "sh"
+        ],
+        [
+          1155,
+          2,
+          "red"
+        ],
+        [
+          1158,
+          1,
+          "popup position and measured e"
+        ],
+        [
+          1160,
+          8,
+          "tent"
+        ]
+      ]
     },
     {
       "address": 1015344,
@@ -121081,17 +121132,47 @@
       "name": "sub_001529F5",
       "file": "recomp_0042.c",
       "generated_sha256": "da725175ed51004f491c8984395965dd3ac1b25e1048e19174bccc1503c574c2",
-      "accepted_sha256": "e5aa35b2fa974e139f7d46435e76da751f1a252a25aae3d830efb4184508058b",
+      "accepted_sha256": "660c937263362e32472a00286d4f57f5fbaea6d651b6644a29ed5c09acc620ba",
       "edits": [
         [
-          6930,
+          6934,
           131,
           ""
         ],
         [
-          7239,
-          439,
-          "    eax = (eax & 0xFFFF0000u) | (uint32_t)(uint16_t)(((g_fp_top & 7u) << 11) | g_fp_cc); /* fnstsw ax <- fpu status */\n    _fa = (uint32_t)(HI8(eax)) & 0xFFu; _fb = (uint32_t)(0x41) & 0xFFu;\n    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* test HI8(eax), 0x41 (8-bit) */\n"
+          7243,
+          16,
+          ""
+        ],
+        [
+          7266,
+          16,
+          ""
+        ],
+        [
+          7326,
+          16,
+          ""
+        ],
+        [
+          7431,
+          16,
+          ""
+        ],
+        [
+          7572,
+          16,
+          ""
+        ],
+        [
+          7609,
+          68,
+          ""
+        ],
+        [
+          16648,
+          0,
+          "    /* EOF retires the movie after this frame's scene pass. Let the next\n     * frame draw the scene before advancing its dialogue contexts. */\n    goto loc_00152C03;\n"
         ]
       ]
     },

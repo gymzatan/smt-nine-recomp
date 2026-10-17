@@ -42,6 +42,31 @@ static void check_dialogue_connector(void) {
         }
     }
 }
+
+static void check_speech_anchor(void) {
+    const uint32_t callers[]={0x006EC256,0x006EC26D,0x0018C795,0x0018C906,0x006EC26C};
+    const float heads[]={100,320,560},steps[]={0,0.25f,1};
+    float factor=(4.0f/3.0f)/aspect;
+    for(unsigned c=0;c<5;c++)for(unsigned n=0;n<3;n++) {
+        memset(ram,0,sizeof ram);MEM32(g_esp)=callers[c];MEM32(g_esp+4)=0x4000;MEM32(g_esp+8)=0x5000;
+        MEMF(0x4000)=heads[n];MEMF(0x4004)=150;MEMF(0x4008)=0.5f;
+        MEMF(0x5000)=56;MEMF(0x5004)=80;MEMF(0x5008)=1;
+        unsigned char original[12],box[12];memcpy(original,ram+0x4000,12);memcpy(box,ram+0x5000,12);
+        prepare_original_speech_anchor();
+        assert(!memcmp(original+4,ram+0x4004,8) && !memcmp(box,ram+0x5000,12));
+        if(c==4)assert(!memcmp(original,ram+0x4000,12));
+        else for(unsigned t=0;t<3;t++) {
+            /* Interpolation must connect the displayed head to the mapped
+             * box for the whole animation, including partial strips. */
+            float generated=MEMF(0x4000)+(56-MEMF(0x4000))*steps[t];
+            float displayed=320+(generated-320)*factor;
+            float mapped_box=320+(56-320)*factor;
+            float expected=heads[n]+(mapped_box-heads[n])*steps[t];
+            assert(fabsf(displayed-expected)<0.0001f);
+        }
+    }
+}
+
 static void check(float left,float top,float width,float height,int fullscreen) {
     memset(ram,0,sizeof ram);MEM32(g_esp)=0x001C4A3B;
     MEM32(g_esp+4)=8;MEM32(g_esp+8)=0;MEM32(g_esp+12)=4;
@@ -126,13 +151,21 @@ static void check_projection(uint32_t caller,int active,float x,float y,float ra
     MEMF(g_esp+8)=ratio;MEMF(g_esp+12)=scale;
     MEMF(0x4000)=x;MEMF(0x4004)=y;MEM32(0x4008)=0x3f000000;
     prepare_original_preview_projection();
-    if(aspect==4.0f/3.0f || !active) {
-        assert(MEMF(0x4000)==x && MEMF(g_esp+8)==ratio);
+    float factor=(4.0f/3.0f)/aspect;
+    int appearance=active && caller!=0x001427AE;
+    if(!active || aspect==4.0f/3.0f)assert(MEMF(0x4000)==x);
+    else assert(MEMF(0x4000)==(x==144?188:290));
+    if(appearance) {
+        /* The patched appearance shader reads c36.y for Y instead of X.
+         * Reconstruct the original scalar on both axes, then widen X only. */
+        float original_scalar=ratio*scale;
+        assert(fabsf(MEMF(g_esp+12)-original_scalar)<0.00001f);
+        assert(fabsf(MEMF(g_esp+8)*MEMF(g_esp+12)-original_scalar*factor)<0.00001f);
     } else {
-        assert(MEMF(0x4000)==(x==144?188:290));
-        assert(fabsf(MEMF(g_esp+8)-ratio*0.75f)<0.000001f);
+        assert(fabsf(MEMF(g_esp+8)-ratio*(active?factor:1))<0.000001f);
+        assert(MEMF(g_esp+12)==scale);
     }
-    assert(MEMF(0x4004)==y && MEM32(0x4008)==0x3f000000 && MEMF(g_esp+12)==scale);
+    assert(MEMF(0x4004)==y && MEM32(0x4008)==0x3f000000);
 }
 int main(int argc,char **argv) {
     assert(argc==2);aspect=atoi(argv[1])==4?4.0f/3.0f:16.0f/9.0f;
@@ -140,7 +173,7 @@ int main(int argc,char **argv) {
     check(12,285,224,40,0);check(12,0,100,480,0);
     check_rgb(0,1);check_rgb(0.5f,1);check_rgb(32,1);check_rgb(80,1);check_rgb(127.5f,1);check_rgb(80,0);
     check_portrait_strip(352,164,272);check_portrait_strip(171,217,216);check_portrait_strip(202,163,80);
-    check_dialogue_connector();
+    check_dialogue_connector();check_speech_anchor();
     const float guide_x[]={426,426,381,384,381,384},guide_y[]={262,265,280,282,319,319};
     check_menu_color(0x001357E7,6,6,20,guide_x,guide_y,1);
     check_menu_color(0x001357E6,6,6,20,guide_x,guide_y,0);

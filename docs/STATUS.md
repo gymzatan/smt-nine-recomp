@@ -4,6 +4,8 @@ The initial source release uses the existing accepted native port. It is an earl
 
 Existing runtime verification includes startup, Japanese/Chinese/English selection, ordinary saves and loads, movies, field navigation and shops, story battles, RTS tutorials, chapter two entry, display/aspect options, pause/screenshots and exact-executable instant-state recovery. The reported post-hacking second story battle proceeds through its following street dialogue and Central Administration Bureau scene with the delivered executable. The ordinary Status demon view has been verified with Sphinx and Cait Sith; its model projection uses the same widescreen mapping as its surrounding panel.
 
+Current scene handling keeps the projected speaker endpoint at its world-screen position while the speech window and connector text end share the existing UI mapping. The per-frame popup update retains measured Chinese line width. CLOVER preserves the original appearance scale on both shader axes before applying widescreen X mapping. On the movie EOF frame, teardown returns through the existing epilogue so the following scene can render before dialogue contexts advance. Targeted helper and compiled-function checks cover these changes; the exact reported Legion movie boundary and all CLOVER appearance variants have not been recaptured in game.
+
 Known coverage limits:
 
 - Full playthrough, later chapters, all battles, complete audio coverage and long-session stability remain incomplete.

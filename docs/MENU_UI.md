@@ -14,7 +14,11 @@ Track and arrow icons retain the original shared sprite/font paths. The reserved
 
 The controller guide strips (`1353F2`, return `1357E7`) and menu polylines (`148240`, return `1482D5`) use the same color-geometry mapping. Every vertex in each strip is mapped, including the six-vertex formation connector.
 
-The small speech-window connector is rebuilt by `1059A0` and submitted by `105C60` as two four-vertex strips at `105EEC` and `105F08`. Each submitted range shares the existing color UI mapping once, keeping its underline and speaker pointer aligned with the text/background. The captured eight-vertex payload verifies both ranges and preserves the original gradient, Y, depth and RHW.
+The small speech-window connector is rebuilt by `1059A0` and submitted by `105C60` as two four-vertex strips at `105EEC` and `105F08`. Each submitted range shares the existing color UI mapping once. The projected world-speaker point is converted into UI coordinates before the original interpolation, so the final draw preserves the world endpoint while mapping the text end with its background. The per-frame update at `F7DA3` calls the existing `6EC24C` popup-layout wrapper, including its measured Chinese width and screen clamp. This keeps the underline inside the measured window instead of resetting it to the original fixed width. The captured eight-vertex payload verifies both ranges and preserves the original gradient, Y, depth and RHW.
+
+## Appearance and Status previews
+
+The appearance producers preserve the original ratio-times-scale on both physical shader axes, then apply the shared widescreen factor to X. Their viewport and screen origin use the existing UI mapping. The Status producer keeps its separate accepted projection handling. Production-helper checks exercise 4:3 and 16:9; complete appearance-route visual coverage remains pending.
 
 ## Portrait transitions
 

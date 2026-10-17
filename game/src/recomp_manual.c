@@ -215,6 +215,18 @@ static void prepare_original_ui_quad(void)
     if(n==count && count<7){seen[count++]=caller;fprintf(stderr,"[UI PRODUCER] caller=%08X buffer=%08X size=%gx%g uv=%g,%g,%g,%g fullscreen=%d\n",caller,buffer,xmax-xmin,ymax-ymin,umin,vmin,umax,vmax,fullscreen);}
     }
 }
+static void prepare_original_speech_anchor(void)
+{
+    uint32_t caller=MEM32(g_esp);
+    if(caller!=0x006EC256u && caller!=0x006EC26Du && caller!=0x0018C795u && caller!=0x0018C906u)return;
+    float factor=(4.0f/3.0f)/smt9_game_aspect();
+    if(factor==1)return;
+    /* 106FE0/105930 consume a projected world point, separate from the UI.
+     * Express only the point in UI coordinates before the original connector
+     * interpolates it; the shared draw mapping then restores its screen X. */
+    uint32_t point=MEM32(g_esp+4);
+    MEMF(point)=320+(MEMF(point)-320)/factor;
+}
 static void prepare_original_preview_viewport(void)
 {
     uint32_t caller=MEM32(g_esp);
@@ -237,19 +249,25 @@ static void prepare_original_preview_projection(void)
 {
     uint32_t caller=MEM32(g_esp);
     if(caller!=0x000F819Eu && caller!=0x000F8638u && caller!=0x001427AEu)return;
-    if(smt9_game_aspect()==4.0f/3.0f)return;
     /* Original appearance and status producers set screen origin and X/Y
      * scale ratio before 16370 uploads c36. Keep their Y and depth intact. */
     uint32_t position=MEM32(g_esp+4);
     float factor=(4.0f/3.0f)/smt9_game_aspect();
     MEMF(position)=320+(MEMF(position)-320)*factor;
-    MEMF(g_esp+8)*=factor;
+    if(caller==0x001427AEu)MEMF(g_esp+8)*=factor;
+    else {
+        /* Appearance uses the field shader's independent c36 axes. Its
+         * original scalar was ratio*scale for both axes, including at 4:3. */
+        MEMF(g_esp+12)*=MEMF(g_esp+8);
+        MEMF(g_esp+8)=factor;
+    }
     static unsigned seen;
     unsigned bit=caller==0x001427AEu?4:caller==0x000F8638u?2:1;
     if(!(seen&bit)){seen|=bit;fprintf(stderr,"[UI PRODUCER] preview projection caller=%08X origin=%g,%g ratio=%g scale=%g\n",caller,MEMF(position),MEMF(position+4),MEMF(g_esp+8),MEMF(g_esp+12));}
 }
 void recomp_call_arguments(uint32_t target)
 {
+    if(target==0x00105930u || target==0x00106FE0u){prepare_original_speech_anchor();return;}
     if(target==0x002EDE10u){prepare_original_preview_viewport();return;}
     if(target==0x002F03E0u || target==0x002F00D0u){prepare_original_ui_quad();return;}
     if(target==0x002218D0u && MEM32(g_esp)==0x000EE3B9u){
