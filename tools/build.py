@@ -67,15 +67,15 @@ def build(iso, jobs, resume=False):
          '--locked','--release','--target','x86_64-pc-windows-msvc','-p','dsp56300-emu-ffi','--jobs',jobs],env=dsp_environment,cwd=ROOT),
          [ROOT/'build_dsp_jit/x86_64-pc-windows-msvc/release/dsp56300_emu_ffi.lib'])
     run([cmake,'-S',ROOT/'game','-B',ROOT/'build/native','-G','Ninja','-DCMAKE_MAKE_PROGRAM='+str(ninja),
-         '-DCMAKE_BUILD_TYPE=Release','-DSMT9_MACHINE_CHECKPOINT=ON','-DCMAKE_RUNTIME_OUTPUT_DIRECTORY='+str(ROOT/'bin')],env=environment)
+         '-DCMAKE_BUILD_TYPE=Release','-DSMT9_MACHINE_CHECKPOINT=ON','-DCMAKE_RUNTIME_OUTPUT_DIRECTORY='+str(ROOT)],env=environment)
     # CMake/Ninja owns the dependency graph. Translation units and Cargo crates
     # have separate outputs; preparation and code generation remain sequential.
     run([cmake,'--build',ROOT/'build/native','--target','smt9_recomp','Config','--parallel',jobs],env=environment)
-    receipt={'iso_sha256':digest(iso),'seconds':time.monotonic()-start,'executable_sha256':digest(ROOT/'bin/smt9_recomp.exe'),
-             'config_sha256':digest(ROOT/'bin/Config.exe'),'source':'Retail ISO plus repository source/translation inputs and declared build dependencies',
+    receipt={'iso_sha256':digest(iso),'seconds':time.monotonic()-start,'executable_sha256':digest(ROOT/'smt9_recomp.exe'),
+             'config_sha256':digest(ROOT/'Config.exe'),'source':'Retail ISO plus repository source/translation inputs and declared build dependencies',
              'ffmpeg':str(ffmpeg),'ffprobe':str(ffprobe),'python':sys.version,'gameplay_validation':'Build completion is not a full-playthrough claim.'}
     (ROOT/'build/completion.json').write_text(json.dumps(receipt,indent=2)+'\n')
-    print('Build complete. Open bin/Config.exe, then bin/smt9_recomp.exe.',flush=True)
+    print('Build complete. Open Config.exe, then smt9_recomp.exe.',flush=True)
 
 
 if __name__ == '__main__':

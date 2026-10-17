@@ -1,17 +1,30 @@
 #pragma once
-#define SMT9_GAME_DIR "@SMT9_GAME_DIR@"
-#define SMT9_XBE_PATH "@SMT9_XBE_PATH@"
-#define SMT9_SAVE_DIR "@SMT9_SAVE_DIR@"
-#define SMT9_CHECKPOINT_PATH "@SMT9_CHECKPOINT_PATH@"
-#define SMT9_CONFIG_PATH_W L"@SMT9_CONFIG_PATH@"
-
-#define SMT9_JP_XBE_PATH "@SMT9_JP_XBE_PATH@"
-#define SMT9_JP_GAME_DIR "@SMT9_JP_GAME_DIR@"
-
-#define SMT9_RUNTIME_DIR_W L"@SMT9_RUNTIME_DIR@"
-#define SMT9_RUNTIME_DIR "@SMT9_RUNTIME_DIR@"
-#define SMT9_LANGUAGES_DIR_W L"@SMT9_RUNTIME_DIR@/languages"
+#include <windows.h>
+#include <stdio.h>
+typedef struct NinePaths {
+    char game_dir[MAX_PATH*4],xbe[MAX_PATH*4],save[MAX_PATH*4];
+    char checkpoint[MAX_PATH*4],jp_xbe[MAX_PATH*4],jp_game_dir[MAX_PATH*4],runtime[MAX_PATH*4];
+    wchar_t config[MAX_PATH],runtime_w[MAX_PATH],screenshots[MAX_PATH];
+    wchar_t languages[MAX_PATH],builtin[MAX_PATH],python[MAX_PATH],importer[MAX_PATH];
+} NinePaths;
+extern NinePaths nine_paths;
+int nine_paths_init(void);
+FILE *nine_fopen(const char *path,const char *mode);
+#define SMT9_ROOT_FROM_EXE_W L"@SMT9_ROOT_FROM_EXE@"
+#define SMT9_IMAGE_RELATIVE_W L"@SMT9_IMAGE_RELATIVE@"
+#define SMT9_CHECKPOINT_RELATIVE_W L"@SMT9_CHECKPOINT_RELATIVE@"
 #define SMT9_COMPILED_LANGUAGE_W L"@SMT9_IMPORTED_LANGUAGE_ID@"
-#define SMT9_BUILTIN_EXECUTABLE_W L"@SMT9_BUILTIN_EXECUTABLE@"
-#define SMT9_PYTHON_W L"@SMT9_PYTHON@"
-#define SMT9_IMPORT_SCRIPT_W L"@SMT9_IMPORT_SCRIPT@"
+#define SMT9_GAME_DIR nine_paths.game_dir
+#define SMT9_XBE_PATH nine_paths.xbe
+#define SMT9_SAVE_DIR nine_paths.save
+#define SMT9_CHECKPOINT_PATH nine_paths.checkpoint
+#define SMT9_CONFIG_PATH_W nine_paths.config
+#define SMT9_JP_XBE_PATH nine_paths.jp_xbe
+#define SMT9_JP_GAME_DIR nine_paths.jp_game_dir
+#define SMT9_RUNTIME_DIR_W nine_paths.runtime_w
+#define SMT9_RUNTIME_DIR nine_paths.runtime
+#define SMT9_SCREENSHOTS_DIR_W nine_paths.screenshots
+#define SMT9_LANGUAGES_DIR_W nine_paths.languages
+#define SMT9_BUILTIN_EXECUTABLE_W nine_paths.builtin
+#define SMT9_PYTHON_W nine_paths.python
+#define SMT9_IMPORT_SCRIPT_W nine_paths.importer

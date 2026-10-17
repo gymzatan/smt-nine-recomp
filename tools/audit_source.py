@@ -19,6 +19,10 @@ def source_files(root=ROOT):
             continue
         if relative.parts[:2] == ('reference','gpu_runtime'):
             continue
+        if len(relative.parts)==1 and (path.name in {'smt9_recomp.exe','Config.exe','smt9_recomp.pdb','Config.pdb'} or path.name=='backends'):
+            continue
+        if relative.parts[0]=='backends':
+            continue
         if relative.as_posix()=='game/src/app_icon.ico':
             continue
         license_text = relative.parts[0]=='LICENSES' and path.name=='WINED3D_COPYING.LIB'

@@ -13,6 +13,7 @@ The native host, Config and DSP library compiled from source. The native configu
 - Chinese F9 pause/resume, a new instant save and strict same-executable cold restore back into the Sphinx Status view. F8 captured the restored displayed surface. Captures were taken at different running frames and were not an exact-frame pixel comparison.
 - First English import through Config and the ISO picker, a rebuilt package update, language selection, English title/load menu, ordinary LOAD01 into the street, F8 and F9 pause. The English patch and ISO remain external user inputs.
 - An intentionally invalid update failed while preserving the existing ready English registration and releasing the import lock.
+- The native executables were copied to D:, renamed into a directory containing Chinese characters and spaces, and launched directly with a different working directory. Config displayed its Chinese interface and saved settings in that moved folder. The game reached the title menu and F8 wrote into that folder. Both executables use the Windows GUI subsystem, so direct launch requires no command script or console window. The delivered play folder excludes the test-created saves and caches.
 
 The ordinary save fixture was copied into the private verification directory only after the disc-to-native build completed. No old instant state was used to establish fresh startup or ordinary-load success. Test processes were closed after verification.
 

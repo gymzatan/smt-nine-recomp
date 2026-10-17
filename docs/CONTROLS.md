@@ -1,6 +1,6 @@
 # Controls
 
-Open `bin/Config.exe` for the full keyboard/controller mapping in Chinese, Japanese or English. The interface language can be selected independently from the game language.
+Open `Config.exe` in the root directory for the full keyboard/controller mapping in Chinese, Japanese or English. The interface defaults to Chinese and can be selected independently from the game language. Double-click `smt9_recomp.exe` in the same directory to play.
 
 - Double-click the game window to toggle borderless fullscreen and restore its previous size/position.
 - F8 saves a BMP screenshot in `runtime/Screenshots`.

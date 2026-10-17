@@ -6,11 +6,13 @@
 
 先安装 Windows x64、Python 3.14、Visual Studio 2022 C++ Build Tools（Windows SDK、CMake、Ninja）、Rustup、PATH 中的 FFmpeg／FFprobe，以及 Windows 简体中文补充字体中的宋体和黑体。
 
+构建后两个 exe 均位于根目录：直接双击 `smt9_recomp.exe` 游玩，双击 `Config.exe` 设置，不需要启动 cmd。程序按 exe 所在目录定位资源，可将整个目录移动到其他盘符。Config 默认中文界面，游戏默认中文，可另行切换日文或导入的英文游戏语言。
+
 ```bat
 setup.cmd
 build.cmd --iso "D:\Games\Shin Megami Tensei - Nine (Japan).iso"
-bin\Config.exe
-run.cmd
+Config.exe
+smt9_recomp.exe
 ```
 
 构建会从原盘生成程序、中文文本、字库、宽屏标题资源和结局字幕，并保留原音轨；不调用翻译或图像生成服务。支持的 ISO 身份、工具设置和中断恢复见 [构建说明](docs/BUILDING.md)，实际干净目录构建及运行检查见 [验证范围](docs/VALIDATION.md)。

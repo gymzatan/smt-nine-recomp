@@ -33,7 +33,7 @@ int nine_title_assets_init(float aspect)
     float factor=(4.0f/3.0f)/aspect;
     if(factor==1.0f)return 1;
     char path[MAX_PATH];snprintf(path,sizeof path,"%s/title_layers.bin",SMT9_RUNTIME_DIR);
-    FILE *file=fopen(path,"rb");if(!file){fprintf(stderr,"[TITLE] missing title layers: %s\n",path);return 0;}
+    FILE *file=nine_fopen(path,"rb");if(!file){fprintf(stderr,"[TITLE] missing title layers: %s\n",path);return 0;}
     char magic[8];uint32_t header[3];
     int ok=fread(magic,8,1,file)==1 && !memcmp(magic,"N9TITLE\0",8) &&
         fread(header,sizeof header,1,file)==1 && header[0]==512 && header[1]==512 && header[2]==1048576;
@@ -60,7 +60,7 @@ int nine_font_assets_init(unsigned scale)
 {
     if(scale==1)return 1;
     char path[MAX_PATH];snprintf(path,sizeof path,"%s/fonts/font%u.bin",SMT9_RUNTIME_DIR,scale);
-    FILE *file=fopen(path,"rb");if(!file){fprintf(stderr,"[FONT] missing generated font: %s\n",path);return 0;}
+    FILE *file=nine_fopen(path,"rb");if(!file){fprintf(stderr,"[FONT] missing generated font: %s\n",path);return 0;}
     char magic[8];uint32_t parameters[2];int ok=fread(magic,8,1,file)==1 && !memcmp(magic,"N9FONT\0\0",8) && fread(parameters,sizeof parameters,1,file)==1 && parameters[0]==scale && parameters[1]>0 && parameters[1]<=128;
     if(!ok){fclose(file);return 0;}
     page_count=parameters[1];pages=calloc(page_count,sizeof *pages);if(!pages){fclose(file);return 0;}
@@ -75,7 +75,7 @@ int nine_font_assets_init(unsigned scale)
     if(ok)ok=fgetc(file)==EOF && !ferror(file);fclose(file);
     unsigned page=0;
     for(unsigned font=0;ok && font<2;font++) {
-        snprintf(path,sizeof path,"%s/Media/SysFont/sys_f%u.xpr",SMT9_GAME_DIR,font?18:24);file=fopen(path,"rb");if(!file){ok=0;break;}
+        snprintf(path,sizeof path,"%s/Media/SysFont/sys_f%u.xpr",SMT9_GAME_DIR,font?18:24);file=nine_fopen(path,"rb");if(!file){ok=0;break;}
         uint32_t header[3];ok=fread(header,sizeof header,1,file)==1 && header[0]==0x30525058 && header[2]>=12 && header[1]>=header[2] && (header[1]-header[2])%131072==0;
         if(ok)ok=fseek(file,(long)header[2],SEEK_SET)==0;
         uint8_t *base=malloc(131072);if(!base)ok=0;

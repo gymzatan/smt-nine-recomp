@@ -15,11 +15,13 @@ git clone https://github.com/gymzatan/smt-nine-recomp.git
 cd smt-nine-recomp
 setup.cmd
 build.cmd --iso "D:\Games\Shin Megami Tensei - Nine (Japan).iso"
-bin\Config.exe
-run.cmd
+Config.exe
+smt9_recomp.exe
 ```
 
 The build extracts and verifies the ISO, generates Chinese resources and subtitles through the existing writers, prepares native images, translates game functions with the pinned lifter, builds the DSP/runtime and compiles the game and Config. Original movie audio is retained. No image-generation or translation service is called during a build.
+
+The two executables are in the project root. Double-click `smt9_recomp.exe` to play and `Config.exe` for settings; no command script is needed. Runtime paths follow the executable, so the folder can be moved to another drive while keeping its resources together. Config defaults to Chinese.
 
 In Config, interface language and game language are independent. Choose Japanese or Chinese for the built-in game. To add English, use **Import or update language ISO…**, enter `English` as its identifier and display name, then select your already-patched ISO. Import compiles a separate language package; it does not include or apply an English translation patch for you.
 
@@ -35,7 +37,7 @@ In Config, interface language and game language are independent. Choose Japanese
 | `patches/` | Rebuildable title corrections and staff-list edits |
 | `reference/` | DSP and resampler dependency source |
 | `tools/` | Disc-to-native-build integration |
-| `data/`, `runtime/`, `bin/`, `build/` | Ignored local inputs and generated outputs |
+| `data/`, `runtime/`, `backends/`, `build/` | Ignored local inputs and generated outputs |
 
 ## Project status
 

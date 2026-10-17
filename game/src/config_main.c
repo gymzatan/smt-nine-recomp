@@ -156,6 +156,7 @@ static INT_PTR CALLBACK config_dialog(HWND window,UINT message,WPARAM wparam,LPA
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE previous,LPWSTR command,int show)
 {
+    if(!nine_paths_init())return 1;
     if(!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))return 1;
     (void)previous;(void)show;wchar_t error[256];
     if(!nine_config_read(&settings,error,256)){MessageBoxW(NULL,error,L"NINE 设置",MB_OK|MB_ICONERROR);return 1;}

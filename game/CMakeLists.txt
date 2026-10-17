@@ -63,27 +63,19 @@ target_link_libraries(apu_device_test PRIVATE xbox_apu xbox_nv2a platform dsp563
 if(MSVC)
     target_compile_options(apu_device_test PRIVATE /UNDEBUG)
 endif()
-get_filename_component(SMT9_GAME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../data/chinese" ABSOLUTE)
 set(SMT9_IMPORTED_LANGUAGE_ROOT "" CACHE PATH "Imported ISO package directory")
 set(SMT9_IMPORTED_LANGUAGE_ID "" CACHE STRING "Imported ISO language identifier")
-get_filename_component(SMT9_XBE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/native_game.xbe" ABSOLUTE)
+set(SMT9_ROOT_FROM_EXE ".")
+set(SMT9_IMAGE_RELATIVE "runtime/native_game.xbe")
+set(SMT9_CHECKPOINT_RELATIVE "runtime/instant.state")
 if(SMT9_IMPORTED_LANGUAGE_ROOT)
-    set(SMT9_XBE_PATH "${SMT9_IMPORTED_LANGUAGE_ROOT}/native_game.xbe")
+    file(RELATIVE_PATH SMT9_PACKAGE_RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/.." "${SMT9_IMPORTED_LANGUAGE_ROOT}")
+    set(SMT9_ROOT_FROM_EXE "../../../../..")
+    set(SMT9_IMAGE_RELATIVE "${SMT9_PACKAGE_RELATIVE}/native_game.xbe")
+    set(SMT9_CHECKPOINT_RELATIVE "${SMT9_PACKAGE_RELATIVE}/instant.state")
 endif()
-set(SMT9_JP_XBE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/native_game_jp.xbe")
-get_filename_component(SMT9_JP_GAME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../data/japanese" ABSOLUTE)
-get_filename_component(SMT9_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../runtime" ABSOLUTE)
-set(SMT9_SAVE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/save")
-get_filename_component(SMT9_CHECKPOINT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/instant.state" ABSOLUTE)
-if(SMT9_IMPORTED_LANGUAGE_ROOT)
-    set(SMT9_CHECKPOINT_PATH "${SMT9_IMPORTED_LANGUAGE_ROOT}/instant.state")
-endif()
-get_filename_component(SMT9_CONFIG_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/NINE.ini" ABSOLUTE)
-get_filename_component(SMT9_PYTHON "${CMAKE_CURRENT_SOURCE_DIR}/../.venv/Scripts/python.exe" ABSOLUTE)
-get_filename_component(SMT9_IMPORT_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/../import_language.py" ABSOLUTE)
-get_filename_component(SMT9_BUILTIN_EXECUTABLE "${CMAKE_CURRENT_SOURCE_DIR}/../bin/smt9_recomp.exe" ABSOLUTE)
 configure_file(src/game_paths.h.in generated/game_paths.h @ONLY)
-add_executable(Config WIN32 src/config_main.c src/config.c src/language.c src/config.rc)
+add_executable(Config WIN32 src/config_main.c src/config.c src/language.c src/game_paths.c src/config.rc)
 target_include_directories(Config PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(Config PRIVATE user32 shell32 comdlg32)
 if(MSVC)
@@ -106,6 +98,7 @@ file(GLOB RECOMP_GEN_SOURCES CONFIGURE_DEPENDS "${SMT9_RECOMP_GEN_DIR}/*.c")
 # Core game sources
 set(GAME_SOURCES
     src/main.c
+    src/game_paths.c
     src/config.c
     src/language.c
     src/font_assets.c
@@ -180,6 +173,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 if(MSVC)
     target_link_options(${PROJECT_NAME} PRIVATE
         /LARGEADDRESSAWARE
+        /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
     )
     # The generated code files can be very large. Increase object file section limit.
     target_compile_options(${PROJECT_NAME} PRIVATE /bigobj /utf-8)

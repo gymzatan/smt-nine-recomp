@@ -33,7 +33,7 @@ build.cmd --iso "D:\Games\Shin Megami Tensei - Nine (Japan).iso"
 
 The pipeline extracts Japanese resources into `data/japanese`, creates Chinese resources in `data/chinese`, prepares both native XBE images, builds title/font/subtitle assets, generates the game C from the pinned original lifter, applies the explicit project codegen edits, builds the DSP dependency, and compiles the existing host/runtime and Config. The build does not use any development-directory XBE, generated C, Media, prebuilt DSP library, font atlas or game executable.
 
-The native game and imported languages use the accepted `Release` compiler configuration. The resulting entry points are `bin/Config.exe` and `bin/smt9_recomp.exe` (`run.cmd`). Keep the checkout and generated resource directories together. Paths are configured for this checkout when compiling; rebuild after moving it.
+The native game and imported languages use the accepted `Release` compiler configuration. The resulting entry points are `Config.exe` and `smt9_recomp.exe` in the project root. Double-click either executable directly. The game opens without a console window. Runtime paths are resolved from the executable directory; keep `data`, `runtime` and `backends` beside the executables when moving the folder. No drive letter or launcher script is required. Config defaults to a Chinese interface and Chinese game language.
 
 If a build is interrupted, keep the unchanged checkout and completed outputs, then use:
 

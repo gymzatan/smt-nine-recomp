@@ -2,6 +2,7 @@
 /data/
 /runtime/
 /bin/
+/backends/
 /build/
 /build_dsp_jit/
 /reference/gpu_runtime/

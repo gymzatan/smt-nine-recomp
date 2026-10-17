@@ -69,19 +69,24 @@ static int instant_checkpoint_control(int load,unsigned slot) {
     if(!path){fprintf(stderr,"[CHECKPOINT] slot %u %s rejected: path allocation failed\n",slot,load?"load":"save");return 0;}
     FILE *file=NULL;int ok=0;
     if(load) {
-        file=fopen(path,"rb");
+        file=nine_fopen(path,"rb");
         if(file) {ok=xbox_CheckpointLoadMachine(file,0,10000);fclose(file);}
     } else {
         size_t length=strlen(path);char *temporary=malloc(length+5);
         if(temporary) {
             memcpy(temporary,path,length);memcpy(temporary+length,".tmp",5);
-            file=fopen(temporary,"wb");
+            wchar_t target_w[MAX_PATH],temporary_w[MAX_PATH];
+            if(!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,path,-1,target_w,MAX_PATH) ||
+               !MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,temporary,-1,temporary_w,MAX_PATH)) {
+                free(temporary);free(path);return 0;
+            }
+            file=nine_fopen(temporary,"wb");
             if(file) {
                 ok=xbox_CheckpointSaveMachine(file,10000);
                 if(ok)ok=fflush(file)==0 && _commit(_fileno(file))==0;
                 if(fclose(file))ok=0;
-                if(ok)ok=MoveFileExA(temporary,path,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
-                if(!ok)DeleteFileA(temporary);
+                if(ok)ok=MoveFileExW(temporary_w,target_w,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
+                if(!ok)DeleteFileW(temporary_w);
             }
             free(temporary);
         }
@@ -549,11 +554,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
 #ifdef SMT9_MACHINE_CHECKPOINT
     unsigned interface_language=!wcscmp(s_display.interface_language,L"Japanese")?1:!wcscmp(s_display.interface_language,L"English")?2:0;
-    xbox_FramebufferWindowSetControls(SMT9_RUNTIME_DIR_W L"/Screenshots",interface_language);
+    xbox_FramebufferWindowSetControls(SMT9_SCREENSHOTS_DIR_W,interface_language);
     xbox_FramebufferSetCheckpointHandler(instant_checkpoint_control);
     if(s_cold_checkpoint) {
         guest_cpu_part();
-        FILE *checkpoint=fopen(s_cold_checkpoint,"rb");
+        FILE *checkpoint=nine_fopen(s_cold_checkpoint,"rb");
         int restored=checkpoint && xbox_CheckpointLoadMachine(checkpoint,1,10000);
         if(checkpoint)fclose(checkpoint);
         if(!restored) {
@@ -583,7 +588,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
 static BOOL load_xbe(const char *path, void **out_data, size_t *out_size)
 {
-    FILE *f = fopen(path, "rb");
+    FILE *f = nine_fopen(path, "rb");
     if (!f) {
         fprintf(stderr, "Cannot open XBE: %s\n", path);
         return FALSE;
@@ -619,6 +624,9 @@ static BOOL load_xbe(const char *path, void **out_data, size_t *out_size)
 /* Console entry point (for debugging -- lets you see printf output) */
 int main(int argc, char **argv)
 {
+    if(!nine_paths_init()) {
+        MessageBoxW(NULL,L"无法确定程序所在目录。 / Cannot resolve the executable directory.",L"NINE",MB_OK|MB_ICONERROR);return 1;
+    }
     if(!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {
         fprintf(stderr,"[DISPLAY] per-monitor pixel sizing failed: %lu\n",GetLastError());return 1;
     }
