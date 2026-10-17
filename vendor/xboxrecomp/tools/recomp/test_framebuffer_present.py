@@ -1,0 +1,117 @@
+"""Exercise the original window consumer, host producer and framebuffer file contract."""
+from pathlib import Path
+import os
+import shutil
+import subprocess
+
+import pytest
+
+
+@pytest.fixture(scope='module')
+def native_framebuffer(tmp_path_factory):
+    root=Path(__file__).resolve().parents[2]
+    work=tmp_path_factory.mktemp('framebuffer_present')
+    compiler=shutil.which('cl');assert compiler, 'requires existing MSVC environment'
+    source=r'''
+#include <windows.h>
+#include <stdint.h>
+#include <assert.h>
+#include <stdio.h>
+static int WINAPI traced_stretch(HDC,int,int,int,int,int,int,int,int,const void *,const BITMAPINFO *,UINT,DWORD);
+#define StretchDIBits traced_stretch
+#include "video/fb_present.c"
+#undef StretchDIBits
+static HANDLE in_gdi,producer_done,next_frame;
+static volatile LONG intercept;
+static unsigned producer_during_gdi;
+static uint32_t first[32*24],second[17*13];
+ptrdiff_t xbox_GetMemoryOffset(void) {return 0;}
+int xbox_VideoIsPlaying(void) {return 0;}
+void xbox_CheckpointDeviceEnter(unsigned device) {(void)device;}
+void xbox_CheckpointDeviceLeave(unsigned device) {(void)device;}
+void xbox_CheckpointDeviceCreating(unsigned device) {(void)device;}
+void xbox_CheckpointDeviceCreated(unsigned device) {(void)device;}
+int xbox_CheckpointBegin(DWORD timeout) {(void)timeout;return 1;}
+void xbox_CheckpointEnd(void) {}
+int xbox_CheckpointFrozen(void) {return 1;}
+void xbox_CaptureDisplayState(uint32_t *state) {state[0]=123;state[1]=456;}
+void xbox_RestoreDisplayState(const uint32_t *state) {assert(state[0]==123 && state[1]==456);}
+static int WINAPI traced_stretch(HDC dc,int x,int y,int dw,int dh,int sx,int sy,int sw,int sh,const void *pixels,const BITMAPINFO *bi,UINT usage,DWORD op) {
+    if(InterlockedCompareExchange(&intercept,0,1)==1) {
+        assert(sw==32 && sh==24 && !memcmp(pixels,first,sizeof first));
+        assert(GetStretchBltMode(dc)==HALFTONE && bi->bmiHeader.biBitCount==32);
+        SetEvent(in_gdi);
+        producer_during_gdi=WaitForSingleObject(producer_done,400)==WAIT_OBJECT_0;
+        /* A resized producer must not invalidate or modify this GDI source. */
+        assert(!memcmp(pixels,first,sizeof first));
+    }else if(intercept==0 && sw==17 && sh==13 && next_frame) {
+        assert(!memcmp(pixels,second,sizeof second));SetEvent(next_frame);
+    }
+    return StretchDIBits(dc,x,y,dw,dh,sx,sy,sw,sh,pixels,bi,usage,op);
+}
+static DWORD WINAPI produce(LPVOID unused) {
+    (void)unused;assert(WaitForSingleObject(in_gdi,5000)==WAIT_OBJECT_0);
+    xbox_FramebufferWindowPresentHost(second,17*4,17,13);SetEvent(producer_done);return 0;
+}
+static void init_host(void) {
+    s_fb_running=1;s_frame_ready=CreateEventW(NULL,FALSE,FALSE,NULL);assert(s_frame_ready);
+    for(unsigned i=0;i<32*24;i++)first[i]=0xff000000u|(i*7919u&0xffffffu);
+    for(unsigned i=0;i<17*13;i++)second[i]=0xff000000u|(i*3571u&0xffffffu);
+    uint32_t padded[24][36];memset(padded,0x5a,sizeof padded);
+    for(unsigned y=0;y<24;y++)memcpy(padded[y],first+y*32,32*4);
+    xbox_FramebufferWindowPresentHost(padded,36*4,32,24);
+    assert(s_host_width==32 && s_host_height==24 && !memcmp(s_host_pixels,first,sizeof first));
+}
+int main(int argc,char **argv) {
+    assert(argc==2);init_host();
+    if(!strcmp(argv[1],"handoff")) {
+        in_gdi=CreateEventW(NULL,TRUE,FALSE,NULL);producer_done=CreateEventW(NULL,TRUE,FALSE,NULL);next_frame=CreateEventW(NULL,TRUE,FALSE,NULL);
+        assert(in_gdi && producer_done && next_frame);intercept=1;
+        xbox_FramebufferWindowConfigure(96,72,4.0f/3.0f);
+        HANDLE producer=CreateThread(NULL,0,produce,NULL,0,NULL),window=CreateThread(NULL,0,fb_thread,NULL,0,NULL);assert(producer && window);
+        assert(WaitForSingleObject(producer,5000)==WAIT_OBJECT_0 && WaitForSingleObject(next_frame,5000)==WAIT_OBJECT_0);
+        InterlockedExchange(&s_fb_running,0);SetEvent(s_frame_ready);
+        assert(WaitForSingleObject(window,5000)==WAIT_OBJECT_0);
+        CloseHandle(window);CloseHandle(producer);CloseHandle(in_gdi);CloseHandle(producer_done);CloseHandle(next_frame);
+        fprintf(stderr,"[FRAMEBUFFER] producer completed inside GDI=%u;original and resized bytes exact\n",producer_during_gdi);
+        assert(producer_during_gdi==1);
+    }else {
+        assert(!strcmp(argv[1],"checkpoint"));
+        s_fb_width=4;s_fb_height=3;s_fb_pitch=16;s_fb_va=0x1234;s_present_idx=1;
+        for(unsigned b=0;b<2;b++) {s_present[b]=malloc(48);for(unsigned i=0;i<12;i++)s_present[b][i]=0xff123400+b*32+i;}
+        s_rgb=calloc(12,4);
+        FILE *saved=tmpfile();assert(saved && xbox_FramebufferSaveCheckpoint(saved));
+        long bytes=ftell(saved);void *original=malloc(bytes),*restored=malloc(bytes);assert(original && restored);
+        rewind(saved);assert(fread(original,bytes,1,saved)==1);
+        xbox_FramebufferWindowPresentHost(second,17*4,17,13);
+        rewind(saved);assert(xbox_FramebufferLoadCheckpoint(saved));
+        assert(s_host_width==32 && s_host_height==24 && !memcmp(s_host_pixels,first,sizeof first));
+        assert(!memcmp(s_rgb,s_present[1],48));
+        FILE *again=tmpfile();assert(again && xbox_FramebufferSaveCheckpoint(again) && ftell(again)==bytes);
+        rewind(again);assert(fread(restored,bytes,1,again)==1 && !memcmp(original,restored,bytes));
+        FILE *shot=tmpfile();assert(shot && fb_write_screenshot(shot)==0);rewind(shot);
+        BITMAPFILEHEADER header;BITMAPINFOHEADER info;assert(fread(&header,sizeof header,1,shot)==1 && fread(&info,sizeof info,1,shot)==1);
+        assert(header.bfType==0x4d42 && info.biWidth==32 && info.biHeight==24);
+        fclose(shot);fclose(again);fclose(saved);free(original);free(restored);
+        fb_close_frame_event();free(s_rgb);free(s_present[0]);free(s_present[1]);
+        fprintf(stderr,"[FRAMEBUFFER] original XBFRONT bytes,guest buffers,host resize restore and F8 BMP dimensions exact\n");
+    }
+    free(s_host_pixels);return 0;
+}
+'''
+    (work/'framebuffer.c').write_text(source,encoding='utf-8')
+    result=subprocess.run([compiler,'/nologo','/O2','/Gy','/MD','/utf-8',
+        '/DWIN32_LEAN_AND_MEAN','/DNOMINMAX','/D_CRT_SECURE_NO_WARNINGS',
+        '/I'+str(root/'src'),str(work/'framebuffer.c'),'/Fe:'+str(work/'framebuffer.exe'),
+        '/link','/OPT:REF','kernel32.lib','user32.lib','gdi32.lib'],
+        cwd=work,capture_output=True,text=True,errors='replace')
+    assert result.returncode==0,result.stdout+result.stderr
+    return work/'framebuffer.exe'
+
+
+@pytest.mark.parametrize('mode',['handoff','checkpoint'])
+def test_original_framebuffer_producer_and_file_contract(native_framebuffer,mode):
+    result=subprocess.run([str(native_framebuffer),mode],env=os.environ.copy(),
+        capture_output=True,text=True,errors='replace',timeout=15)
+    print(result.stderr)
+    assert result.returncode==0,result.stdout+result.stderr

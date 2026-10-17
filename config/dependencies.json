@@ -1,0 +1,35 @@
+{
+  "xboxrecomp_commit": "193e2995ffaec871bb3be43a43bd66aa5fccfeb1",
+  "rust_toolchain": "1.96.0",
+  "gpu": [
+    {
+      "name": "dxvk",
+      "archive": "dxvk.tar.gz",
+      "url": "https://github.com/doitsujin/dxvk/releases/download/v3.1.1/dxvk-3.1.1.tar.gz",
+      "sha256": "40565b4a724aadc4433fa4e010b4b23916d9b1f1baeee64e17186db94f54e608",
+      "files": {
+        "d3d11.dll": "0a203b6255c893430f0a8461c618962df04e62aa41538d5a875b21868317cf9f",
+        "dxgi.dll": "e3c1178eb7f0dd59f91bcfcc257549e5b9cfdb5e8508719293de7f8704f53160"
+      },
+      "backend": "vulkan",
+      "dxgi_import_offset": 7450324,
+      "import_name": "nvgi.dll",
+      "prepared_sha256": "3b8b9585d3026d504d0ca1b422f1da27cad47900e5f1d1225d279ce59bd25a41"
+    },
+    {
+      "name": "wined3d",
+      "archive": "wined3d.zip",
+      "url": "https://downloads.fdossena.com/Projects/WineD3D/Builds/WineD3DForWindows_11.19-x86_64.zip",
+      "sha256": "a7a1e8902ce69068128c8094a186e958b524953360d7f381f76e0c23c401a9cb",
+      "files": {
+        "d3d11.dll": "674ab224dfb9363eb64a9284e657ca5153b29d447dbf85f815fce997bff9cb18",
+        "dxgi.dll": "bdc75dc733fa34f362b16c9f086a96489e6e41fe0b11139ebbc80727f31fb591",
+        "wined3d.dll": "de80dff5b4fb8400e023c5c2effa38f9c9b6f64f4c024b9adfecd395eeca8e0b"
+      },
+      "backend": "opengl",
+      "dxgi_import_offset": 447708,
+      "import_name": "nogi.dll",
+      "prepared_sha256": "482689e7fff4bee7304e0a45999e9b21a2de692e0799a8dd4445a3939c9214af"
+    }
+  ]
+}

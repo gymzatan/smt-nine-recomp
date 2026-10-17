@@ -1,0 +1,357 @@
+[
+ {
+  "start": "0x000223BC",
+  "observed": true,
+  "note": "PsCreateSystemThreadEx StartContext1 observed at runtime; decodes as a function body."
+ },
+ {
+  "start": "0x0021AEBB",
+  "observed": true,
+  "note": "PsCreateSystemThreadEx StartContext1 observed at runtime; decodes as a function body."
+ },
+ {
+  "start": "0x00243129",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x0025CC70",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x0016712F",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x001B431A",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x002F9F40",
+  "observed": true,
+  "note": "Address the kernel bridge could not dispatch; decodes as a function body."
+ },
+ {
+  "start": "0x0030FD65",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x0003D57C",
+  "observed": true,
+  "note": "PsCreateSystemThreadEx StartContext1 observed at runtime; decodes as a function body."
+ },
+ {
+  "start": "0x00288473",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x00288440",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x0031447F",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x00313B73",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x001B3CDC",
+  "observed": true,
+  "note": "PsCreateSystemThreadEx StartContext1 observed at runtime; decodes as a function body."
+ },
+ {
+  "start": "0x0024159A",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x0014F4B5",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x002412F7",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x00106570",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x001036B0",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x001A6FBC",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x00105050",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x0006D9FC",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x00071038",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x001013E0",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x00102B30",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x00106120",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x00094A39",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x00068F2F",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x000A87A3",
+  "observed": true,
+  "note": "Actual original first-battle callback target from native185 strict unresolved call; existing decoded body add ecx,0xA8 then tail-jmp0x0008E5CE."
+ },
+ {
+  "start": "0x000CE75F",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x0001D020",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x0007C933",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x001C8D1B",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x000E1030",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x000E01AE",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x000A8D86",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x00042DE1",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x000DACD6",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x000678D8",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x0001F10D",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x006EC020",
+  "end": "0x006EC090",
+  "size": 112,
+  "name": "sub_006EC020",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "popup_measure_lines"
+ },
+ {
+  "start": "0x006EC090",
+  "end": "0x006EC098",
+  "size": 8,
+  "name": "sub_006EC090",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "popup_measure"
+ },
+ {
+  "start": "0x006EC098",
+  "end": "0x006EC178",
+  "size": 224,
+  "name": "sub_006EC098",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "popup_clamp"
+ },
+ {
+  "start": "0x006EC178",
+  "end": "0x006EC191",
+  "size": 25,
+  "name": "sub_006EC178",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "choice_rows"
+ },
+ {
+  "start": "0x006EC191",
+  "end": "0x006EC1B7",
+  "size": 38,
+  "name": "sub_006EC191",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "choice_row_offset"
+ },
+ {
+  "start": "0x006EC1B7",
+  "end": "0x006EC22A",
+  "size": 115,
+  "name": "sub_006EC1B7",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "choice_layout"
+ },
+ {
+  "start": "0x006EC22A",
+  "end": "0x006EC24C",
+  "size": 34,
+  "name": "sub_006EC22A",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "choice_store_length"
+ },
+ {
+  "start": "0x006EC24C",
+  "end": "0x006EC25F",
+  "size": 19,
+  "name": "sub_006EC24C",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "world_popup_place"
+ },
+ {
+  "start": "0x006EC25F",
+  "end": "0x006EC276",
+  "size": 23,
+  "name": "sub_006EC25F",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "scene_popup_place"
+ },
+ {
+  "start": "0x006EC276",
+  "end": "0x006EC28B",
+  "size": 21,
+  "name": "sub_006EC276",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "choice_highlight_offset"
+ },
+ {
+  "start": "0x006EC28B",
+  "end": "0x006EC2A1",
+  "size": 22,
+  "name": "sub_006EC28B",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "choice_next_y"
+ },
+ {
+  "start": "0x006EC2A1",
+  "end": "0x006EC2D7",
+  "size": 54,
+  "name": "sub_006EC2A1",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "choice_marker_cells"
+ },
+ {
+  "start": "0x006EC2D7",
+  "end": "0x006EC2E2",
+  "size": 11,
+  "name": "sub_006EC2D7",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "choice_marker_count"
+ },
+ {
+  "start": "0x006EC2E2",
+  "end": "0x006EC2F0",
+  "size": 14,
+  "name": "sub_006EC2E2",
+  "section": "$$XSIMAGE",
+  "confidence": 1.0,
+  "detection_method": "explicit_popup_patch",
+  "popup_helper": "choice_marker_right"
+ },
+ {
+  "start": "0x000CE742",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x000DC72F",
+  "observed": true,
+  "note": "Call target observed at runtime before strict termination; decodes as a function body."
+ },
+ {
+  "start": "0x0002268C",
+  "observed": true,
+  "note": "Original fusion callback registered by 00022978 at 00022A10; actual unresolved call from 0003D548 return 0003D54A in chapter2_current/run.err."
+ }
+]

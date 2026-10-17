@@ -1,0 +1,19 @@
+# Source release validation
+
+The source package was built in a separate Windows directory from the supported Japanese retail ISO, repository inputs and the dependencies listed in BUILDING.md. No developer game executable, extracted Media, generated game C, prepared XBE, font container or compiled DSP library was used as a build input. A fresh Python environment was installed from the requirements file. Windows SimSun/SimHei supplied the font inputs.
+
+The ISO SHA-256 was `eafcd00e7fbc53bb10a0ac5743faf2d5ea3e1be9f7351ddb3e97b3c8d916d446`; all 3,515 extracted files were checked against the retail manifest. The original XBE SHA-256 was `6c249401369ed41c2a319762f0b56b80aefde3efe766ac0d8731889a4150deac`.
+
+The existing writers rebuilt the Chinese scripts, fixed fields, fonts, title, staff list and five subtitled movies. The rebuilt native image's sections match the accepted development image byte for byte; only the original certificate title differs. All 22,325 generated function bodies passed the recorded generation hashes. The title bundle matches the accepted bundle. The subtitle writer retained all 24 original audio tracks across 7,631 movie frames and checked the original audio and packet timing. These are rebuild checks, not claims that every translated scene has been played.
+
+The native host, Config and DSP library compiled from source. The native configuration is Release with machine checkpoints enabled. Runtime checks covered:
+
+- Japanese startup/title and an ordinary LOAD01 read.
+- Chinese startup, ordinary LOAD10, chapter-two dialogue, a city transition and Status → Demons with Sphinx correctly inside the model panel at 16:9.
+- Chinese F9 pause/resume, a new instant save and strict same-executable cold restore back into the Sphinx Status view. F8 captured the restored displayed surface. Captures were taken at different running frames and were not an exact-frame pixel comparison.
+- First English import through Config and the ISO picker, a rebuilt package update, language selection, English title/load menu, ordinary LOAD01 into the street, F8 and F9 pause. The English patch and ISO remain external user inputs.
+- An intentionally invalid update failed while preserving the existing ready English registration and releasing the import lock.
+
+The ordinary save fixture was copied into the private verification directory only after the disc-to-native build completed. No old instant state was used to establish fresh startup or ordinary-load success. Test processes were closed after verification.
+
+Source-only CI runs the content audit and the targeted build/integration checks without requiring a game disc. It does not run the game or substitute for the clean local build. See [STATUS.md](STATUS.md) for remaining gameplay and performance coverage.
