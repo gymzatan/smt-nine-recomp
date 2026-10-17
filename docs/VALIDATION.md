@@ -16,6 +16,8 @@ The native host, Config and DSP library compiled from source. The native configu
 - The native executables were copied to D:, renamed into a directory containing Chinese characters and spaces, and launched directly with a different working directory. Config displayed its Chinese interface and saved settings in that moved folder. The game reached the title menu and F8 wrote into that folder. Both executables use the Windows GUI subsystem, so direct launch requires no command script or console window. The delivered play folder excludes the test-created saves and caches.
 - The Option screen's RGB message-background fills align with their slider frames at 16:9, verified on the displayed surface. Their original direct color-quad entry uses the existing UI coordinate mapping. Targeted checks cover empty, fractional and populated fills, preserve all non-X vertex bytes and leave 4:3 unchanged.
 
+The menu graphics audit checks the original shared scrollbar, icon and connector paths. See [MENU_UI.md](MENU_UI.md) for producer identities, displayed coverage and progression-dependent limits.
+
 The ordinary save fixture was copied into the private verification directory only after the disc-to-native build completed. No old instant state was used to establish fresh startup or ordinary-load success. Test processes were closed after verification.
 
 Source-only CI runs the content audit and the targeted build/integration checks without requiring a game disc. It does not run the game or substitute for the clean local build. See [STATUS.md](STATUS.md) for remaining gameplay and performance coverage.

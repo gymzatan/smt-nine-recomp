@@ -60,6 +60,21 @@ static void check_rgb(float width,int active) {
     else for(unsigned i=0;i<4;i++)assert(MEMF(0x4000+i*20)==320+(x[i]-320)*((4.0f/3.0f)/aspect));
     for(unsigned i=0;i<4;i++)assert(!memcmp(before+i*20+4,ram+0x4000+i*20+4,16));
 }
+static void check_menu_color(uint32_t caller,unsigned primitive,unsigned count,unsigned stride,const float *x,const float *y,int active) {
+    memset(ram,0,sizeof ram);MEM32(g_esp)=caller;
+    MEM32(g_esp+4)=primitive;MEM32(g_esp+8)=count;MEM32(g_esp+12)=0x4000;MEM32(g_esp+16)=stride;
+    for(unsigned i=0;i<count;i++) {
+        unsigned vertex=0x4000+i*stride;MEMF(vertex)=x[i];MEMF(vertex+4)=y[i];
+        for(unsigned offset=8;offset<stride;offset+=4)MEM32(vertex+offset)=0x604040a0+i+offset;
+    }
+    if(caller==0x001482D5){g_ebx=0x2000;MEM32(g_ebx+0x18)=0x4000;MEM32(g_esp+8)=0;MEM32(g_esp+12)=count;}
+    if(caller==0x000F4F82){MEM32(g_esi+8)=0x3000;MEM32(0x3004)=0x4000;MEM32(g_esp+8)=0;MEM32(g_esp+12)=count;}
+    unsigned char before[6*28];memcpy(before,ram+0x4000,count*stride);
+    prepare_original_ui_quad();
+    if(aspect==4.0f/3.0f || !active)assert(!memcmp(before,ram+0x4000,count*stride));
+    else for(unsigned i=0;i<count;i++)assert(MEMF(0x4000+i*stride)==320+(x[i]-320)*((4.0f/3.0f)/aspect));
+    for(unsigned i=0;i<count;i++)assert(!memcmp(before+i*stride+4,ram+0x4000+i*stride+4,stride-4));
+}
 static void check_preview(uint32_t caller,int active) {
     memset(ram,0,sizeof ram);MEM32(g_esp)=caller;MEM32(g_esp+4)=0x4000;
     uint32_t original[6]={208,88,144,288,0x3e800000,0x3f800000};
@@ -92,6 +107,23 @@ int main(int argc,char **argv) {
     check(0,0,640,480,1);check(-0.5f,-0.5f,640,480,1);
     check(12,285,224,40,0);check(12,0,100,480,0);
     check_rgb(0,1);check_rgb(0.5f,1);check_rgb(32,1);check_rgb(80,1);check_rgb(127.5f,1);check_rgb(80,0);
+    const float guide_x[]={426,426,381,384,381,384},guide_y[]={262,265,280,282,319,319};
+    check_menu_color(0x001357E7,6,6,20,guide_x,guide_y,1);
+    check_menu_color(0x001357E6,6,6,20,guide_x,guide_y,0);
+    const float formation_x[]={231,231,148,148,100,102},formation_y[]={85,87,85,87,137,137};
+    check_menu_color(0x001482D5,6,6,28,formation_x,formation_y,1);
+    const float bar_x[]={372,381,381,372},bar_y[]={216,216,374,374};
+    const float target_x[]={572,581,581,572},target_y[]={120,120,374,374};
+    check_menu_color(0x00146153,7,4,28,bar_x,bar_y,1);
+    check_menu_color(0x00146153,7,4,28,target_x,target_y,1);
+    check_menu_color(0x00146152,7,4,28,bar_x,bar_y,0);
+    const float fade_x[]={0,640,640,0},fade_y[]={0,0,480,480};
+    check_menu_color(0x00146153,7,4,28,fade_x,fade_y,0);
+    const float navi_x[]={542,542,551,551},navi_y[]={408,120,408,120};
+    check_menu_color(0x000F4F82,6,4,20,navi_x,navi_y,1);
+    const float field_x[]={0,0,639,639},field_y[]={479,0,479,0};
+    check_menu_color(0x000F4F82,6,4,20,field_x,field_y,0);
+    check_menu_color(0x000F4F82,6,4,20,fade_x,fade_y,0);
     check_preview(0x000F826F,1);check_preview(0x000F8709,1);
     check_preview(0x000F84D8,0);check_preview(0x000F8969,0);check_preview(0x000EE537,0);
     check_projection(0x001427AE,1,144,176,1.09523809f,84);

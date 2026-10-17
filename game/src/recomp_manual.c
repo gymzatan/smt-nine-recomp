@@ -55,38 +55,42 @@ extern unsigned smt9_native_font_pages(void);
 extern unsigned d3d8_RenderScale(void);
 static void prepare_original_ui_quad(void)
 {
-    uint32_t caller=MEM32(g_esp),buffer=0;int texture=0,extra=1,video=0,background=0,texel_endpoints=0;unsigned font_scale=1,vertices=4;
+    uint32_t caller=MEM32(g_esp),buffer=0;int texture=0,extra=1,video=0,background=0,texel_endpoints=0,direct=0;unsigned font_scale=1,vertices=4;
     float texture_width=512,texture_height=512;
-    if(caller==0x000F4F82u && MEM32(g_esp+48)==0x00106885u){
-        /* 1066F0's timer fill uses F4F90's original four 20-byte vertices. */
-        buffer=MEM32(MEM32(g_esi+8)+4)|0x80000000u;
-        if(MEM32(g_esp+4)!=6 || MEM32(g_esp+12)!=4){fprintf(stderr,"[STOP] original timer fill contract\n");exit(5);}
-        float factor=(4.0f/3.0f)/smt9_game_aspect();
-        for(unsigned i=0;i<4;i++){
-            uint32_t vertex=buffer+i*20;
-            MEMF(vertex)=320+(MEMF(vertex)-320)*factor;
-        }
-        return;
-    }
-    if(caller==0x001C4A3Bu || caller==0x00110102u){
-        /* Original VB and direct color quads share XYZRHW+diffuse mapping. */
+    if(caller==0x001C4A3Bu || caller==0x00110102u || caller==0x001357E7u || caller==0x001482D5u || caller==0x000F4F82u){
+        /* Original color quads and menu guide strips share XYZRHW+diffuse mapping. */
+        unsigned stride=20;
         if(smt9_game_aspect()==4.0f/3.0f)return;
         if(caller==0x00110102u){
             if(MEM32(g_esp+4)!=7 || MEM32(g_esp+8)!=4 || MEM32(g_esp+16)!=20){fprintf(stderr,"[STOP] original direct color quad contract\n");exit(5);}
+            buffer=MEM32(g_esp+12);
+        }else if(caller==0x000F4F82u){
+            /* F4F90 rebuilds this original color VB before each panel draw. */
+            if(MEM32(g_esp+4)!=6 || MEM32(g_esp+8)!=0 || MEM32(g_esp+12)!=4){fprintf(stderr,"[STOP] original panel color fill contract\n");exit(5);}
+            buffer=MEM32(MEM32(g_esi+8)+4)|0x80000000u;
+        }else if(caller==0x001482D5u){
+            vertices=MEM32(g_esp+12);stride=28;
+            if(MEM32(g_esp+4)!=6 || MEM32(g_esp+8)!=0 || vertices<3){fprintf(stderr,"[STOP] original menu polyline contract\n");exit(5);}
+            buffer=MEM32(g_ebx+0x18);
+        }else if(caller==0x001357E7u){
+            vertices=6;
+            if(MEM32(g_esp+4)!=6 || MEM32(g_esp+8)!=vertices || MEM32(g_esp+16)!=20){fprintf(stderr,"[STOP] original menu guide strip contract\n");exit(5);}
             buffer=MEM32(g_esp+12);
         }else{
             if(MEM32(g_esp+4)!=8 || MEM32(g_esp+8)!=0 || MEM32(g_esp+12)!=4){fprintf(stderr,"[STOP] original command highlight contract\n");exit(5);}
             buffer=MEM32(MEM32(g_esi+4)+4)|0x80000000u;
         }
         float xmin=INFINITY,xmax=-INFINITY,ymin=INFINITY,ymax=-INFINITY;
-        for(unsigned i=0;i<4;i++){
-            uint32_t vertex=buffer+i*20;float x=MEMF(vertex),y=MEMF(vertex+4);
+        for(unsigned i=0;i<vertices;i++){
+            uint32_t vertex=buffer+i*stride;float x=MEMF(vertex),y=MEMF(vertex+4);
             if(x<xmin)xmin=x;if(x>xmax)xmax=x;if(y<ymin)ymin=y;if(y>ymax)ymax=y;
         }
         if(xmax-xmin>=640 && ymax-ymin>=480)return;
+        /* F4E70 also draws the original 639x479 field fade. */
+        if(caller==0x000F4F82u && xmax-xmin>=639 && ymax-ymin>=479)return;
         float factor=(4.0f/3.0f)/smt9_game_aspect();
-        for(unsigned i=0;i<4;i++){
-            uint32_t vertex=buffer+i*20;
+        for(unsigned i=0;i<vertices;i++){
+            uint32_t vertex=buffer+i*stride;
             MEMF(vertex)=320+(MEMF(vertex)-320)*factor;
         }
         return;
@@ -129,10 +133,15 @@ static void prepare_original_ui_quad(void)
         if(smt9_game_aspect()==4.0f/3.0f)return;
         buffer=MEM32(MEM32(g_esi+0x48)+4)|0x80000000u;
         break;
+    case 0x00146153u:
+        /* 145A39 also submits untextured 28-byte quads for menu scroll thumbs. */
+        buffer=MEM32(g_esp+12);direct=1;
+        if(MEM32(g_esp+4)!=7 || MEM32(g_esp+16)!=28){fprintf(stderr,"[STOP] original untextured sprite quad contract\n");exit(5);}
+        break;
     case 0x0014617Au:
         /* 145A39 submits its stack quad through the original DrawVerticesUP.
          * Its GetLevelDesc result and UVs use width/height minus one. */
-        buffer=MEM32(g_esp+12);texture=1;extra=0;texel_endpoints=1;
+        buffer=MEM32(g_esp+12);texture=1;extra=0;texel_endpoints=1;direct=1;
         texture_width=(float)MEM32(g_esp+0x13c);texture_height=(float)MEM32(g_esp+0x140);
         if(MEM32(g_esp+4)!=7 || MEM32(g_esp+16)!=28 || texture_width<=1 || texture_height<=1){fprintf(stderr,"[STOP] original sprite quad contract\n");exit(5);}
         break;
@@ -150,7 +159,7 @@ static void prepare_original_ui_quad(void)
     case 0x0015D750u:buffer=MEM32(g_esi+0x0c);video=1;break;
     default:return;
     }
-    if(!buffer || !vertices || MEM32(g_esp+(texel_endpoints?8:12))!=vertices){fprintf(stderr,"[STOP] original UI quad contract at %08X\n",caller);exit(5);}
+    if(!buffer || !vertices || MEM32(g_esp+(direct?8:12))!=vertices){fprintf(stderr,"[STOP] original UI quad contract at %08X\n",caller);exit(5);}
     for(unsigned quad=0;quad<vertices/4;quad++,buffer+=4*28){
     float xmin=INFINITY,xmax=-INFINITY,ymin=INFINITY,ymax=-INFINITY;
     float umin=INFINITY,umax=-INFINITY,vmin=INFINITY,vmax=-INFINITY;
