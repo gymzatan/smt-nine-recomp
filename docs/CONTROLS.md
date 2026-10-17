@@ -31,17 +31,17 @@ The original Xbox control column is the button sent to the game; each screen det
 | Right stick down | Right stick down | K |
 | Right stick left | Right stick left | J |
 | Right stick right | Right stick right | L |
-| Left stick press (L3) | Press left stick | Q (also sends L) |
-| Right stick press (R3) | Press right stick | O |
+| Left stick press (L3) | Press left stick | Number 1 |
+| Right stick press (R3) | Press right stick | Number 2 |
 | A | A | `.` (period) |
 | B | B | `/` (slash) |
 | X | X | `;` (semicolon) |
 | Y | Y | `'` (apostrophe) |
-| L trigger | LB | Q (also sends left-stick press) |
+| L trigger | LB | Q |
 | R trigger | RB | E |
-| White | LT | Number 2 |
-| Black | RT | Number 1 |
+| White | LT | `[` (left bracket) |
+| Black | RT | `]` (right bracket) |
 | Start | Start / Menu | Right Shift |
 | Back | Back / View | Backspace |
 
-The shoulder buttons provide the game's L/R actions. LT/RT retain their pressure on the White/Black channels; keyboard buttons send full pressure. The existing keyboard mapping sends both L and left-stick press when Q is held. Keyboard input is enabled by default and merges with the first controller.
+The shoulder buttons provide the game's L/R actions. LT/RT retain their pressure on the White/Black channels; keyboard buttons send full pressure. Keyboard input is enabled by default and merges with the first controller.

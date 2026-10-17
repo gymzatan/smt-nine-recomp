@@ -87,8 +87,8 @@ static void keyboard_state(XBOX_INPUT_STATE *pState)
     if (key_down(VK_RIGHT))  b |= XBOX_GAMEPAD_DPAD_RIGHT;
     if (key_down(VK_RSHIFT)) b |= XBOX_GAMEPAD_START;
     if (key_down(VK_BACK))   b |= XBOX_GAMEPAD_BACK;
-    if (key_down('Q'))       b |= XBOX_GAMEPAD_LEFT_THUMB;
-    if (key_down('O'))       b |= XBOX_GAMEPAD_RIGHT_THUMB;
+    if (key_down('1'))       b |= XBOX_GAMEPAD_LEFT_THUMB;
+    if (key_down('2'))       b |= XBOX_GAMEPAD_RIGHT_THUMB;
     pState->Gamepad.wButtons = b;
 
     /* Analog on the console, so a key is 255 rather than a flag -- a title
@@ -97,8 +97,8 @@ static void keyboard_state(XBOX_INPUT_STATE *pState)
     pState->Gamepad.bAnalogButtons[XBOX_BUTTON_B]        = key_down(VK_OEM_2) ? 255 : 0;
     pState->Gamepad.bAnalogButtons[XBOX_BUTTON_X]        = key_down(VK_OEM_1) ? 255 : 0;
     pState->Gamepad.bAnalogButtons[XBOX_BUTTON_Y]        = key_down(VK_OEM_7) ? 255 : 0;
-    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_WHITE]    = key_down('2') ? 255 : 0;
-    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_BLACK]    = key_down('1') ? 255 : 0;
+    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_WHITE]    = key_down(VK_OEM_4) ? 255 : 0;
+    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_BLACK]    = key_down(VK_OEM_6) ? 255 : 0;
     pState->Gamepad.bAnalogButtons[XBOX_BUTTON_LTRIGGER] = key_down('Q') ? 255 : 0;
     pState->Gamepad.bAnalogButtons[XBOX_BUTTON_RTRIGGER] = key_down('E') ? 255 : 0;
 

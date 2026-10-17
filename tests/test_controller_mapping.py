@@ -13,6 +13,7 @@ def test_controller_shoulders_and_triggers(tmp_path):
 #include <xinput.h>
 #include <assert.h>
 static XINPUT_STATE host;
+static unsigned char keys[256];
 static DWORD test_get_state(DWORD port, XINPUT_STATE *state) {*state=host;return ERROR_SUCCESS;}
 static HWND test_foreground(void) {return (HWND)1;}
 static DWORD test_owner(HWND window, LPDWORD owner) {*owner=GetCurrentProcessId();return 1;}
@@ -20,7 +21,15 @@ static DWORD test_owner(HWND window, LPDWORD owner) {*owner=GetCurrentProcessId(
 #define GetForegroundWindow test_foreground
 #define GetWindowThreadProcessId test_owner
 #include "xinput_device.c"
-int xbox_FramebufferKeyDown(int key) {return 0;}
+int xbox_FramebufferKeyDown(int key) {return key>=0 && key<256 && keys[key];}
+static void keyboard_key(int key,WORD digital,int analog) {
+    memset(keys,0,sizeof keys);keys[key]=1;
+    XBOX_INPUT_STATE actual;keyboard_state(&actual);
+    assert(actual.Gamepad.wButtons==digital);
+    for(int i=0;i<8;i++)assert(actual.Gamepad.bAnalogButtons[i]==(i==analog?255:0));
+    assert(!actual.Gamepad.sThumbLX && !actual.Gamepad.sThumbLY &&
+           !actual.Gamepad.sThumbRX && !actual.Gamepad.sThumbRY);
+}
 static void check(WORD buttons,BYTE left,BYTE right,BYTE l,BYTE r,BYTE white,BYTE black) {
     memset(&host,0,sizeof host);host.Gamepad.wButtons=buttons;
     host.Gamepad.bLeftTrigger=left;host.Gamepad.bRightTrigger=right;
@@ -40,6 +49,13 @@ int main(void) {
     check(0,73,0,0,0,73,0);check(0,0,181,0,0,0,181);
     check(XINPUT_GAMEPAD_A|XINPUT_GAMEPAD_LEFT_SHOULDER|XINPUT_GAMEPAD_RIGHT_SHOULDER,31,219,255,255,31,219);
     check(0,0,0,0,0,0,0);
+    keyboard_key('1',XBOX_GAMEPAD_LEFT_THUMB,-1);
+    keyboard_key('2',XBOX_GAMEPAD_RIGHT_THUMB,-1);
+    keyboard_key(VK_OEM_4,0,XBOX_BUTTON_WHITE);
+    keyboard_key(VK_OEM_6,0,XBOX_BUTTON_BLACK);
+    keyboard_key('Q',0,XBOX_BUTTON_LTRIGGER);
+    keyboard_key('E',0,XBOX_BUTTON_RTRIGGER);
+    keyboard_key('O',0,-1);
     return 0;
 }
 '''
