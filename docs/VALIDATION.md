@@ -25,3 +25,5 @@ Closing the framebuffer window ends the game process. A hidden test reproduced t
 The ordinary save fixture was copied into the private verification directory only after the disc-to-native build completed. No old instant state was used to establish fresh startup or ordinary-load success. Test processes were closed after verification.
 
 Source-only CI runs the content audit and the targeted build/integration checks without requiring a game disc. It does not run the game or substitute for the clean local build. See [STATUS.md](STATUS.md) for remaining gameplay and performance coverage.
+
+The Config window-size presets, custom dimensions and Fixed Aspect Ratio checkbox were exercised through the real dialog in Chinese, Japanese and English, including save and reload. Resize checks execute the production window handler for all eight edges/corners at 4:3, 16:9 and a custom size, with a different game aspect to verify independence. They also check the system tracking limit, free resizing and the fullscreen exemption. Config and game checks use isolated copies and do not alter user settings or saves.

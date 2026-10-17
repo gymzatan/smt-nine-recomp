@@ -77,6 +77,7 @@ void xbox_FramebufferSetCheckpointHandler(int (*handler)(int,unsigned)) { s_chec
 static uint32_t      s_fb_va, s_fb_pitch, s_fb_width = 640, s_fb_height = 480;
 static unsigned s_window_width=640,s_window_height=480;
 static float s_display_aspect=4.0f/3.0f;
+static int s_fixed_aspect;
 static SRWLOCK s_host_lock=SRWLOCK_INIT;
 static uint32_t *s_host_pixels;
 static unsigned s_host_width,s_host_height;
@@ -100,9 +101,30 @@ void xbox_FramebufferWindowPresentHost(const void *pixels,unsigned pitch,unsigne
     if(s_frame_ready)SetEvent(s_frame_ready);
     ReleaseSRWLockExclusive(&s_host_lock);
 }
-void xbox_FramebufferWindowConfigure(unsigned width,unsigned height,float aspect)
+void xbox_FramebufferWindowConfigure(unsigned width,unsigned height,float aspect,int fixed_aspect)
 {
-    s_window_width=width;s_window_height=height;s_display_aspect=aspect;
+    s_window_width=width;s_window_height=height;s_display_aspect=aspect;s_fixed_aspect=fixed_aspect;
+}
+static int fb_constrain_window_size(HWND window,WPARAM edge,RECT *bounds)
+{
+    if(!s_fixed_aspect || s_fullscreen || edge<WMSZ_LEFT || edge>WMSZ_BOTTOMRIGHT)return 0;
+    RECT current,client;GetWindowRect(window,&current);GetClientRect(window,&client);
+    LONG border_width=current.right-current.left-client.right;
+    LONG border_height=current.bottom-current.top-client.bottom;
+    LONG width=bounds->right-bounds->left-border_width,height=bounds->bottom-bounds->top-border_height;
+    if(width<1 || height<1)return 0;
+    int vertical=edge==WMSZ_TOP || edge==WMSZ_BOTTOM;
+    if(edge>=WMSZ_TOPLEFT && edge!=WMSZ_BOTTOM){
+        LONG dx=labs(width-client.right),dy=labs(height-client.bottom);
+        vertical=(int64_t)dy*s_window_width>(int64_t)dx*s_window_height;
+    }
+    if(vertical)width=MulDiv(height,s_window_width,s_window_height);
+    else height=MulDiv(width,s_window_height,s_window_width);
+    if(edge==WMSZ_LEFT || edge==WMSZ_TOPLEFT || edge==WMSZ_BOTTOMLEFT)bounds->left=bounds->right-width-border_width;
+    else bounds->right=bounds->left+width+border_width;
+    if(edge==WMSZ_TOP || edge==WMSZ_TOPLEFT || edge==WMSZ_TOPRIGHT)bounds->top=bounds->bottom-height-border_height;
+    else bounds->bottom=bounds->top+height+border_height;
+    return 1;
 }
 static RECT fb_display_bounds(HWND window)
 {
@@ -291,6 +313,22 @@ int xbox_FramebufferKeyDown(int vk)
 static LRESULT CALLBACK fb_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     switch (m) {
+    case WM_GETMINMAXINFO:
+        if(s_fixed_aspect && !s_fullscreen){
+            LRESULT result=DefWindowProcA(h,m,w,l);MINMAXINFO *limits=(MINMAXINFO *)l;
+            RECT frame={0};
+            if(!AdjustWindowRectExForDpi(&frame,(DWORD)GetWindowLongPtrW(h,GWL_STYLE),FALSE,(DWORD)GetWindowLongPtrW(h,GWL_EXSTYLE),GetDpiForWindow(h))){fprintf(stderr,"[STOP] resize frame sizing failed\n");exit(5);}
+            LONG bw=frame.right-frame.left,bh=frame.bottom-frame.top;
+            LONG width=limits->ptMaxTrackSize.x-bw,height=limits->ptMaxTrackSize.y-bh;
+            if((int64_t)width*s_window_height>(int64_t)height*s_window_width)width=(LONG)((int64_t)height*s_window_width/s_window_height);
+            else height=(LONG)((int64_t)width*s_window_height/s_window_width);
+            limits->ptMaxTrackSize.x=width+bw;limits->ptMaxTrackSize.y=height+bh;
+            return result;
+        }
+        break;
+    case WM_SIZING:
+        if(fb_constrain_window_size(h,w,(RECT *)l))return TRUE;
+        break;
     case WM_CLOSE:
     case WM_DESTROY:
         /* Clears also call WindowStart. End the game before another clear

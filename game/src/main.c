@@ -408,9 +408,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
     if(!WideCharToMultiByte(CP_UTF8,0,s_display.backend,-1,backend,16,NULL,NULL))return 1;
     extern void d3d8_DisplayConfigure(unsigned scale,float aspect);
-    extern void xbox_FramebufferWindowConfigure(unsigned width,unsigned height,float aspect);
+    extern void xbox_FramebufferWindowConfigure(unsigned width,unsigned height,float aspect,int fixed_aspect);
     d3d8_DisplayConfigure(s_display.render_scale,smt9_game_aspect());
-    xbox_FramebufferWindowConfigure(s_display.window_width,s_display.window_height,smt9_game_aspect());
+    xbox_FramebufferWindowConfigure(s_display.window_width,s_display.window_height,smt9_game_aspect(),s_display.fixed_aspect);
     if(_putenv_s("RECOMP_GPU_BACKEND",backend)!=0)return 1;
     fprintf(stderr,"[DISPLAY] backend=%s render_scale=%u window=%ux%u aspect=%u:%u refresh_hz=%u\n",backend,s_display.render_scale,s_display.window_width,s_display.window_height,s_display.aspect_width,s_display.aspect_height,s_display.refresh_hz);
     fprintf(stderr,"[LANGUAGE] %ls\n",s_display.language);

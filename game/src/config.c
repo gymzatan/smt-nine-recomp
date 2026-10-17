@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <wchar.h>
 
-typedef enum ConfigError {CE_UI,CE_REFRESH,CE_SCALE,CE_SIZE,CE_ASPECT,CE_BACKEND,CE_NUMBERS,CE_GAME,CE_PATH,CE_WRITE,CE_SAVE} ConfigError;
+typedef enum ConfigError {CE_UI,CE_REFRESH,CE_SCALE,CE_SIZE,CE_ASPECT,CE_BACKEND,CE_NUMBERS,CE_GAME,CE_PATH,CE_WRITE,CE_SAVE,CE_FIXED} ConfigError;
 static int config_error(const NineConfig *c,wchar_t *error,size_t count,ConfigError code)
 {
     static const wchar_t *const messages[][3]={
@@ -18,7 +18,8 @@ static int config_error(const NineConfig *c,wchar_t *error,size_t count,ConfigEr
         {L"游戏语言标识无效或过长。",L"ゲーム言語 ID が無効、または長すぎます。",L"The game language ID is invalid or too long."},
         {L"配置文件路径过长。",L"設定ファイルのパスが長すぎます。",L"The settings file path is too long."},
         {L"无法写入配置文件。",L"設定ファイルに書き込めません。",L"Could not write the settings file."},
-        {L"无法保存配置文件。",L"設定ファイルを保存できません。",L"Could not save the settings file."}
+        {L"无法保存配置文件。",L"設定ファイルを保存できません。",L"Could not save the settings file."},
+        {L"FixedAspectRatio 必须为 0 或 1。",L"FixedAspectRatio は 0 または 1 で指定してください。",L"FixedAspectRatio must be 0 or 1."}
     };
     unsigned language=!wcscmp(c->interface_language,L"Chinese")?0:!wcscmp(c->interface_language,L"Japanese")?1:2;
     if(error && count)swprintf_s(error,count,L"%s",messages[code][language]);
@@ -43,6 +44,7 @@ int nine_config_validate(const NineConfig *c,wchar_t *error,size_t count)
        wcscmp(c->backend,L"OpenGL") && wcscmp(c->backend,L"D3D11"))
         return config_error(c,error,count,CE_BACKEND);
     if(!nine_language_id_valid(c->language))return config_error(c,error,count,CE_GAME);
+    if(c->fixed_aspect>1)return config_error(c,error,count,CE_FIXED);
     return 1;
 }
 static int read_number(const wchar_t *key,unsigned initial,unsigned *value)
@@ -56,7 +58,7 @@ static int read_number(const wchar_t *key,unsigned initial,unsigned *value)
 }
 int nine_config_read(NineConfig *c,wchar_t *error,size_t count)
 {
-    *c=(NineConfig){1,960,720,4,3,L"Auto",L"Chinese",30,L"Chinese"};
+    *c=(NineConfig){1,960,720,4,3,L"Auto",L"Chinese",30,L"Chinese",0};
     if(GetPrivateProfileStringW(L"Interface",L"Language",L"Chinese",c->interface_language,16,SMT9_CONFIG_PATH_W)>=15)
         return config_error(c,error,count,CE_UI);
     DWORD length=GetPrivateProfileStringW(L"Display",L"Backend",L"Auto",c->backend,16,SMT9_CONFIG_PATH_W);
@@ -64,7 +66,8 @@ int nine_config_read(NineConfig *c,wchar_t *error,size_t count)
        !read_number(L"WindowWidth",960,&c->window_width) ||
        !read_number(L"WindowHeight",720,&c->window_height) ||
        !read_number(L"AspectWidth",4,&c->aspect_width) || !read_number(L"AspectHeight",3,&c->aspect_height) ||
-       !read_number(L"RefreshHz",30,&c->refresh_hz))
+       !read_number(L"RefreshHz",30,&c->refresh_hz) ||
+       !read_number(L"FixedAspectRatio",0,&c->fixed_aspect))
         return config_error(c,error,count,CE_NUMBERS);
     wchar_t language_id[NINE_LANGUAGE_ID+1];
     if(GetPrivateProfileStringW(L"Display",L"Language",L"Chinese",language_id,NINE_LANGUAGE_ID+1,SMT9_CONFIG_PATH_W)>=NINE_LANGUAGE_ID)
@@ -78,8 +81,8 @@ int nine_config_write(const NineConfig *c,wchar_t *error,size_t count)
     wchar_t temporary[MAX_PATH],content[512];
     if(swprintf_s(temporary,MAX_PATH,L"%s.tmp",SMT9_CONFIG_PATH_W)<0)
         return config_error(c,error,count,CE_PATH);
-    int length=swprintf_s(content,512,L"[Interface]\r\nLanguage=%s\r\n\r\n[Display]\r\nBackend=%s\r\nLanguage=%s\r\nRenderScale=%u\r\nWindowWidth=%u\r\nWindowHeight=%u\r\nAspectWidth=%u\r\nAspectHeight=%u\r\nRefreshHz=%u\r\n",
-        c->interface_language,c->backend,c->language,c->render_scale,c->window_width,c->window_height,c->aspect_width,c->aspect_height,c->refresh_hz);
+    int length=swprintf_s(content,512,L"[Interface]\r\nLanguage=%s\r\n\r\n[Display]\r\nBackend=%s\r\nLanguage=%s\r\nRenderScale=%u\r\nWindowWidth=%u\r\nWindowHeight=%u\r\nAspectWidth=%u\r\nAspectHeight=%u\r\nRefreshHz=%u\r\nFixedAspectRatio=%u\r\n",
+        c->interface_language,c->backend,c->language,c->render_scale,c->window_width,c->window_height,c->aspect_width,c->aspect_height,c->refresh_hz,c->fixed_aspect);
     HANDLE file=CreateFileW(temporary,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file==INVALID_HANDLE_VALUE)return config_error(c,error,count,CE_WRITE);
     WORD bom=0xfeff;DWORD written;DWORD bytes=(DWORD)length*sizeof(wchar_t);

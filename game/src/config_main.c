@@ -47,16 +47,26 @@ static void refresh_languages(HWND w,const wchar_t *selected)
     }
 }
 static const unsigned aspect[][2]={{4,3},{16,9},{16,10},{21,9}};
+static const unsigned window_sizes[][2]={{640,480},{960,720},{1280,720},{1280,960},{1600,900},{1920,1080},{2560,1440},{3840,2160}};
 static const wchar_t *backends[]={L"Auto",L"Vulkan",L"OpenGL",L"D3D11"};
 static void combo(HWND window,int id,const wchar_t *label)
 {
     SendDlgItemMessageW(window,id,CB_ADDSTRING,0,(LPARAM)label);
 }
+static void select_window_size(HWND window)
+{
+    LRESULT selected=SendDlgItemMessageW(window,112,CB_GETCURSEL,0,0);
+    unsigned count=sizeof window_sizes/sizeof window_sizes[0];
+    if(selected<0 || selected>(LRESULT)count)return;
+    int custom=selected==(LRESULT)count;
+    if(!custom){SetDlgItemInt(window,103,window_sizes[selected][0],FALSE);SetDlgItemInt(window,104,window_sizes[selected][1],FALSE);}
+    EnableWindow(GetDlgItem(window,103),custom);EnableWindow(GetDlgItem(window,104),custom);EnableWindow(GetDlgItem(window,133),custom);
+}
 static void apply_ui(HWND window)
 {
     const struct {int id;UiText text;} labels[]={
         {121,UI_BACKEND},{122,UI_SCALE},{125,UI_ASPECT},{126,UI_GAME},
-        {127,UI_REFRESH},{128,UI_SIZE},{129,UI_HINT},{108,UI_IMPORT},
+        {127,UI_REFRESH},{128,UI_SIZE},{129,UI_HINT},{108,UI_IMPORT},{133,UI_SIZE_CUSTOM},{132,UI_FIXED_ASPECT},
         {111,UI_CONTROLS},{IDOK,UI_SAVE},{IDCANCEL,UI_CANCEL}};
     SetWindowTextW(window,tr(UI_TITLE));
     for(unsigned i=0;i<sizeof labels/sizeof labels[0];i++)SetDlgItemTextW(window,labels[i].id,tr(labels[i].text));
@@ -68,6 +78,10 @@ static void apply_ui(HWND window)
     SendDlgItemMessageW(window,105,CB_DELETESTRING,1,0);SendDlgItemMessageW(window,105,CB_INSERTSTRING,1,(LPARAM)tr(UI_WIDE));
     SendDlgItemMessageW(window,105,CB_DELETESTRING,3,0);SendDlgItemMessageW(window,105,CB_INSERTSTRING,3,(LPARAM)tr(UI_ULTRAWIDE));
     SendDlgItemMessageW(window,105,CB_SETCURSEL,ratio,0);
+    unsigned custom=sizeof window_sizes/sizeof window_sizes[0];
+    LRESULT size=SendDlgItemMessageW(window,112,CB_GETCURSEL,0,0);
+    SendDlgItemMessageW(window,112,CB_DELETESTRING,custom,0);SendDlgItemMessageW(window,112,CB_INSERTSTRING,custom,(LPARAM)tr(UI_SIZE_CUSTOM));
+    SendDlgItemMessageW(window,112,CB_SETCURSEL,size,0);
 }
 static INT_PTR CALLBACK config_dialog(HWND window,UINT message,WPARAM wparam,LPARAM lparam)
 {
@@ -89,10 +103,18 @@ static INT_PTR CALLBACK config_dialog(HWND window,UINT message,WPARAM wparam,LPA
         combo(window,107,L"30 Hz");combo(window,107,L"60 Hz");
         SendDlgItemMessageW(window,107,CB_SETCURSEL,settings.refresh_hz==60,0);
         SetDlgItemInt(window,103,settings.window_width,FALSE);SetDlgItemInt(window,104,settings.window_height,FALSE);
+        unsigned size_count=sizeof window_sizes/sizeof window_sizes[0],selected_size=size_count;
+        for(unsigned i=0;i<size_count;i++){
+            wchar_t label[32];swprintf_s(label,32,L"%u × %u",window_sizes[i][0],window_sizes[i][1]);combo(window,112,label);
+            if(settings.window_width==window_sizes[i][0] && settings.window_height==window_sizes[i][1])selected_size=i;
+        }
+        combo(window,112,tr(UI_SIZE_CUSTOM));SendDlgItemMessageW(window,112,CB_SETCURSEL,selected_size,0);select_window_size(window);
+        CheckDlgButton(window,132,settings.fixed_aspect?BST_CHECKED:BST_UNCHECKED);
         apply_ui(window);
         return TRUE;
     }
     if(message==WM_COMMAND) {
+        if(LOWORD(wparam)==112 && HIWORD(wparam)==CBN_SELCHANGE){select_window_size(window);return TRUE;}
         if(importing.hProcess && (LOWORD(wparam)==IDOK || LOWORD(wparam)==IDCANCEL))return TRUE;
         if(LOWORD(wparam)==110 && HIWORD(wparam)==CBN_SELCHANGE){
             LRESULT selected=SendDlgItemMessageW(window,110,CB_GETCURSEL,0,0);
@@ -130,6 +152,7 @@ static INT_PTR CALLBACK config_dialog(HWND window,UINT message,WPARAM wparam,LPA
             LRESULT refresh=SendDlgItemMessageW(window,107,CB_GETCURSEL,0,0);
             if(refresh<0 || refresh>1)return TRUE;
             chosen.refresh_hz=refresh?60:30;
+            chosen.fixed_aspect=IsDlgButtonChecked(window,132)==BST_CHECKED;
             wcscpy_s(chosen.interface_language,16,ui_ids[ui_language]);
             wcscpy_s(chosen.language,NINE_LANGUAGE_ID,languages[language].id);
             wcscpy_s(chosen.backend,16,backends[backend]);chosen.render_scale=(unsigned)scale+1;
