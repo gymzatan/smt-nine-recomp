@@ -68,11 +68,16 @@ static void prepare_original_ui_quad(void)
         }
         return;
     }
-    if(caller==0x001C4A3Bu){
-        /* The shared color-quad entry submits command highlights and fades. */
+    if(caller==0x001C4A3Bu || caller==0x00110102u){
+        /* Original VB and direct color quads share XYZRHW+diffuse mapping. */
         if(smt9_game_aspect()==4.0f/3.0f)return;
-        if(MEM32(g_esp+4)!=8 || MEM32(g_esp+8)!=0 || MEM32(g_esp+12)!=4){fprintf(stderr,"[STOP] original command highlight contract\n");exit(5);}
-        buffer=MEM32(MEM32(g_esi+4)+4)|0x80000000u;
+        if(caller==0x00110102u){
+            if(MEM32(g_esp+4)!=7 || MEM32(g_esp+8)!=4 || MEM32(g_esp+16)!=20){fprintf(stderr,"[STOP] original direct color quad contract\n");exit(5);}
+            buffer=MEM32(g_esp+12);
+        }else{
+            if(MEM32(g_esp+4)!=8 || MEM32(g_esp+8)!=0 || MEM32(g_esp+12)!=4){fprintf(stderr,"[STOP] original command highlight contract\n");exit(5);}
+            buffer=MEM32(MEM32(g_esi+4)+4)|0x80000000u;
+        }
         float xmin=INFINITY,xmax=-INFINITY,ymin=INFINITY,ymax=-INFINITY;
         for(unsigned i=0;i<4;i++){
             uint32_t vertex=buffer+i*20;float x=MEMF(vertex),y=MEMF(vertex+4);

@@ -46,6 +46,20 @@ static void check(float left,float top,float width,float height,int fullscreen) 
     }
     for(unsigned i=0;i<4;i++)assert(!memcmp(before+i*20+4,ram+0x4000+i*20+4,16));
 }
+static void check_rgb(float width,int active) {
+    memset(ram,0,sizeof ram);MEM32(g_esp)=active?0x00110102:0x00110101;
+    MEM32(g_esp+4)=7;MEM32(g_esp+8)=4;MEM32(g_esp+12)=0x4000;MEM32(g_esp+16)=20;
+    const float x[]={240,240+width,240+width,240},y[]={237,237,245,245};
+    for(unsigned i=0;i<4;i++) {
+        unsigned vertex=0x4000+i*20;MEMF(vertex)=x[i];MEMF(vertex+4)=y[i];
+        MEM32(vertex+8)=0x3f000000+i;MEM32(vertex+12)=0x3f800000;MEM32(vertex+16)=0xff60d060+i;
+    }
+    unsigned char before[80];memcpy(before,ram+0x4000,sizeof before);
+    prepare_original_ui_quad();
+    if(aspect==4.0f/3.0f || !active)assert(!memcmp(before,ram+0x4000,sizeof before));
+    else for(unsigned i=0;i<4;i++)assert(MEMF(0x4000+i*20)==320+(x[i]-320)*((4.0f/3.0f)/aspect));
+    for(unsigned i=0;i<4;i++)assert(!memcmp(before+i*20+4,ram+0x4000+i*20+4,16));
+}
 static void check_preview(uint32_t caller,int active) {
     memset(ram,0,sizeof ram);MEM32(g_esp)=caller;MEM32(g_esp+4)=0x4000;
     uint32_t original[6]={208,88,144,288,0x3e800000,0x3f800000};
@@ -77,6 +91,7 @@ int main(int argc,char **argv) {
     assert(argc==2);aspect=atoi(argv[1])==4?4.0f/3.0f:16.0f/9.0f;
     check(0,0,640,480,1);check(-0.5f,-0.5f,640,480,1);
     check(12,285,224,40,0);check(12,0,100,480,0);
+    check_rgb(0,1);check_rgb(0.5f,1);check_rgb(32,1);check_rgb(80,1);check_rgb(127.5f,1);check_rgb(80,0);
     check_preview(0x000F826F,1);check_preview(0x000F8709,1);
     check_preview(0x000F84D8,0);check_preview(0x000F8969,0);check_preview(0x000EE537,0);
     check_projection(0x001427AE,1,144,176,1.09523809f,84);
