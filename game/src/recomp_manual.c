@@ -105,10 +105,14 @@ static void prepare_original_ui_quad(void)
         }
         return;
     }
-    if(caller==0x000F559Cu){
+    if(caller==0x000F559Cu || caller==0x001452C5u){
         /* EF1B0's original 80x30 backdrop grid shares EEF90's source and pan.
-         * Match its X mapping to the expanded backdrop UVs before submission. */
-        buffer=MEM32(MEM32(g_esi+8)+4)|0x80000000u;
+         * 1450CF rebuilds 22 vertices for a sprite's entry/exit animation.
+         * Both meshes use the existing UI X mapping on every vertex. */
+        if(caller==0x001452C5u){
+            if(MEM32(g_esp+4)!=9 || MEM32(g_esp+8)!=0 || MEM32(g_esp+12)!=22){fprintf(stderr,"[STOP] original sprite strip contract\n");exit(5);}
+            buffer=MEM32(MEM32(g_ebp-12)+4)|0x80000000u;
+        }else buffer=MEM32(MEM32(g_esi+8)+4)|0x80000000u;
         vertices=MEM32(g_esp+12);
         float factor=(4.0f/3.0f)/smt9_game_aspect();
         for(unsigned i=0;i<vertices;i++){

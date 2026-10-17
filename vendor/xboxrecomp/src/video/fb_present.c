@@ -293,7 +293,9 @@ static LRESULT CALLBACK fb_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
     switch (m) {
     case WM_CLOSE:
     case WM_DESTROY:
-        InterlockedExchange(&s_fb_running, 0);
+        /* Clears also call WindowStart. End the game before another clear
+         * can start a second framebuffer thread while this one tears down. */
+        ExitProcess(0);
         return 0;
 
     case WM_LBUTTONDBLCLK:

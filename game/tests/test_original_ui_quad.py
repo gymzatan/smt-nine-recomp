@@ -22,7 +22,7 @@ static unsigned char ram[0x10000];
 #define MEM32(a) (*(uint32_t *)(ram+((uint32_t)(a)&0x7fffffffu)))
 #define MEMF(a) (*(float *)(ram+((uint32_t)(a)&0x7fffffffu)))
 #define NINE_TITLE_UI_ORIGIN 0
-static uint32_t g_esp=0x1000,g_esi=0x2000,g_ebx;
+static uint32_t g_esp=0x1000,g_esi=0x2000,g_ebx,g_ebp=0x1800;
 static float aspect;
 float smt9_game_aspect(void){return aspect;}
 int smt9_is_chinese(void){return 0;}
@@ -75,6 +75,24 @@ static void check_menu_color(uint32_t caller,unsigned primitive,unsigned count,u
     else for(unsigned i=0;i<count;i++)assert(MEMF(0x4000+i*stride)==320+(x[i]-320)*((4.0f/3.0f)/aspect));
     for(unsigned i=0;i<count;i++)assert(!memcmp(before+i*stride+4,ram+0x4000+i*stride+4,stride-4));
 }
+static void check_portrait_strip(float left,float top,float height) {
+    memset(ram,0,sizeof ram);MEM32(g_esp)=0x001452C5;
+    MEM32(g_esp+4)=9;MEM32(g_esp+8)=0;MEM32(g_esp+12)=22;
+    MEM32(g_ebp-12)=0x3000;MEM32(0x3004)=0x4000;
+    for(unsigned i=0;i<22;i++) {
+        unsigned vertex=0x4000+i*28;
+        MEMF(vertex)=left+(i&1?80:0);MEMF(vertex+4)=top+(i/2)*height/10;
+        for(unsigned offset=8;offset<28;offset+=4)MEM32(vertex+offset)=0x3f000000+i+offset;
+    }
+    unsigned char before[22*28];memcpy(before,ram+0x4000,sizeof before);
+    prepare_original_ui_quad();
+    for(unsigned i=0;i<22;i++) {
+        float x;memcpy(&x,before+i*28,4);
+        assert(MEMF(0x4000+i*28)==320+(x-320)*((4.0f/3.0f)/aspect));
+        assert(!memcmp(before+i*28+4,ram+0x4000+i*28+4,24));
+    }
+    if(aspect==4.0f/3.0f)assert(!memcmp(before,ram+0x4000,sizeof before));
+}
 static void check_preview(uint32_t caller,int active) {
     memset(ram,0,sizeof ram);MEM32(g_esp)=caller;MEM32(g_esp+4)=0x4000;
     uint32_t original[6]={208,88,144,288,0x3e800000,0x3f800000};
@@ -107,6 +125,7 @@ int main(int argc,char **argv) {
     check(0,0,640,480,1);check(-0.5f,-0.5f,640,480,1);
     check(12,285,224,40,0);check(12,0,100,480,0);
     check_rgb(0,1);check_rgb(0.5f,1);check_rgb(32,1);check_rgb(80,1);check_rgb(127.5f,1);check_rgb(80,0);
+    check_portrait_strip(352,164,272);check_portrait_strip(171,217,216);check_portrait_strip(202,163,80);
     const float guide_x[]={426,426,381,384,381,384},guide_y[]={262,265,280,282,319,319};
     check_menu_color(0x001357E7,6,6,20,guide_x,guide_y,1);
     check_menu_color(0x001357E6,6,6,20,guide_x,guide_y,0);

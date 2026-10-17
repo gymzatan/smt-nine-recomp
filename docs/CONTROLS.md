@@ -5,6 +5,7 @@ Open `Config.exe` in the root directory for the full keyboard/controller mapping
 - Double-click the game window to toggle borderless fullscreen and restore its previous size/position.
 - F8 saves a BMP screenshot in `runtime/Screenshots`.
 - F9 pauses/resumes guest execution, devices, game clock and audio.
+- Closing the game window exits the process, including while paused.
 - Shift+F1 through Shift+F5 save instant slots; F1 through F5 load those slots. Resume from F9 pause before using an instant state.
 - Instant states must match their exact program and game image. Keep normal saves for moving between builds.
 

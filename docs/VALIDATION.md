@@ -18,6 +18,10 @@ The native host, Config and DSP library compiled from source. The native configu
 
 The menu graphics audit checks the original shared scrollbar, icon and connector paths. See [MENU_UI.md](MENU_UI.md) for producer identities, displayed coverage and progression-dependent limits.
 
+New-game displayed recordings also cover the mother/sister and red-haired communications portrait transitions, including entry and exit. The original 22-vertex strip renderer shares the existing UI mapping throughout its animation. The actual helper checks preserve 4:3 coordinates and all non-X vertex bytes.
+
+Closing the framebuffer window ends the game process. A hidden test reproduced the previous lifecycle race: clearing the running flag on close allowed the next guest clear to start another window thread before the old thread finished. The close handler now uses the runtime's existing process-exit behavior. Closing the rebuilt game, including while F9-paused, was verified to terminate the process without creating another framebuffer window.
+
 The ordinary save fixture was copied into the private verification directory only after the disc-to-native build completed. No old instant state was used to establish fresh startup or ordinary-load success. Test processes were closed after verification.
 
 Source-only CI runs the content audit and the targeted build/integration checks without requiring a game disc. It does not run the game or substitute for the clean local build. See [STATUS.md](STATUS.md) for remaining gameplay and performance coverage.
