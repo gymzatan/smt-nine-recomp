@@ -181,30 +181,6 @@ NTSTATUS __stdcall xbox_NtCreateFile(
         return STATUS_OBJECT_PATH_NOT_FOUND;
     }
 
-    /* A partition device opened as a directory.
-     *
-     * The path layer maps \Device\Harddisk0\PartitionN to a PartitionN.img
-     * backing file, but a title asking for free space opens the partition with
-     * FILE_DIRECTORY_FILE | FILE_OPEN_FOR_FREE_SPACE_QUERY -- it wants the
-     * volume, not the bytes. Opening a regular file as a directory fails, and
-     * the title reads STATUS_OBJECT_PATH_NOT_FOUND as "no such volume".
-     *
-     * Half-Life 2's CRT probes partition0 this way during startup and treats
-     * the failure as fatal. Redirecting to the directory that holds the image
-     * gives a handle that is valid for exactly what the caller is going to do
-     * with it, which is NtQueryVolumeInformationFile. */
-    if ((CreateOptions & XBOX_FILE_DIRECTORY_FILE) &&
-        GetFileAttributesW(win_path) != INVALID_FILE_ATTRIBUTES &&
-        !(GetFileAttributesW(win_path) & FILE_ATTRIBUTE_DIRECTORY)) {
-        WCHAR *slash = wcsrchr(win_path, L'\\');
-        if (slash && slash != win_path) {
-            *slash = 0;
-            xbox_log(XBOX_LOG_INFO, XBOX_LOG_FILE,
-                     "NtCreateFile: directory open of a device image, "
-                     "using its containing directory instead");
-        }
-    }
-
     if (CreateOptions & XBOX_FILE_DIRECTORY_FILE) {
         if (CreateDisposition == XBOX_FILE_CREATE || CreateDisposition == XBOX_FILE_OPEN_IF)
             CreateDirectoryW(win_path, NULL);

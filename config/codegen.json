@@ -164927,8 +164927,39 @@
       "name": "sub_00219920",
       "file": "recomp_0056.c",
       "generated_sha256": "bf49063bddee604a936997f206c41f214d475927690d0deb4fe532ca6e26e3c6",
-      "accepted_sha256": "bf49063bddee604a936997f206c41f214d475927690d0deb4fe532ca6e26e3c6",
-      "edits": []
+      "accepted_sha256": "854935c3d93fd944823a006d523fda3ae8c34bad4e53e91b313b613d7b1224a3",
+      "edits": [
+        [
+          1447,
+          50,
+          ""
+        ],
+        [
+          1647,
+          50,
+          ""
+        ],
+        [
+          1747,
+          100,
+          ""
+        ],
+        [
+          2411,
+          1431,
+          "    /* The PC cache is already a directory; no disk selection or formatting. */\n    MEM32(ebp + -4) = 5;\n"
+        ],
+        [
+          5853,
+          910,
+          ""
+        ],
+        [
+          7166,
+          1832,
+          "    if ((int32_t)ebx < 0) goto loc_00219A04;\n"
+        ]
+      ]
     },
     {
       "address": 2202149,
