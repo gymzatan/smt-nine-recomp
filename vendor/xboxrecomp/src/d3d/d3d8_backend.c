@@ -2,6 +2,8 @@
  * Vulkan, WineD3D for OpenGL, or the system D3D11 driver. */
 #include "d3d8_internal.h"
 #include <dxgi1_4.h>
+#include <d3d12.h>
+#include <d3d11on12.h>
 #include <mmsystem.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -113,6 +115,27 @@ static HRESULT create_hardware(CreateFactory factory_fn,CreateDevice device_fn,
     if(chosen)IDXGIAdapter1_Release(chosen);
     return hr;
 }
+static HRESULT WINAPI create_d3d12(IDXGIAdapter *adapter,D3D_DRIVER_TYPE driver,
+    HMODULE software,UINT flags,const D3D_FEATURE_LEVEL *levels,UINT count,UINT sdk,
+    ID3D11Device **device,D3D_FEATURE_LEVEL *level,ID3D11DeviceContext **context)
+{
+    (void)driver;(void)software;(void)sdk;
+    ID3D12Device *native=NULL;ID3D12CommandQueue *queue=NULL;
+    HRESULT hr=D3D12CreateDevice((IUnknown *)adapter,D3D_FEATURE_LEVEL_11_0,
+        &IID_ID3D12Device,(void **)&native);
+    if(SUCCEEDED(hr)) {
+        D3D12_COMMAND_QUEUE_DESC desc={0};desc.Type=D3D12_COMMAND_LIST_TYPE_DIRECT;
+        hr=ID3D12Device_CreateCommandQueue(native,&desc,&IID_ID3D12CommandQueue,(void **)&queue);
+    }
+    if(SUCCEEDED(hr)) {
+        IUnknown *queues[]={(IUnknown *)queue};
+        hr=D3D11On12CreateDevice((IUnknown *)native,flags,levels,count,queues,1,0,
+            device,context,level);
+    }
+    if(queue)ID3D12CommandQueue_Release(queue);
+    if(native)ID3D12Device_Release(native);
+    return hr;
+}
 static void release_opengl_timer(void) { timeEndPeriod(1); }
 HRESULT d3d8_backend_create_device(ID3D11Device **device,ID3D11DeviceContext **context)
 {
@@ -121,17 +144,18 @@ HRESULT d3d8_backend_create_device(ID3D11Device **device,ID3D11DeviceContext **c
     const char *requested=getenv("RECOMP_GPU_BACKEND");
     if(!requested)requested="D3D11";
     int automatic=!strcmp(requested,"Auto");
-    const char *names[]={"Vulkan","OpenGL","D3D11"};
+    const char *names[]={"Vulkan","OpenGL","D3D12","D3D11"};
     const wchar_t *folders[]={L"vulkan",L"opengl"};
     HRESULT last=E_INVALIDARG;
     /* Driver dependencies have process lifetime: unloading a failed runtime
      * can invalidate shared native-driver state during subsequent draws.
      * Cache each load once; partial device/context objects are still released. */
     static HMODULE modules[2][2];
-    for(unsigned index=0;index<3;index++) {
+    for(unsigned index=0;index<4;index++) {
         if(!automatic && strcmp(requested,names[index]))continue;
         active_backend=names[index];HRESULT hr=S_OK;
         CreateFactory factory_fn=CreateDXGIFactory1;CreateDevice device_fn=D3D11CreateDevice;
+        if(index==2)device_fn=create_d3d12;
         fprintf(stderr,"[GPU] trying %s\n",active_backend);
         if(index<2) {
             if(index==1 && (!SetEnvironmentVariableA("WINE_D3D_CONFIG","renderer=gl") || _putenv_s("WINE_D3D_CONFIG","renderer=gl")))hr=E_FAIL;

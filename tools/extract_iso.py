@@ -9,6 +9,16 @@ sys.path.insert(0, str(ROOT/'vendor/xboxrecomp'))
 from tools.xiso.xdvdfs import Xiso
 
 
+def verify_existing(destination):
+    """Verify installed retail inputs using the extraction manifest, without writes."""
+    identity = json.loads((ROOT/'config/retail.json').read_text())
+    for row in identity['files']:
+        target = Path(destination).joinpath(*PurePosixPath(row['path']).parts)
+        if not target.is_file() or digest(target) != row['sha256']:
+            raise ValueError('Existing retail resource identity differs: '+row['path'])
+    return identity
+
+
 def extract(iso_path, destination):
     destination = Path(destination)
     identity = json.loads((ROOT/'config/retail.json').read_text())

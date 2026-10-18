@@ -17,7 +17,7 @@ static const wchar_t *const ui_text[][3]={
     {L"游戏画面比例独立于窗口尺寸，多余区域留黑。\n固定宽高比：拖动窗口时保持所选尺寸的比例。\n保存后下次启动游戏时生效。",L"画面比率とウィンドウサイズは独立し、余白は黒になります。\n縦横比を固定すると、リサイズ時に選択したサイズの比率を維持します。\n保存した設定は次回のゲーム起動時に反映されます。",L"Game aspect and window size are independent; unused areas stay black.\nFixed Aspect Ratio preserves the chosen window shape when resizing.\nSaved settings apply on the next game launch."},
     {L"导入或更新语言 ISO…",L"言語 ISO を追加・更新…",L"Import / update language ISO…"},
     {L"保存",L"保存",L"Save"}, {L"取消",L"キャンセル",L"Cancel"},
-    {L"自动（Vulkan → OpenGL → D3D11）",L"自動（Vulkan → OpenGL → D3D11）",L"Auto (Vulkan → OpenGL → D3D11)"},
+    {L"自动（Vulkan → OpenGL → D3D12 → D3D11）",L"自動（Vulkan → OpenGL → D3D12 → D3D11）",L"Auto (Vulkan → OpenGL → D3D12 → D3D11)"},
     {L"16:9（宽屏）",L"16:9（ワイド）",L"16:9 (Widescreen)"},
     {L"21:9（超宽屏）",L"21:9（ウルトラワイド）",L"21:9 (Ultrawide)"},
     {L"导入或更新语言",L"言語の追加・更新",L"Import / update language"},

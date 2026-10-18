@@ -52,7 +52,7 @@ def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese):
     def generate(image,destination):
         assert image.is_file();calls.append('generation');write('build/generated/shared.c')
     modules={
-        'extract_iso':SimpleNamespace(extract=extract),
+        'extract_iso':SimpleNamespace(extract=extract,verify_existing=lambda destination:{'iso_sha256':build.digest(iso)}),
         'prepare_fonts':SimpleNamespace(prepare=fonts),
         'prepare_resources':SimpleNamespace(scripts=scripts,
             rts=lambda *args:write('data/chinese/Media/RTS/Scripts/RTSScript.bin'),
@@ -73,6 +73,14 @@ def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese):
     assert ('ffmpeg' in receipt)==chinese
     build.build(iso,2,resume=True,with_chinese=chinese)
     assert calls.count('retail')==calls.count('generation')==calls.count('images')==1
+    protected={p:p.read_bytes() for p in (tmp_path/'data').rglob('*') if p.is_file()}
+    previous_calls=len(calls)
+    build.build(None,2,update=True)
+    assert calls.count('retail')==calls.count('images')==1
+    assert calls.count('generation')==2
+    assert not {'ffmpeg','ffprobe'} & set(calls[previous_calls:])
+    assert all(p.read_bytes()==content for p,content in protected.items())
+    assert json.loads((tmp_path/'build/completion.json').read_text())['with_chinese']==chinese
     with pytest.raises(ValueError,match='same --with-chinese'):
         build.build(iso,2,resume=True,with_chinese=not chinese)
     progress_path=tmp_path/'build/progress.json'
@@ -119,6 +127,8 @@ int main(void) {
     wcscpy_s(config.interface_language,16,L"Japanese");
     assert(nine_config_write(&config,error,256));assert(nine_config_read(&config,error,256));
     assert(!wcscmp(config.language,L"English")&&!wcscmp(config.interface_language,L"Japanese"));
+    wcscpy_s(config.backend,16,L"D3D12");assert(nine_config_write(&config,error,256));
+    assert(nine_config_read(&config,error,256)&&!wcscmp(config.backend,L"D3D12"));
     wcscpy_s(config.language,NINE_LANGUAGE_ID,L"Chinese");assert(nine_config_write(&config,error,256));
     assert(nine_config_read(&config,error,256)&&!wcscmp(config.language,L"Chinese"));
     assert(nine_language_resolve(config.language,&item,error,256)==SMT9_WITH_CHINESE);

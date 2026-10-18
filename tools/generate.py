@@ -7,7 +7,8 @@ import json
 import re
 import shutil
 import sys
-from common import ROOT, digest
+import tempfile
+from common import ROOT, digest, write_if_changed
 
 sys.path.insert(0, str(ROOT/'vendor/xboxrecomp'))
 from tools.recomp import config
@@ -58,16 +59,19 @@ def generate(image, destination):
     declarations.update('sub_'+a for a in recipe['unresolved_stops'])
     declarations.update(name for _,name in recipe['dispatch'])
     header = '#pragma once\n#include "recomp_types.h"\n'+''.join('void '+name+'(void);\n' for name in sorted(declarations))
-    (destination/'recomp_funcs.h').write_text(header)
-    shutil.copyfile(ROOT/'config/recomp_types.h', destination/'recomp_types.h')
+    write_if_changed(destination/'recomp_funcs.h', header)
+    write_if_changed(destination/'recomp_types.h', (ROOT/'config/recomp_types.h').read_bytes())
     prefix = '#define RECOMP_GENERATED_CODE\n#include "recomp_funcs.h"\n#include "kernel/recomp_continuation.h"\n#include <math.h>\n'
     for filename, bodies in units.items():
-        (destination/filename).write_text(prefix+'\n\n'.join(bodies)+'\n')
-    batch._write_dispatch_table([(int(address,16),name,'') for address,name in recipe['dispatch']],
-                               str(destination/'recomp_dispatch.c'), 'recomp_funcs.h')
+        write_if_changed(destination/filename, prefix+'\n\n'.join(bodies)+'\n')
+    with tempfile.TemporaryDirectory() as temporary:
+        dispatch = Path(temporary)/'recomp_dispatch.c'
+        batch._write_dispatch_table([(int(address,16),name,'') for address,name in recipe['dispatch']],
+                                   str(dispatch), 'recomp_funcs.h')
+        write_if_changed(destination/'recomp_dispatch.c', dispatch.read_bytes())
     receipt = {'image_sha256':digest(image), 'functions':len(recipe['functions']), 'source':'Pinned BatchTranslator plus config/codegen.json project edits',
                'files':{p.name:digest(p) for p in destination.iterdir() if p.suffix in ('.c','.h')}}
-    (destination/'receipt.json').write_text(json.dumps(receipt, indent=2)+'\n')
+    write_if_changed(destination/'receipt.json', json.dumps(receipt, indent=2)+'\n')
     return receipt
 
 

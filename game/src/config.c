@@ -41,7 +41,7 @@ int nine_config_validate(const NineConfig *c,wchar_t *error,size_t count)
          (c->aspect_width==21 && c->aspect_height==9)))
         return config_error(c,error,count,CE_ASPECT);
     if(wcscmp(c->backend,L"Auto") && wcscmp(c->backend,L"Vulkan") &&
-       wcscmp(c->backend,L"OpenGL") && wcscmp(c->backend,L"D3D11"))
+       wcscmp(c->backend,L"OpenGL") && wcscmp(c->backend,L"D3D12") && wcscmp(c->backend,L"D3D11"))
         return config_error(c,error,count,CE_BACKEND);
     if(!nine_language_id_valid(c->language))return config_error(c,error,count,CE_GAME);
     if(c->fixed_aspect>1)return config_error(c,error,count,CE_FIXED);

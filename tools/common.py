@@ -14,6 +14,14 @@ def digest(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def write_if_changed(path, content):
+    path = Path(path)
+    if isinstance(content, str):
+        content = content.replace('\n', os.linesep).encode('utf-8')
+    if not path.exists() or path.read_bytes() != content:
+        path.write_bytes(content)
+
+
 def required_program(name):
     path = shutil.which(name)
     if path is None:

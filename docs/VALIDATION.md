@@ -56,15 +56,24 @@ The original movie/script update returns through its existing epilogue on the mo
 
 ## Process graphics-memory samples
 
-The selected adapter's DXGI memory API was exercised in the existing ordinary street save, with Japanese, 1×, 4:3 and 30 Hz. D3D11, Vulkan and OpenGL used the same native executable; the AMD-integrated D3D11 diagnostic changed only the existing adapter-selection vendor predicate and restored the original source and compiled outputs afterward. The logger samples the selected adapter at startup and at most once per five seconds while frames are presented. Values below are maxima among samples, not continuous peaks or minimum VRAM requirements.
+The selected adapter's DXGI memory API was exercised in the existing ordinary street save, with Japanese, 1×, 4:3 and 30 Hz. D3D11, Vulkan and OpenGL used the same native executable; D3D12 used the subsequent build adding D3D11On12 while retaining the same rendering path; the AMD-integrated D3D11 diagnostic changed only the existing adapter-selection vendor predicate and restored the original source and compiled outputs afterward. The logger samples the selected adapter at startup and at most once per five seconds while frames are presented. Values below are maxima among samples, not continuous peaks or minimum VRAM requirements.
 
 | Selected path | Maximum sampled local usage (MiB) | Maximum sampled nonlocal usage (MiB) |
 | --- | ---: | ---: |
 | D3D11 / NVIDIA GeForce RTX 5090 | 222.3 | 24.1 |
 | Vulkan / NVIDIA GeForce RTX 5090 | 251.9 | 88.9 |
 | OpenGL / NVIDIA GeForce GTX 470 | 118.8 | 229.5 |
+| D3D12 / NVIDIA GeForce RTX 5090 | 295.0 | 33.6 |
 | D3D11_AMD / AMD Radeon(TM) Graphics | 63.4 | 0.0 |
 
-All four samples returned valid local/nonlocal query results and no sampled usage exceeded the corresponding reported process budget. The integrated adapter reports a unified local budget that includes system-memory resources; its zero nonlocal values are a successful API result, not an unsupported-query placeholder. Capacity and segment accounting can differ across drivers and translation layers, so do not add these values to infer a universal physical VRAM requirement or compare only dedicated capacity.
+All five samples returned valid local/nonlocal query results and no sampled usage exceeded the corresponding reported process budget. The integrated adapter reports a unified local budget that includes system-memory resources; its zero nonlocal values are a successful API result, not an unsupported-query placeholder. Capacity and segment accounting can differ across drivers and translation layers, so do not add these values to infer a universal physical VRAM requirement or compare only dedicated capacity.
 
 The existing test suite exercises the actual logger with supported queries, unsupported interfaces, unavailable segments, five-second throttling and adapter-reference release. Startup failure/selection checks and native/imported-English builds also pass. The same ordinary street, NPC and interaction capture paths continue to run around 30 FPS. These checks do not establish 512 MiB support, long-session peaks, the exact reported female-player model or the restaurant occlusion case. The [README](../README.md#system-requirements) separates tested reference hardware from requirements that have not been established.
+
+## D3D12 and program updates
+
+D3D12 was exercised through the actual D3D11On12 device path in the same ordinary street save at Japanese 1×, 4:3, 30 Hz. Street, NPC and dialogue counters measured about 29–31 FPS; the captured models had no horizontal gaps. It is not a reproduction of the player's female model or restaurant scene. Startup selection tests cover Auto reaching D3D12 and D3D11 after preceding failures, and exclusive manual D3D12 selection. Production configuration read/write accepts D3D12.
+
+The source program-update command reuses the original lifter, Cargo and CMake dependency graphs. Installer tests check a complete payload before any copy, reject escaping paths, preserve data/configuration/saves, apply changed programs and leave identical files' timestamps alone. The program update deliberately retains installed translated resources; it does not claim to rebuild changed translation data.
+
+The complete local source-check selection passed 32 checks. An actual in-place source update completed without an ISO or Chinese font/movie imports, retaining bytes and timestamps for 14,080 data/configuration/language files and all 96 generated C/header files. Both native and imported-English Ninja builds reported no work after the D3D12 build, demonstrating reuse of the existing compiled outputs.

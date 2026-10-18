@@ -48,7 +48,7 @@ static void refresh_languages(HWND w,const wchar_t *selected)
 }
 static const unsigned aspect[][2]={{4,3},{16,9},{16,10},{21,9}};
 static const unsigned window_sizes[][2]={{640,480},{960,720},{1280,720},{1280,960},{1600,900},{1920,1080},{2560,1440},{3840,2160}};
-static const wchar_t *backends[]={L"Auto",L"Vulkan",L"OpenGL",L"D3D11"};
+static const wchar_t *backends[]={L"Auto",L"Vulkan",L"OpenGL",L"D3D12",L"D3D11"};
 static void combo(HWND window,int id,const wchar_t *label)
 {
     SendDlgItemMessageW(window,id,CB_ADDSTRING,0,(LPARAM)label);
@@ -92,9 +92,9 @@ static INT_PTR CALLBACK config_dialog(HWND window,UINT message,WPARAM wparam,LPA
         SendDlgItemMessageW(window,110,CB_SETCURSEL,ui_language,0);
         SendMessageW(window,WM_SETICON,ICON_BIG,(LPARAM)LoadIconW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(1)));
         SendMessageW(window,WM_SETICON,ICON_SMALL,(LPARAM)LoadIconW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(1)));
-        combo(window,101,L"自动（Vulkan → OpenGL → D3D11）");
-        for(unsigned i=1;i<4;i++)combo(window,101,backends[i]);
-        for(unsigned i=0;i<4;i++)if(!wcscmp(settings.backend,backends[i]))SendDlgItemMessageW(window,101,CB_SETCURSEL,i,0);
+        combo(window,101,L"自动（Vulkan → OpenGL → D3D12 → D3D11）");
+        for(unsigned i=1;i<sizeof backends/sizeof backends[0];i++)combo(window,101,backends[i]);
+        for(unsigned i=0;i<sizeof backends/sizeof backends[0];i++)if(!wcscmp(settings.backend,backends[i]))SendDlgItemMessageW(window,101,CB_SETCURSEL,i,0);
         combo(window,102,L"1×");combo(window,102,L"2×");combo(window,102,L"3×");combo(window,102,L"4×");
         SendDlgItemMessageW(window,102,CB_SETCURSEL,settings.render_scale-1,0);
         combo(window,105,L"4:3");combo(window,105,L"16:9（宽屏）");combo(window,105,L"16:10");combo(window,105,L"21:9（超宽屏）");
@@ -144,7 +144,7 @@ static INT_PTR CALLBACK config_dialog(HWND window,UINT message,WPARAM wparam,LPA
         if(LOWORD(wparam)==IDOK) {
             BOOL width_ok,height_ok;wchar_t error[256];NineConfig chosen=settings;
             LRESULT backend=SendDlgItemMessageW(window,101,CB_GETCURSEL,0,0),scale=SendDlgItemMessageW(window,102,CB_GETCURSEL,0,0),ratio=SendDlgItemMessageW(window,105,CB_GETCURSEL,0,0);
-            if(backend<0 || backend>3 || scale<0 || scale>3 || ratio<0 || ratio>3)return TRUE;
+            if(backend<0 || backend>=(LRESULT)(sizeof backends/sizeof backends[0]) || scale<0 || scale>3 || ratio<0 || ratio>3)return TRUE;
             chosen.window_width=GetDlgItemInt(window,103,&width_ok,FALSE);chosen.window_height=GetDlgItemInt(window,104,&height_ok,FALSE);
             if(!width_ok || !height_ok){MessageBoxW(window,tr(UI_INTEGER_ERROR),tr(UI_TITLE),MB_OK|MB_ICONERROR);return TRUE;}
             LRESULT language=SendDlgItemMessageW(window,106,CB_GETCURSEL,0,0);

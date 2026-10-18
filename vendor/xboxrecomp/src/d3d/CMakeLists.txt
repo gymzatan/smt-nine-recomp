@@ -14,7 +14,7 @@ if(WIN32)
         d3d8_combiners.c
         d3d8_vsh.c
     )
-    target_link_libraries(xbox_d3d8 PUBLIC platform d3d11 dxgi dxguid d3dcompiler winmm)
+    target_link_libraries(xbox_d3d8 PUBLIC platform d3d11 d3d12 dxgi dxguid d3dcompiler winmm)
 
     # Offline smoke test for the pure format layer (no D3D11 device needed).
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../../tests/d3d8_smoke
