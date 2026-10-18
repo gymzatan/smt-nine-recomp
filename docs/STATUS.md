@@ -10,6 +10,7 @@ Window entry effects reuse the visible UI rectangle for both the original transi
 
 Known coverage limits:
 
+- Horizontal character gaps and incorrect occlusion have been reported on some player configurations. Local three-backend street samples and an AMD-integrated D3D11 sample did not reproduce them; the exact female-player and restaurant scenes, affected builds and drivers remain unverified. A graphics-memory cause has not been established, and 512 MiB support is not certified. See the README for hardware requirements and memory-report fields.
 - Full playthrough, later chapters, all battles, complete audio coverage and long-session stability remain incomplete.
 - Performance in heavy scenes still needs work. Selecting 60 Hz is not a promise that every scene maintains it.
 - The previously unresolved fusion callback is integrated and the original two-demon selector has been reached. Final fusion confirmation/result coverage remains pending.

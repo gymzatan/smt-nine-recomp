@@ -72,6 +72,7 @@ static D3D8Surface *hw_prepare_scaled_color(uint32_t address,uint32_t pitch)
 }
 static void hw_present_scaled_color(D3D8Surface *surface)
 {
+    d3d8_LogVideoMemory();
     if(!surface)return;
     hw_enter();D3DLOCKED_RECT pixels;
     hw_check(d3d8_surface_lock_readback(&surface->iface,&pixels),"scaled display readback");

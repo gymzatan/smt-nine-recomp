@@ -41,6 +41,8 @@ void d3d8_DisplayConfigure(unsigned scale,float aspect);
 unsigned d3d8_RenderScale(void);
 float d3d8_GameAspect(void);
 const char *d3d8_ActiveBackend(void);
+void d3d8_LogVideoMemory(void);
+void d3d8_video_memory_shutdown(void);
 HRESULT d3d8_shaders_bind_nv2a_outputs(float width, float height, int raw_position);
 
 /* Presentation-only gamma. End restores the saved backbuffer even if Present fails. */

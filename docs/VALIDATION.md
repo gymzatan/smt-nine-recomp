@@ -53,3 +53,18 @@ HQ displayed-surface checks at 16:9 cover changing speakers, dialogue choices an
 Appearance projection tests execute the production helper and check both physical shader scales at 4:3 and 16:9. The field shader uses independent c36 axes; the appearance scalar preserves the original ratio-times-scale on both axes before applying the widescreen X factor. The separate Status producer keeps its existing handling.
 
 The original movie/script update returns through its existing epilogue on the movie EOF frame after teardown, allowing the next scene pass to precede dialogue-context advancement. A local compiled probe executes the actual generated function before and after the edit: ordinary and still-playing frames retain their context calls, EOF performs teardown once and defers context calls, and the next frame resumes them. Script wait constants and movie timing are unchanged. The exact reported Legion-to-dialogue boundary has not been recaptured frame by frame with this build.
+
+## Process graphics-memory samples
+
+The selected adapter's DXGI memory API was exercised in the existing ordinary street save, with Japanese, 1×, 4:3 and 30 Hz. D3D11, Vulkan and OpenGL used the same native executable; the AMD-integrated D3D11 diagnostic changed only the existing adapter-selection vendor predicate and restored the original source and compiled outputs afterward. The logger samples the selected adapter at startup and at most once per five seconds while frames are presented. Values below are maxima among samples, not continuous peaks or minimum VRAM requirements.
+
+| Selected path | Maximum sampled local usage (MiB) | Maximum sampled nonlocal usage (MiB) |
+| --- | ---: | ---: |
+| D3D11 / NVIDIA GeForce RTX 5090 | 222.3 | 24.1 |
+| Vulkan / NVIDIA GeForce RTX 5090 | 251.9 | 88.9 |
+| OpenGL / NVIDIA GeForce GTX 470 | 118.8 | 229.5 |
+| D3D11_AMD / AMD Radeon(TM) Graphics | 63.4 | 0.0 |
+
+All four samples returned valid local/nonlocal query results and no sampled usage exceeded the corresponding reported process budget. The integrated adapter reports a unified local budget that includes system-memory resources; its zero nonlocal values are a successful API result, not an unsupported-query placeholder. Capacity and segment accounting can differ across drivers and translation layers, so do not add these values to infer a universal physical VRAM requirement or compare only dedicated capacity.
+
+The existing test suite exercises the actual logger with supported queries, unsupported interfaces, unavailable segments, five-second throttling and adapter-reference release. Startup failure/selection checks and native/imported-English builds also pass. The same ordinary street, NPC and interaction capture paths continue to run around 30 FPS. These checks do not establish 512 MiB support, long-session peaks, the exact reported female-player model or the restaurant occlusion case. The [README](../README.md#system-requirements) separates tested reference hardware from requirements that have not been established.

@@ -5,12 +5,14 @@
 - Windows 10/11 x64 and sufficient free disk space for the extracted disc, generated C, native build, language packages and high-resolution font atlases. Keep at least 15 GB free; 16 GB RAM or more is recommended.
 - Python 3.14 x64, available through the Windows `py` launcher.
 - Visual Studio 2022 Build Tools with Desktop development with C++, Windows SDK, CMake and Ninja. The scripts locate the installation using `vswhere`; no developer drive paths are required. A portable installation can be selected explicitly with `NINE_VS_ROOT` set to its Build Tools directory.
-- Rustup on PATH. `setup.cmd` installs the pinned Rust toolchain specified by the DSP source.
+- [Rustup](https://rust-lang.org/tools/install/) installed and on PATH. The default Windows installer adds `%USERPROFILE%\.cargo\bin` to the user PATH; fully close and reopen the terminal or editor afterward, then verify `rustup --version`. `setup.cmd` installs the pinned Rust toolchain, not Rustup itself.
 - For `--with-chinese` only: FFmpeg and FFprobe on PATH, with WMV2 encoding and the subtitles/libass filter enabled.
 - For `--with-chinese` only: Windows Simplified Chinese supplemental fonts, `%WINDIR%\Fonts\simsun.ttc` and `%WINDIR%\Fonts\simhei.ttf`. Font files are not included in this project. Chinese glyph identities, encodings, layout and rendering rules are supplied by the repository. Japanese builds and English imports do not require these fonts or FFmpeg/FFprobe.
 - Internet access for the declared Python, Cargo, DXVK and WineD3D dependencies. Their origins and the GPU archive checksums are recorded in `requirements.txt`, `Cargo.lock` and `config/dependencies.json`.
 
 ## Supported input
+
+Gameplay hardware requirements and the limits of current GPU/VRAM verification are listed in the [README](../README.md#system-requirements). The RAM/disk guidance above is for building.
 
 The supported unmodified Japanese ISO is 2,188,050,432 bytes with SHA-256:
 

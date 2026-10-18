@@ -1,6 +1,7 @@
 /* The existing D3D11 command and shader contract is implemented by DXVK for
  * Vulkan, WineD3D for OpenGL, or the system D3D11 driver. */
 #include "d3d8_internal.h"
+#include <dxgi1_4.h>
 #include <mmsystem.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,52 @@ void d3d8_DisplayConfigure(unsigned scale,float aspect)
 unsigned d3d8_RenderScale(void){return render_scale;}
 float d3d8_GameAspect(void){return game_aspect;}
 const char *d3d8_ActiveBackend(void){return active_backend;}
+
+static IDXGIAdapter3 *memory_adapter;
+static unsigned memory_segments;
+static ULONGLONG memory_last_tick;
+static int memory_sampled;
+void d3d8_video_memory_shutdown(void)
+{
+    if(memory_adapter)IDXGIAdapter3_Release(memory_adapter);
+    memory_adapter=NULL;memory_segments=0;memory_sampled=0;
+}
+void d3d8_LogVideoMemory(void)
+{
+    if(!memory_adapter || !memory_segments)return;
+    ULONGLONG now=GetTickCount64();
+    if(memory_sampled && now-memory_last_tick<5000)return;
+    memory_sampled=1;memory_last_tick=now;
+    for(unsigned segment=0;segment<2;segment++) {
+        if(!(memory_segments&(1u<<segment)))continue;
+        const char *name=segment ? "nonlocal" : "local";
+        DXGI_QUERY_VIDEO_MEMORY_INFO info={0};
+        HRESULT hr=IDXGIAdapter3_QueryVideoMemoryInfo(memory_adapter,0,
+            (DXGI_MEMORY_SEGMENT_GROUP)segment,&info);
+        if(SUCCEEDED(hr)) {
+            fprintf(stderr,"[GPU MEMORY %s] segment=%s current_bytes=%llu budget_bytes=%llu\n",
+                active_backend,name,(unsigned long long)info.CurrentUsage,
+                (unsigned long long)info.Budget);
+        } else {
+            fprintf(stderr,"[GPU MEMORY %s] segment=%s unavailable hr=%08lX\n",
+                active_backend,name,(unsigned long)hr);
+            memory_segments&=~(1u<<segment);
+        }
+    }
+}
+static void attach_memory_adapter(IDXGIAdapter1 *adapter)
+{
+    d3d8_video_memory_shutdown();
+    HRESULT hr=IDXGIAdapter1_QueryInterface(adapter,&IID_IDXGIAdapter3,(void **)&memory_adapter);
+    if(FAILED(hr)) {
+        memory_adapter=NULL;
+        fprintf(stderr,"[GPU MEMORY %s] unavailable IDXGIAdapter3 hr=%08lX\n",
+            active_backend,(unsigned long)hr);
+        return;
+    }
+    memory_segments=3;
+    d3d8_LogVideoMemory();
+}
 
 static HRESULT load_backend(const wchar_t *name,HMODULE *dxgi,HMODULE *d3d)
 {
@@ -59,7 +106,8 @@ static HRESULT create_hardware(CreateFactory factory_fn,CreateDevice device_fn,
         hr=device_fn((IDXGIAdapter *)chosen,D3D_DRIVER_TYPE_UNKNOWN,NULL,0,requested,1,D3D11_SDK_VERSION,device,&level,context);
         if(SUCCEEDED(hr)) {
             DXGI_ADAPTER_DESC1 desc;HRESULT description=IDXGIAdapter1_GetDesc1(chosen,&desc);
-            if(SUCCEEDED(description))fprintf(stderr,"[GPU %s] adapter %ls, dedicated memory %llu, feature level %04X\n",active_backend,desc.Description,(unsigned long long)desc.DedicatedVideoMemory,level);
+            if(SUCCEEDED(description))fprintf(stderr,"[GPU %s] adapter %ls, dedicated memory %llu, feature level %04X, shared system memory %llu, dedicated system memory %llu, vendor %04X device %04X\n",active_backend,desc.Description,(unsigned long long)desc.DedicatedVideoMemory,level,(unsigned long long)desc.SharedSystemMemory,(unsigned long long)desc.DedicatedSystemMemory,desc.VendorId,desc.DeviceId);
+            attach_memory_adapter(chosen);
         }
     }
     if(chosen)IDXGIAdapter1_Release(chosen);

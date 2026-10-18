@@ -376,6 +376,7 @@ static ULONG __stdcall dev_Release(IDirect3DDevice8 *self)
         /* Cleanup subsystems first */
         up_ring_shutdown();
         d3d8_gamma_shutdown();
+        d3d8_video_memory_shutdown();
         d3d8_vsh_shutdown();
         d3d8_combiners_shutdown();
         d3d8_states_shutdown();
