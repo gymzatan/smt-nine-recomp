@@ -265,6 +265,17 @@ static void prepare_original_preview_projection(void)
     unsigned bit=caller==0x001427AEu?4:caller==0x000F8638u?2:1;
     if(!(seen&bit)){seen|=bit;fprintf(stderr,"[UI PRODUCER] preview projection caller=%08X origin=%g,%g ratio=%g scale=%g\n",caller,MEMF(position),MEMF(position+4),MEMF(g_esp+8),MEMF(g_esp+12));}
 }
+void smt9_prepare_window_transition(uint32_t object)
+{
+    /* 10D6C8 has copied the original window rectangle into its animation.
+     * Its mesh generators use that same rectangle for screen XY and for
+     * sampling the captured UI texture. Both must match the visible UI. */
+    float factor=(4.0f/3.0f)/smt9_game_aspect();
+    if(factor==1)return;
+    if(MEM32(object+0x50)>=640 && MEM32(object+0x54)>=480)return;
+    MEMF(object+0x3C)=320+(MEMF(object+0x3C)-320)*factor;
+    MEM32(object+0x50)=(uint32_t)floorf(MEM32(object+0x50)*factor+0.5f);
+}
 void recomp_call_arguments(uint32_t target)
 {
     if(target==0x00105930u || target==0x00106FE0u){prepare_original_speech_anchor();return;}

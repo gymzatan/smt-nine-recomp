@@ -105353,8 +105353,19 @@
       "name": "sub_0010D6C8",
       "file": "recomp_0037.c",
       "generated_sha256": "af7c9a539526a0352c196ce73f41567c340230af865dae86c83af0740a6c441e",
-      "accepted_sha256": "af7c9a539526a0352c196ce73f41567c340230af865dae86c83af0740a6c441e",
-      "edits": []
+      "accepted_sha256": "41e5194f83198ad982fec7dc4463b0e523167872b92571cb45f83f03f64b0304",
+      "edits": [
+        [
+          25,
+          0,
+          "\n    extern void smt9_prepare_window_transition(uint32_t);"
+        ],
+        [
+          1374,
+          0,
+          ";\n    smt9_prepare_window_transition(esi)"
+        ]
+      ]
     },
     {
       "address": 1103675,

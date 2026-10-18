@@ -6,6 +6,8 @@ Existing runtime verification includes startup, Japanese/Chinese/English selecti
 
 Current scene handling keeps the projected speaker endpoint at its world-screen position while the speech window and connector text end share the existing UI mapping. The per-frame popup update retains measured Chinese line width. CLOVER preserves the original appearance scale on both shader axes before applying widescreen X mapping. On the movie EOF frame, teardown returns through the existing epilogue so the following scene can render before dialogue contexts advance. Targeted helper and compiled-function checks cover these changes; the exact reported Legion movie boundary and all CLOVER appearance variants have not been recaptured in game.
 
+Window entry effects reuse the visible UI rectangle for both the original transition mesh and its captured-texture sampling. The two-body Manual fusion entry was replayed through all eleven transition draws at 16:9; its source and screen left edges agree with the settled list. This shared window path also serves shop lists. A separate buy/sell replay remains outside the current verification.
+
 Known coverage limits:
 
 - Full playthrough, later chapters, all battles, complete audio coverage and long-session stability remain incomplete.

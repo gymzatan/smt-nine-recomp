@@ -22,7 +22,7 @@ static unsigned char ram[0x10000];
 #define MEM32(a) (*(uint32_t *)(ram+((uint32_t)(a)&0x7fffffffu)))
 #define MEMF(a) (*(float *)(ram+((uint32_t)(a)&0x7fffffffu)))
 #define NINE_TITLE_UI_ORIGIN 0
-static uint32_t g_esp=0x1000,g_esi=0x2000,g_ebx,g_edi,g_ebp=0x1800;
+static uint32_t g_esp=0x1000,g_esi=0x2000,g_ebx,g_edi,g_ecx,g_ebp=0x1800;
 static float aspect;
 float smt9_game_aspect(void){return aspect;}
 int smt9_is_chinese(void){return 0;}
@@ -167,6 +167,21 @@ static void check_projection(uint32_t caller,int active,float x,float y,float ra
     }
     assert(MEMF(0x4004)==y && MEM32(0x4008)==0x3f000000);
 }
+static void check_window_transition(void) {
+    memset(ram,0,sizeof ram);g_ecx=0x2000;
+    /* Actual Manual fusion capture: x184, y80, width392, height288. */
+    uint32_t original[16]={1,0,0x43380000,0x42a00000,20,0,0,392,288,0x3f800000,0x3f800000,0x3f800000,0,0,0,0};
+    memcpy(ram+g_ecx+0x34,original,sizeof original);
+    smt9_prepare_window_transition(g_ecx);
+    if(aspect==4.0f/3.0f)assert(!memcmp(ram+g_ecx+0x34,original,sizeof original));
+    else {
+        /* Visible list maps 184..576 to 218..512; the source rectangle
+         * must cover that same area before the original mesh is built. */
+        assert(MEMF(g_ecx+0x3c)==218 && MEM32(g_ecx+0x50)==294);
+        original[2]=MEM32(g_ecx+0x3c);original[7]=MEM32(g_ecx+0x50);
+        assert(!memcmp(ram+g_ecx+0x34,original,sizeof original));
+    }
+}
 int main(int argc,char **argv) {
     assert(argc==2);aspect=atoi(argv[1])==4?4.0f/3.0f:16.0f/9.0f;
     check(0,0,640,480,1);check(-0.5f,-0.5f,640,480,1);
@@ -174,6 +189,9 @@ int main(int argc,char **argv) {
     check_rgb(0,1);check_rgb(0.5f,1);check_rgb(32,1);check_rgb(80,1);check_rgb(127.5f,1);check_rgb(80,0);
     check_portrait_strip(352,164,272);check_portrait_strip(171,217,216);check_portrait_strip(202,163,80);
     check_dialogue_connector();check_speech_anchor();
+    check_window_transition();
+    memset(ram,0,sizeof ram);g_ecx=0x2000;MEM32(g_ecx+0x50)=640;MEM32(g_ecx+0x54)=480;
+    smt9_prepare_window_transition(g_ecx);assert(MEMF(g_ecx+0x3c)==0 && MEM32(g_ecx+0x50)==640);
     const float guide_x[]={426,426,381,384,381,384},guide_y[]={262,265,280,282,319,319};
     check_menu_color(0x001357E7,6,6,20,guide_x,guide_y,1);
     check_menu_color(0x001357E6,6,6,20,guide_x,guide_y,0);

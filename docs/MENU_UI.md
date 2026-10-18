@@ -26,6 +26,12 @@ The original sprite renderer `145A39` switches to `1450CF` during the strip anim
 
 Displayed checks start a new game and record continuous frames of the mother and sister appearing, changing speakers and disappearing, followed by the red-haired communications portrait appearing and disappearing. The surrounding communications window and backdrop retain their existing handling. Targeted checks execute the actual helper with the original 22-vertex geometry at 4:3 and 16:9.
 
+## Window entry effects
+
+After copying a window descriptor, the original `10D6C8` initializer maps its X origin and width with the same centered UI factor as the settled window. The original animation engine then generates screen vertices and captured-texture coordinates from that rectangle. This keeps the animated fragments aligned with the captured UI. Original 4:3 coordinates and full-screen rectangles are preserved.
+
+The two-body Manual fusion list was replayed through all eleven entry draws at 16:9. Its screen and texture-source left edges both match the settled list at X218, instead of the original X184. Production-helper checks cover this captured rectangle, 4:3 and full-screen preservation. Shop lists share the initializer; their buy/sell transitions have not been replayed separately.
+
 ## Validation scope
 
 Local displayed-surface checks cover title selection, name entry, Option/RGB extremes/default confirmation, controller Basic/RTS/Battle settings, ordinary-load devices/slots/confirmation/progress, item and magic selection, party/player/demon Status, demon sorting/skills/affinities/delete warnings, undiscovered analysis entries, equipment icons/lists, NAVI collection/view/change, AI and formation. Wide and original 4:3 layouts were compared for the demonstrated scrollbar and connector problems.
