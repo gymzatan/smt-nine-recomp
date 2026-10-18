@@ -19,7 +19,18 @@
 
 报告图形问题时，请提供发生异常那次运行的 `runtime/startup.log`、驱动版本和附近的普通存档。日志记录专用／共享容量；若所选运行库支持 DXGI 显存查询，还会在呈现画面时每五秒记录 local／nonlocal 内存段的进程用量 `current_bytes` 和预算 `budget_bytes`，不支持的查询会明确标注 unavailable。容量、进程用量和预算是不同数据，专用显存显示 512 MiB 不能单独证明显存耗尽。转换层可能返回兼容用的适配器名称与容量，请同时提供 Windows 显示的显卡／驱动信息。双击重新启动会覆盖日志，请在下次启动前复制。
 
+Config 提供 Auto、Vulkan、OpenGL、D3D12 和 D3D11。Auto 在初始化失败时按 **Vulkan → OpenGL → D3D12 → D3D11** 尝试。D3D12 通过[微软 D3D11On12](https://learn.microsoft.com/en-us/windows/win32/direct3d12/direct3d-11-on-12)复用现有 D3D11 渲染代码，不保证更快或降低显存要求。
+
 ## 构建与启动
+
+### 更新
+
+- **已编译的游玩目录：** 关闭游戏和 Config，从[发行页](https://github.com/gymzatan/smt-nine-recomp/releases/latest)下载匹配日文／日中安装的**更新 ZIP**，解压到原游戏目录，运行 `Apply-Update.cmd`。
+- **源码目录（含已导入英文）：** 运行 `git pull`，再用原构建环境执行 `.\update.cmd`，不需要 ISO。
+
+保留游戏数据、设置和普通存档。[详细更新说明](docs/BUILDING.md#compiled-program-updates)。
+
+### 首次安装
 
 先安装 Windows x64、Python 3.14、Visual Studio 2022 C++ Build Tools（Windows SDK、CMake、Ninja）和 Rustup。只有选择中文构建时，才需要 PATH 中的 FFmpeg／FFprobe，以及 Windows 简体中文补充字体中的宋体和黑体。
 
@@ -47,14 +58,6 @@ Config 的界面语言与游戏语言独立，三种界面语言始终可用。�
 当前已验证的流程与尚未覆盖的边界见 [状态说明](docs/STATUS.md)。尚未完成全流程通关和所有场景稳定 60 FPS 验收。
 
 项目自有代码与中文翻译采用 MIT 许可；第三方组件保留各自许可，见 [第三方声明](THIRD_PARTY.md)。宋体、黑体只从使用者的 Windows 安装中读取，不随仓库分发。
-
-## 更新已有安装
-
-源码目录先用 `git pull` 更新源码，然后在 CMD 运行 `update.cmd`，或在 PowerShell 运行 `.\update.cmd`。这是程序更新：校验并复用已安装日中资源，保留原构建语言选择，重新生成共享代码但不改写相同输出，增量编译主程序、Config、DSP 和已导入语言的程序。需要原构建环境和完整构建产物，不需要 ISO、中文字体或视频工具。翻译资源内容变更需在另一源码目录完整构建资源。
-
-已编译游玩目录使用匹配该安装的独立更新 ZIP：解压到游戏目录并运行 `Apply-Update.cmd`；也可从单独解压的更新目录执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Apply-Update.ps1 -Target "D:\Games\NINE"`。先关闭游戏和 Config。脚本校验游戏及更新文件，只覆盖发生变化的程序文件，保留日中原始数据、配置、普通存档和语言注册。更新 ZIP 不能用于全新安装。GitHub 发行附件中，日文安装选择文件名以 `-update-japanese.zip` 结尾的更新包，启用中文的安装选择 `-update-japanese-chinese.zip`；选错语言构建会被拒绝。完整游玩包仍保存在本地。外部英文宿主依赖玩家自己的补丁 ISO，需通过源码目录的 `update.cmd` 重编译；即时档仍只适用于创建它的原程序。
-
-Config 提供 Auto、Vulkan、OpenGL、D3D12 和 D3D11。Auto 在初始化失败时按 **Vulkan → OpenGL → D3D12 → D3D11** 尝试。D3D12 通过[微软 D3D11On12](https://learn.microsoft.com/en-us/windows/win32/direct3d12/direct3d-11-on-12)复用现有 D3D11 渲染代码，不保证更快或降低显存要求。
 
 ## 自定义控制
 

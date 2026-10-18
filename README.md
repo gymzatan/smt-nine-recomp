@@ -21,7 +21,18 @@ Local street samples with an AMD Ryzen 9 9950X and RTX 5090 exercised D3D11, Vul
 
 For graphics reports, send `runtime/startup.log` from the affected run, your driver version and a nearby ordinary save. The log records dedicated/shared capacity and, where the selected runtime supports DXGI memory queries, process `current_bytes` and `budget_bytes` for local/nonlocal segments every five seconds while frames are presented. Unsupported queries are explicitly marked unavailable. Capacity, process usage and budget are different measurements; 512 MiB dedicated memory alone does not prove exhaustion. Translation layers can expose compatibility adapter names and capacity values, so include the GPU/driver information reported by Windows too. A new GUI launch replaces the log, so copy it before launching again.
 
+Config offers Auto, Vulkan, OpenGL, D3D12 and D3D11. Auto tries **Vulkan → OpenGL → D3D12 → D3D11** on initialization errors. D3D12 reuses the existing D3D11 rendering code through [Microsoft D3D11On12](https://learn.microsoft.com/en-us/windows/win32/direct3d12/direct3d-11-on-12); it is not a separate native D3D12 renderer or a promise of lower memory usage.
+
 ## Build and run
+
+### Update
+
+- **Prebuilt game:** Close the game and Config, download the matching Japanese or Japanese/Chinese **update ZIP** from [Releases](https://github.com/gymzatan/smt-nine-recomp/releases/latest), extract it into the game folder, then run `Apply-Update.cmd`.
+- **Source build (including imported English):** Run `git pull`, then `.\update.cmd` using the existing build environment. No ISO is needed.
+
+Game data, settings and ordinary saves are kept. [Update details](docs/BUILDING.md#compiled-program-updates).
+
+### First installation
 
 Requires Windows x64, Python 3.14, Visual Studio 2022 C++ Build Tools including Windows SDK/CMake/Ninja, and Rustup. Only the optional Chinese build also requires FFmpeg/FFprobe on PATH and Windows Simplified Chinese supplemental fonts (SimSun and SimHei). See the build guide for the supported disc identity and tool setup.
 
@@ -67,14 +78,6 @@ The current port has been exercised through startup, ordinary saving/loading, mo
 ## License and credits
 
 Project-authored code and Chinese translation inputs are provided under the MIT license. Third-party components retain their own licenses, including LGPL portions of xboxrecomp/WineD3D; see `THIRD_PARTY.md` and the retained notices. SimSun and SimHei are read from the user's Windows installation and are not redistributed. Shin Megami Tensei NINE and its original assets belong to their respective rights holders. This is an independent fan project.
-
-## Updating an existing installation
-
-After updating the source with `git pull`, run `update.cmd` in Command Prompt, or `.\update.cmd` in PowerShell. This is a program update: it verifies and reuses installed Japanese/Chinese resources, preserves the build's language selection, regenerates shared code without rewriting unchanged outputs, and incrementally rebuilds the native host, Config, DSP and installed imported-language hosts. It needs the existing build environment and completed build outputs, but no ISO, Chinese fonts or movie tools. Changes to translated resources require a full resource build in a separate checkout.
-
-For a matching compiled play installation, extract its program-update ZIP into the game directory and run `Apply-Update.cmd`. From a separate extracted folder, run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Apply-Update.ps1 -Target "D:\Games\NINE"`. Close the game and Config first. The installer verifies payload and game identities, replaces only changed program files, and preserves Japanese/Chinese data, settings, ordinary saves and language registrations. The update ZIP cannot create a new installation. The GitHub release provides update ZIPs ending in `-update-japanese.zip` for Japanese-only installations and `-update-japanese-chinese.zip` for Chinese-enabled installations. Choose the matching language selection; the installer rejects the other variant. Full play packages remain local. Imported English hosts must be rebuilt through source `update.cmd`, since their executables depend on the externally patched ISO. Instant checkpoints still require their original exact executable.
-
-Config offers Auto, Vulkan, OpenGL, D3D12 and D3D11. Auto tries **Vulkan → OpenGL → D3D12 → D3D11** on initialization errors. D3D12 reuses the existing D3D11 rendering code through [Microsoft D3D11On12](https://learn.microsoft.com/en-us/windows/win32/direct3d12/direct3d-11-on-12); it is not a separate native D3D12 renderer or a promise of lower memory usage.
 
 ## Custom controls
 
