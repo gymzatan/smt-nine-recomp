@@ -1,6 +1,6 @@
 # SMT NINE Recomp
 
-A native Windows port of **Shin Megami Tensei NINE** for the original Xbox, built with [xboxrecomp](https://github.com/sp00nznet/xboxrecomp). Game code is statically translated from your Japanese retail disc and compiled locally. Japanese and the project's Chinese translation are built together. Config can import an ISO that you have separately patched with an English translation.
+A native Windows port of **Shin Megami Tensei NINE** for the original Xbox, built with [xboxrecomp](https://github.com/sp00nznet/xboxrecomp). Game code is statically translated from your Japanese retail disc and compiled locally. The default build provides Japanese; the project's Chinese translation is optional. Config can import an ISO that you have separately patched with an English translation, with or without Chinese support.
 
 This repository contains project source, configuration, patch rules and Chinese translation inputs. Supply your own supported Japanese ISO. Game executables, disc assets, generated game C, Microsoft fonts, saves and external translations are excluded.
 
@@ -8,7 +8,7 @@ This repository contains project source, configuration, patch rules and Chinese 
 
 ## Build and run
 
-Requires Windows x64, Python 3.14, Visual Studio 2022 C++ Build Tools including Windows SDK/CMake/Ninja, Rustup, FFmpeg/FFprobe on PATH, and Windows Simplified Chinese supplemental fonts (SimSun and SimHei). See the build guide for the supported disc identity and tool setup.
+Requires Windows x64, Python 3.14, Visual Studio 2022 C++ Build Tools including Windows SDK/CMake/Ninja, and Rustup. Only the optional Chinese build also requires FFmpeg/FFprobe on PATH and Windows Simplified Chinese supplemental fonts (SimSun and SimHei). See the build guide for the supported disc identity and tool setup.
 
 ```bat
 git clone https://github.com/gymzatan/smt-nine-recomp.git
@@ -19,11 +19,17 @@ Config.exe
 smt9_recomp.exe
 ```
 
-The build extracts and verifies the ISO, generates Chinese resources and subtitles through the existing writers, prepares native images, translates game functions with the pinned lifter, builds the DSP/runtime and compiles the game and Config. Original movie audio is retained. No image-generation or translation service is called during a build.
+To include Chinese, add the option to the initial build command:
 
-The two executables are in the project root. Double-click `smt9_recomp.exe` to play and `Config.exe` for settings; no command script is needed. Runtime paths follow the executable, so the folder can be moved to another drive while keeping its resources together. Config defaults to Chinese.
+```bat
+build.cmd --iso "D:\Games\Shin Megami Tensei - Nine (Japan).iso" --with-chinese
+```
 
-In Config, interface language and game language are independent. Choose Japanese or Chinese for the built-in game. To add English, use **Import or update language ISO…**, enter `English` as its identifier and display name, then select your already-patched ISO. Import compiles a separate language package; it does not include or apply an English translation patch for you.
+The build extracts and verifies the ISO, prepares native code and title resources, translates game functions with the pinned lifter, builds the DSP/runtime and compiles the game and Config. `--with-chinese` also builds Chinese scripts, fonts and subtitled movies through the existing writers. Without that option, those resource steps are skipped. Original movie audio is retained. No image-generation or translation service is called during a build.
+
+The two executables are in the project root. Double-click `smt9_recomp.exe` to play and `Config.exe` for settings; no command script is needed. Runtime paths follow the executable, so the folder can be moved to another drive while keeping its resources together. The default build starts with English settings and Japanese game text; a Chinese-enabled build starts with Chinese settings and game text. Existing saved settings remain in effect.
+
+In Config, interface language and game language are independent. Japanese is built in; Chinese appears only when enabled at build time. To play Japanese and English only, use the default build, then **Import or update language ISO…**, enter `English` as its identifier and display name, and select your already-patched ISO. Import compiles a separate language package; it does not include or apply an English translation patch for you.
 
 ## Repository layout
 

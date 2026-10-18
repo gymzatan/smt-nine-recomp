@@ -1,6 +1,14 @@
 #pragma once
 #include <windows.h>
 #include <stdio.h>
+#cmakedefine01 SMT9_WITH_CHINESE
+#if SMT9_WITH_CHINESE
+#define SMT9_DEFAULT_GAME_LANGUAGE_W L"Chinese"
+#define SMT9_DEFAULT_UI_LANGUAGE_W L"Chinese"
+#else
+#define SMT9_DEFAULT_GAME_LANGUAGE_W L"Japanese"
+#define SMT9_DEFAULT_UI_LANGUAGE_W L"English"
+#endif
 typedef struct NinePaths {
     char game_dir[MAX_PATH*4],xbe[MAX_PATH*4],save[MAX_PATH*4];
     char checkpoint[MAX_PATH*4],jp_xbe[MAX_PATH*4],jp_game_dir[MAX_PATH*4],runtime[MAX_PATH*4];

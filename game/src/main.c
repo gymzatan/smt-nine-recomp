@@ -23,6 +23,7 @@
  */
 
 #include <windows.h>
+#include <shlobj.h>
 #include <dbghelp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -483,6 +484,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* Step 4: Set game directory for file I/O path translation */
     {
         extern void xbox_path_init(const char *game_dir, const char *save_dir);
+        /* Partition1 opens the shared save root before any Media access.
+         * Its existing path must also exist when Chinese assets are omitted. */
+        wchar_t shared_save_root[MAX_PATH];
+        if(!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,YOUR_GAME_DIR,-1,shared_save_root,MAX_PATH))return 1;
+        int directory_result=SHCreateDirectoryExW(NULL,shared_save_root,NULL);
+        if(directory_result!=ERROR_SUCCESS && directory_result!=ERROR_ALREADY_EXISTS) {
+            fprintf(stderr,"Cannot create the shared save directory (Windows error %d).\n",directory_result);
+            return 1;
+        }
         xbox_path_init(YOUR_GAME_DIR, SMT9_SAVE_DIR);
         char media_root[MAX_PATH],cache_id[64];
         extern void xbox_path_set_language_media(const char *language,const char *media_root);

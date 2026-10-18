@@ -58,8 +58,8 @@ static int read_number(const wchar_t *key,unsigned initial,unsigned *value)
 }
 int nine_config_read(NineConfig *c,wchar_t *error,size_t count)
 {
-    *c=(NineConfig){1,960,720,4,3,L"Auto",L"Chinese",30,L"Chinese",0};
-    if(GetPrivateProfileStringW(L"Interface",L"Language",L"Chinese",c->interface_language,16,SMT9_CONFIG_PATH_W)>=15)
+    *c=(NineConfig){1,960,720,4,3,L"Auto",SMT9_DEFAULT_GAME_LANGUAGE_W,30,SMT9_DEFAULT_UI_LANGUAGE_W,0};
+    if(GetPrivateProfileStringW(L"Interface",L"Language",SMT9_DEFAULT_UI_LANGUAGE_W,c->interface_language,16,SMT9_CONFIG_PATH_W)>=15)
         return config_error(c,error,count,CE_UI);
     DWORD length=GetPrivateProfileStringW(L"Display",L"Backend",L"Auto",c->backend,16,SMT9_CONFIG_PATH_W);
     if(length>=15 || !read_number(L"RenderScale",1,&c->render_scale) ||
@@ -70,7 +70,7 @@ int nine_config_read(NineConfig *c,wchar_t *error,size_t count)
        !read_number(L"FixedAspectRatio",0,&c->fixed_aspect))
         return config_error(c,error,count,CE_NUMBERS);
     wchar_t language_id[NINE_LANGUAGE_ID+1];
-    if(GetPrivateProfileStringW(L"Display",L"Language",L"Chinese",language_id,NINE_LANGUAGE_ID+1,SMT9_CONFIG_PATH_W)>=NINE_LANGUAGE_ID)
+    if(GetPrivateProfileStringW(L"Display",L"Language",SMT9_DEFAULT_GAME_LANGUAGE_W,language_id,NINE_LANGUAGE_ID+1,SMT9_CONFIG_PATH_W)>=NINE_LANGUAGE_ID)
         return config_error(c,error,count,CE_GAME);
     wcscpy_s(c->language,NINE_LANGUAGE_ID,language_id);
     return nine_config_validate(c,error,count);

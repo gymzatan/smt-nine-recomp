@@ -15,7 +15,7 @@ from build_popup_ui import build as build_popup
 from prepare_resources import fixed_fields
 
 
-def prepare():
+def prepare(with_chinese=True):
     runtime = ROOT/'runtime'
     runtime.mkdir(exist_ok=True)
     work = ROOT/'build/localization'
@@ -29,12 +29,17 @@ def prepare():
     image[0x140CB2] = 13
     refresh_section_digests(image)
     chinese.write_bytes(image)
+    # The checked shared codegen recipe includes the existing popup edits in
+    # both builds. Only a Chinese-enabled build installs this image at runtime.
+    codegen_image=runtime/'native_game.xbe' if with_chinese else work/'native_codegen.xbe'
     with tempfile.TemporaryDirectory(prefix='popup-',dir=work) as directory:
         prepared = Path(directory)/'native_game.xbe'
         layout = build_popup(chinese,prepared)
-        os.replace(prepared,runtime/'native_game.xbe')
-    receipt = {'japanese_sha256':digest(japanese),'chinese_sha256':digest(runtime/'native_game.xbe'),
+        os.replace(prepared,codegen_image)
+    receipt = {'japanese_sha256':digest(japanese),'codegen_sha256':digest(codegen_image),'with_chinese':with_chinese,
                'popup_layout':layout,'source':'Original layout, fixed-field writer and popup assembly APIs'}
+    if with_chinese:
+        receipt['chinese_sha256']=receipt['codegen_sha256']
     (work/'images.json').write_text(json.dumps(receipt,indent=2)+'\n')
     return receipt
 

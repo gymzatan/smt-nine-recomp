@@ -24,6 +24,8 @@ int nine_language_resolve(const wchar_t *id,NineLanguage *language,wchar_t *erro
     if(!nine_language_id_valid(id))return failure(error,count,L"语言标识须以英文字母开头，最多31位，仅含字母、数字、下划线或连字符。");
     wcscpy_s(language->id,NINE_LANGUAGE_ID,id);
     if(!wcscmp(id,L"Chinese")||!wcscmp(id,L"Japanese")) {
+        if(!wcscmp(id,L"Chinese") && !SMT9_WITH_CHINESE)
+            return failure(error,count,L"Chinese game support was not built. Build with --with-chinese to enable it.");
         wcscpy_s(language->name,80,!wcscmp(id,L"Chinese")?L"中文":L"日本語");
         language->font_pages=!wcscmp(id,L"Japanese")?9:13;
         return 1;

@@ -1,6 +1,8 @@
 # Source release validation
 
-The source package was built in a separate Windows directory from the supported Japanese retail ISO, repository inputs and the dependencies listed in BUILDING.md. No developer game executable, extracted Media, generated game C, prepared XBE, font container or compiled DSP library was used as a build input. A fresh Python environment was installed from the requirements file. Windows SimSun/SimHei supplied the font inputs.
+The Chinese-enabled source package was built in a separate Windows directory from the supported Japanese retail ISO, repository inputs and the dependencies listed in BUILDING.md. No developer game executable, extracted Media, generated game C, prepared XBE, font container or compiled DSP library was used as a build input. A fresh Python environment was installed from the requirements file. Windows SimSun/SimHei supplied the font inputs.
+
+Optional-language checks cover the build driver's dependency selection and resume settings, plus the compiled production Config/language APIs with Chinese enabled and disabled. A separate Japanese-only host and imported English package were built without Chinese Media, high-resolution font atlases or a Chinese runtime image; both reached the title menu from an absent shared save root. Startup created ordinary save directories and no partition images. This validation reused verified extracted assets, DSP and generated baseline files; the shared code-generation image was rebuilt from retail and matched the accepted input byte for byte. It was not another complete ISO-to-resources rebuild. Chinese game selection is unavailable in this build, while imported English and all three interface languages remain supported.
 
 The ISO SHA-256 was `eafcd00e7fbc53bb10a0ac5743faf2d5ea3e1be9f7351ddb3e97b3c8d916d446`; all 3,515 extracted files were checked against the retail manifest. The original XBE SHA-256 was `6c249401369ed41c2a319762f0b56b80aefde3efe766ac0d8731889a4150deac`.
 
