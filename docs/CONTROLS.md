@@ -1,6 +1,6 @@
 # Controls
 
-Open `Config.exe` in the root directory for the full keyboard/controller mapping in Chinese, Japanese or English. The interface defaults to Chinese and can be selected independently from the game language. Double-click `smt9_recomp.exe` in the same directory to play. [中文操作说明](CONTROLS.zh-CN.md).
+Open `Config.exe` in the root directory for the full keyboard/controller mapping in Chinese, Japanese or English. The interface language can be selected independently from the game language. Double-click `smt9_recomp.exe` in the same directory to play. [中文操作说明](CONTROLS.zh-CN.md).
 
 Window size offers 640×480, 960×720, 1280×720, 1280×960, 1600×900, 1920×1080, 2560×1440 and 3840×2160 presets. Select Custom size to enter another width and height. Fixed Aspect Ratio locks the window's client-area proportions to the chosen dimensions when dragging any edge or corner. It is off by default; `Display/FixedAspectRatio=1` enables it in `runtime/NINE.ini`. The game aspect ratio is independent and retains its existing letterboxing. Saved settings apply on the next launch.
 
@@ -14,6 +14,8 @@ Window size offers 640×480, 960×720, 1280×720, 1280×960, 1600×900, 1920×10
 Pause and instant-save requests require the runtime's existing safe boundary. If a request is rejected, the window reports it and no valid instant state is created by that attempt. Keep ordinary saves.
 
 Physical keyboard/controller input is accepted only while the game owns the foreground window. Configuration, saves, language packages and screenshots stay local and are excluded from the repository.
+
+The table below shows the default profile. Use Config → Bindings to change keyboard and controller assignments independently, capture a key/button/stick direction, unbind an input or restore defaults. Apply the dialog and Save the main window; changes apply next launch and survive program updates. F1–F5, F8 and F9 are reserved.
 
 The original Xbox control column is the button sent to the game; each screen determines its game function. Punctuation uses US keyboard labels. Stick directions and D-pad directions are separate inputs.
 

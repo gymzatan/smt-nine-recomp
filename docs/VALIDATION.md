@@ -77,3 +77,11 @@ D3D12 was exercised through the actual D3D11On12 device path in the same ordinar
 The source program-update command reuses the original lifter, Cargo and CMake dependency graphs. Installer tests check a complete payload before any copy, reject escaping paths, preserve data/configuration/saves, apply changed programs and leave identical files' timestamps alone. The program update deliberately retains installed translated resources; it does not claim to rebuild changed translation data.
 
 The complete local source-check selection passed 32 checks. An actual in-place source update completed without an ISO or Chinese font/movie imports, retaining bytes and timestamps for 14,080 data/configuration/language files and all 96 generated C/header files. Both native and imported-English Ninja builds reported no work after the D3D12 build, demonstrating reuse of the existing compiled outputs.
+
+## Custom keyboard and controller bindings
+
+The source check selection passes 33 checks. Production input tests cover default shoulders/buttons/sticks, every trigger byte value, keyboard remapping, controller B-to-A remapping, unbound actions, axis inversion including signed endpoints, invalid/reserved bindings and restoring defaults. Configuration read/write tests exercise both Japanese-only and Chinese-enabled builds, preserve custom/unbound values, and reject invalid writes without replacing the saved profile.
+
+The actual Config dialog/resource is exercised in all three interface languages with controlled host inputs: held-key rejection, reserved-key rejection, focus-loss cancellation, keyboard/controller capture, Apply, Cancel and Restore defaults. The game was loaded through the existing ordinary-save route at Japanese 1×, 4:3, around 30 FPS. Two attempts to activate the automated game's window were refused by Windows, so live physical-key interaction was not established by those street captures. The production focus restriction was preserved; simulated production-input tests are not a physical-device gameplay claim.
+
+The release update installers also check language-selection mismatches before writing. Original Japanese/Chinese data, settings and saves are excluded from program update payloads. Imported-English hosts are rebuilt from their existing source package; generic binary updates do not replace externally translated executables.

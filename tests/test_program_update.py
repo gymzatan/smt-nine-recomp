@@ -39,6 +39,11 @@ def test_update_preserves_data_and_checks_entire_payload(tmp_path):
     manifest['files'].append({'path':'../outside','sha256':'0'*64})
     assert run().returncode!=0
     manifest['files'].pop()
+    manifest['forbidden_files']=['runtime/native_game.xbe']
+    marker=write(target,'runtime/native_game.xbe',b'Chinese-enabled installation')
+    assert run().returncode!=0
+    assert (target/'smt9_recomp.exe').read_bytes()==b'old program'
+    marker.unlink()
     assert run().returncode==0
     assert (target/'smt9_recomp.exe').read_bytes()==b'new program'
     stamps={p:p.stat().st_mtime_ns for p in (target/'smt9_recomp.exe',target/'Config.exe')}

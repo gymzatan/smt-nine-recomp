@@ -15,6 +15,7 @@
 #define BURNOUT3_XINPUT_XBOX_H
 
 #include <stdint.h>
+#include "input_bindings.h"
 #include "platform/xbox_winnt.h"
 
 #ifdef __cplusplus
@@ -87,6 +88,9 @@ typedef struct XBOX_INPUT_CAPABILITIES {
  * Maps Xbox controller ports to XInput slots.
  */
 void xbox_InputInit(void);
+#ifdef _WIN32
+BOOL xbox_InputConfigure(const XboxInputBindings *bindings);
+#endif
 
 /**
  * Get the state of a controller.

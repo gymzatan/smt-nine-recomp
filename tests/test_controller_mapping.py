@@ -56,6 +56,23 @@ int main(void) {
     keyboard_key('Q',0,XBOX_BUTTON_LTRIGGER);
     keyboard_key('E',0,XBOX_BUTTON_RTRIGGER);
     keyboard_key('O',0,-1);
+    for(unsigned value=0;value<256;value++)check(0,(BYTE)value,(BYTE)(255-value),0,0,(BYTE)value,(BYTE)(255-value));
+    XboxInputBindings custom=XBOX_DEFAULT_BINDINGS;
+    custom.keyboard[8]='Z';custom.gamepad[8]=10;custom.gamepad[9]=0;
+    custom.gamepad[16]=18;custom.gamepad[17]=17;
+    assert(xbox_InputConfigure(&custom));
+    keyboard_key('Z',0,XBOX_BUTTON_A);keyboard_key(VK_OEM_PERIOD,0,-1);
+    memset(&host,0,sizeof host);host.Gamepad.wButtons=XINPUT_GAMEPAD_B;host.Gamepad.sThumbLX=-32768;
+    XBOX_INPUT_STATE actual;assert(xbox_InputGetState(0,&actual)==ERROR_SUCCESS);
+    assert(actual.Gamepad.bAnalogButtons[XBOX_BUTTON_A]==255 && !actual.Gamepad.bAnalogButtons[XBOX_BUTTON_B]);
+    assert(actual.Gamepad.sThumbLX==32767);
+    host.Gamepad.sThumbLX=32767;assert(xbox_InputGetState(0,&actual)==ERROR_SUCCESS);
+    assert(actual.Gamepad.sThumbLX==-32767);
+    custom.keyboard[8]=0;assert(xbox_InputConfigure(&custom));keyboard_key('Z',0,-1);
+    custom.gamepad[8]=25;assert(!xbox_InputConfigure(&custom));
+    custom.gamepad[8]=10;custom.keyboard[8]=VK_F1;assert(!xbox_InputConfigure(&custom));
+    custom=(XboxInputBindings)XBOX_DEFAULT_BINDINGS;assert(xbox_InputConfigure(&custom));
+    keyboard_key(VK_OEM_PERIOD,0,XBOX_BUTTON_A);
     return 0;
 }
 '''

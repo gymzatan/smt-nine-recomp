@@ -129,6 +129,16 @@ int main(void) {
     assert(!wcscmp(config.language,L"English")&&!wcscmp(config.interface_language,L"Japanese"));
     wcscpy_s(config.backend,16,L"D3D12");assert(nine_config_write(&config,error,256));
     assert(nine_config_read(&config,error,256)&&!wcscmp(config.backend,L"D3D12"));
+    assert(config.controls.keyboard[8]==VK_OEM_PERIOD && config.controls.gamepad[8]==9);
+    config.controls.keyboard[8]='Z';config.controls.gamepad[8]=10;
+    config.controls.keyboard[4]=0;config.controls.gamepad[4]=0;
+    assert(nine_config_write(&config,error,256));
+    memset(&config.controls,0,sizeof config.controls);
+    assert(nine_config_read(&config,error,256));
+    assert(config.controls.keyboard[8]=='Z' && config.controls.gamepad[8]==10);
+    assert(!config.controls.keyboard[4] && !config.controls.gamepad[4]);
+    config.controls.keyboard[8]=VK_F8;assert(!nine_config_write(&config,error,256));
+    assert(nine_config_read(&config,error,256) && config.controls.keyboard[8]=='Z');
     wcscpy_s(config.language,NINE_LANGUAGE_ID,L"Chinese");assert(nine_config_write(&config,error,256));
     assert(nine_config_read(&config,error,256)&&!wcscmp(config.language,L"Chinese"));
     assert(nine_language_resolve(config.language,&item,error,256)==SMT9_WITH_CHINESE);

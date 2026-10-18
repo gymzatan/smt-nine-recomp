@@ -2,7 +2,7 @@
 
 《真·女神转生 NINE》原 Xbox 版的 Windows 原生静态重编译项目，基于 [xboxrecomp](https://github.com/sp00nznet/xboxrecomp)。使用者提供原始日版 ISO，在本地提取资源、生成游戏代码并编译程序。默认只构建日文，本项目中文翻译为可选项；英文通过 Config 导入使用者另行准备的已打补丁 ISO，不需要先构建中文。
 
-仓库只提供源码、重建规则、中文翻译与稳定身份。不包含原游戏、生成的游戏 C、微软字体、存档或外部英文翻译。
+仓库只提供源码、重建规则、中文翻译与稳定身份。源码仓库与源码 ZIP 不包含原游戏、生成的游戏 C、微软字体、存档或外部英文翻译；GitHub 发行另提供已有安装使用的纯程序更新包，不附日中原始数据。
 
 ## 运行配置与验证范围
 
@@ -52,6 +52,12 @@ Config 的界面语言与游戏语言独立，三种界面语言始终可用。�
 
 源码目录先用 `git pull` 更新源码，然后在 CMD 运行 `update.cmd`，或在 PowerShell 运行 `.\update.cmd`。这是程序更新：校验并复用已安装日中资源，保留原构建语言选择，重新生成共享代码但不改写相同输出，增量编译主程序、Config、DSP 和已导入语言的程序。需要原构建环境和完整构建产物，不需要 ISO、中文字体或视频工具。翻译资源内容变更需在另一源码目录完整构建资源。
 
-已编译游玩目录使用匹配该安装的独立更新 ZIP：解压到游戏目录并运行 `Apply-Update.cmd`；也可从单独解压的更新目录执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Apply-Update.ps1 -Target "D:\Games\NINE"`。先关闭游戏和 Config。脚本校验游戏及更新文件，只覆盖发生变化的程序文件，保留日中原始数据、配置、普通存档和语言注册。更新 ZIP 不能用于全新安装。私人完整游玩包及其更新 ZIP 与 GitHub 的公开纯源码发行分别保存；即时档仍只适用于创建它的原程序。
+已编译游玩目录使用匹配该安装的独立更新 ZIP：解压到游戏目录并运行 `Apply-Update.cmd`；也可从单独解压的更新目录执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Apply-Update.ps1 -Target "D:\Games\NINE"`。先关闭游戏和 Config。脚本校验游戏及更新文件，只覆盖发生变化的程序文件，保留日中原始数据、配置、普通存档和语言注册。更新 ZIP 不能用于全新安装。GitHub 发行附件中，日文安装选择文件名以 `-update-japanese.zip` 结尾的更新包，启用中文的安装选择 `-update-japanese-chinese.zip`；选错语言构建会被拒绝。完整游玩包仍保存在本地。外部英文宿主依赖玩家自己的补丁 ISO，需通过源码目录的 `update.cmd` 重编译；即时档仍只适用于创建它的原程序。
 
 Config 提供 Auto、Vulkan、OpenGL、D3D12 和 D3D11。Auto 在初始化失败时按 **Vulkan → OpenGL → D3D12 → D3D11** 尝试。D3D12 通过[微软 D3D11On12](https://learn.microsoft.com/en-us/windows/win32/direct3d12/direct3d-11-on-12)复用现有 D3D11 渲染代码，不保证更快或降低显存要求。
+
+## 自定义控制
+
+打开 **Config → 按键设置**，从 24 项 Xbox 游戏动作中选择一项，分别选择或捕获键盘按键与 XInput 手柄输入。包括双摇杆方向及按下、十字键、四个面键、Start／Back 和原 Xbox 白／黑／L／R 键。“不绑定”可禁用对应输入，“恢复默认”可恢复原键位。点击“应用”后回到主窗口“保存”，下次启动生效。设置保存在 `runtime/NINE.ini`，仅更新程序时会保留。
+
+可交换或反转摇杆方向；映射到模拟动作时保留摇杆力度与扳机按压程度。实体输入仍只在游戏窗口位于前台时生效。F1～F5、F8、F9 保留即时档／截图／暂停功能，不能用作游戏动作键。“操作说明”与对应表展示默认键位。

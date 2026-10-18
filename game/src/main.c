@@ -399,6 +399,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     if(!nine_config_read(&s_display,config_error,256)) {
         MessageBoxW(NULL,config_error,L"NINE",MB_OK|MB_ICONERROR);return 1;
     }
+    extern BOOL xbox_InputConfigure(const XboxInputBindings *bindings);
+    if(!xbox_InputConfigure(&s_display.controls))return 1;
     if(!nine_language_resolve(s_display.language,&s_language,config_error,256)) {
         MessageBoxW(NULL,config_error,L"NINE",MB_OK|MB_ICONERROR);return 1;
     }

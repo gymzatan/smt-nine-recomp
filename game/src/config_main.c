@@ -3,6 +3,7 @@
 #include <commdlg.h>
 #include <stdio.h>
 #include "config_ui.h"
+#include "config_controls.h"
 
 static NineConfig settings;
 static NineLanguage languages[64];
@@ -15,7 +16,12 @@ static void apply_ui(HWND window);
 static wchar_t import_id[NINE_LANGUAGE_ID]=L"English",import_name[80]=L"English";
 static INT_PTR CALLBACK controls_dialog(HWND w,UINT m,WPARAM p,LPARAM l) {
     (void)l;
-    if(m==WM_INITDIALOG){SetWindowTextW(w,tr(UI_CONTROLS));SetDlgItemTextW(w,301,tr(UI_CONTROLS_BODY));SetDlgItemTextW(w,IDOK,tr(UI_CLOSE));SetFocus(GetDlgItem(w,IDOK));return FALSE;}
+    if(m==WM_INITDIALOG){
+        wchar_t body[12000];
+        const wchar_t *notice=ui_language==0?L"以下为默认键位。自定义控制请使用主窗口的“按键设置”。":ui_language==1?L"以下は初期設定です。割り当ての変更はメイン画面の「入力設定」を使用してください。":L"Default bindings are listed below. Use Bindings in the main window to customize controls.";
+        swprintf_s(body,12000,L"%s\r\n\r\n%s",notice,tr(UI_CONTROLS_BODY));
+        SetWindowTextW(w,tr(UI_CONTROLS));SetDlgItemTextW(w,301,body);SetDlgItemTextW(w,IDOK,tr(UI_CLOSE));SetFocus(GetDlgItem(w,IDOK));return FALSE;
+    }
     if(m==WM_CLOSE || (m==WM_COMMAND && (LOWORD(p)==IDOK || LOWORD(p)==IDCANCEL))){EndDialog(w,0);return TRUE;}
     return FALSE;
 }
@@ -69,6 +75,7 @@ static void apply_ui(HWND window)
         {127,UI_REFRESH},{128,UI_SIZE},{129,UI_HINT},{108,UI_IMPORT},{133,UI_SIZE_CUSTOM},{132,UI_FIXED_ASPECT},
         {111,UI_CONTROLS},{IDOK,UI_SAVE},{IDCANCEL,UI_CANCEL}};
     SetWindowTextW(window,tr(UI_TITLE));
+    SetDlgItemTextW(window,113,ui_language==0?L"按键设置":ui_language==1?L"入力設定":L"Bindings");
     for(unsigned i=0;i<sizeof labels/sizeof labels[0];i++)SetDlgItemTextW(window,labels[i].id,tr(labels[i].text));
     SetDlgItemTextW(window,109,tr(status_text));
     LRESULT backend=SendDlgItemMessageW(window,101,CB_GETCURSEL,0,0);
@@ -122,6 +129,7 @@ static INT_PTR CALLBACK config_dialog(HWND window,UINT message,WPARAM wparam,LPA
             return TRUE;
         }
         if(LOWORD(wparam)==111){DialogBoxParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(300),window,controls_dialog,0);return TRUE;}
+        if(LOWORD(wparam)==113){nine_controls_dialog(window,&settings.controls,ui_language);return TRUE;}
         if(LOWORD(wparam)==108){
             if(importing.hProcess)return TRUE;
             INT_PTR dialog=DialogBoxParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(200),window,import_dialog,0);

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <wchar.h>
 
-typedef enum ConfigError {CE_UI,CE_REFRESH,CE_SCALE,CE_SIZE,CE_ASPECT,CE_BACKEND,CE_NUMBERS,CE_GAME,CE_PATH,CE_WRITE,CE_SAVE,CE_FIXED} ConfigError;
+typedef enum ConfigError {CE_UI,CE_REFRESH,CE_SCALE,CE_SIZE,CE_ASPECT,CE_BACKEND,CE_NUMBERS,CE_GAME,CE_PATH,CE_WRITE,CE_SAVE,CE_FIXED,CE_CONTROLS} ConfigError;
 static int config_error(const NineConfig *c,wchar_t *error,size_t count,ConfigError code)
 {
     static const wchar_t *const messages[][3]={
@@ -19,7 +19,8 @@ static int config_error(const NineConfig *c,wchar_t *error,size_t count,ConfigEr
         {L"配置文件路径过长。",L"設定ファイルのパスが長すぎます。",L"The settings file path is too long."},
         {L"无法写入配置文件。",L"設定ファイルに書き込めません。",L"Could not write the settings file."},
         {L"无法保存配置文件。",L"設定ファイルを保存できません。",L"Could not save the settings file."},
-        {L"FixedAspectRatio 必须为 0 或 1。",L"FixedAspectRatio は 0 または 1 で指定してください。",L"FixedAspectRatio must be 0 or 1."}
+        {L"FixedAspectRatio 必须为 0 或 1。",L"FixedAspectRatio は 0 または 1 で指定してください。",L"FixedAspectRatio must be 0 or 1."},
+        {L"按键映射无效。F1～F5、F8、F9 为保留快捷键。",L"入力割り当てが無効です。F1～F5、F8、F9 は予約されています。",L"Invalid control binding. F1–F5, F8 and F9 are reserved hotkeys."}
     };
     unsigned language=!wcscmp(c->interface_language,L"Chinese")?0:!wcscmp(c->interface_language,L"Japanese")?1:2;
     if(error && count)swprintf_s(error,count,L"%s",messages[code][language]);
@@ -45,20 +46,25 @@ int nine_config_validate(const NineConfig *c,wchar_t *error,size_t count)
         return config_error(c,error,count,CE_BACKEND);
     if(!nine_language_id_valid(c->language))return config_error(c,error,count,CE_GAME);
     if(c->fixed_aspect>1)return config_error(c,error,count,CE_FIXED);
+    if(!xbox_bindings_valid(&c->controls))return config_error(c,error,count,CE_CONTROLS);
     return 1;
 }
-static int read_number(const wchar_t *key,unsigned initial,unsigned *value)
+static int read_section_number(const wchar_t *section,const wchar_t *key,unsigned initial,unsigned *value)
 {
     wchar_t text[32],def[32],*end;
     swprintf_s(def,32,L"%u",initial);
-    DWORD length=GetPrivateProfileStringW(L"Display",key,def,text,32,SMT9_CONFIG_PATH_W);
+    DWORD length=GetPrivateProfileStringW(section,key,def,text,32,SMT9_CONFIG_PATH_W);
     unsigned long number=wcstoul(text,&end,10);
     if(!length || length>=31 || *end || text[0]==L'-' || number>UINT_MAX) return 0;
     *value=(unsigned)number;return 1;
 }
+static int read_number(const wchar_t *key,unsigned initial,unsigned *value) {
+    return read_section_number(L"Display",key,initial,value);
+}
 int nine_config_read(NineConfig *c,wchar_t *error,size_t count)
 {
     *c=(NineConfig){1,960,720,4,3,L"Auto",SMT9_DEFAULT_GAME_LANGUAGE_W,30,SMT9_DEFAULT_UI_LANGUAGE_W,0};
+    c->controls=(XboxInputBindings)XBOX_DEFAULT_BINDINGS;
     if(GetPrivateProfileStringW(L"Interface",L"Language",SMT9_DEFAULT_UI_LANGUAGE_W,c->interface_language,16,SMT9_CONFIG_PATH_W)>=15)
         return config_error(c,error,count,CE_UI);
     DWORD length=GetPrivateProfileStringW(L"Display",L"Backend",L"Auto",c->backend,16,SMT9_CONFIG_PATH_W);
@@ -73,16 +79,28 @@ int nine_config_read(NineConfig *c,wchar_t *error,size_t count)
     if(GetPrivateProfileStringW(L"Display",L"Language",SMT9_DEFAULT_GAME_LANGUAGE_W,language_id,NINE_LANGUAGE_ID+1,SMT9_CONFIG_PATH_W)>=NINE_LANGUAGE_ID)
         return config_error(c,error,count,CE_GAME);
     wcscpy_s(c->language,NINE_LANGUAGE_ID,language_id);
+    for(unsigned i=0;i<XBOX_BINDING_COUNT;i++)
+        if(!read_section_number(L"Keyboard",xbox_binding_ids[i],c->controls.keyboard[i],&c->controls.keyboard[i]) ||
+           !read_section_number(L"Gamepad",xbox_binding_ids[i],c->controls.gamepad[i],&c->controls.gamepad[i]))
+            return config_error(c,error,count,CE_CONTROLS);
     return nine_config_validate(c,error,count);
 }
 int nine_config_write(const NineConfig *c,wchar_t *error,size_t count)
 {
     if(!nine_config_validate(c,error,count))return 0;
-    wchar_t temporary[MAX_PATH],content[512];
+    wchar_t temporary[MAX_PATH],content[4096];
     if(swprintf_s(temporary,MAX_PATH,L"%s.tmp",SMT9_CONFIG_PATH_W)<0)
         return config_error(c,error,count,CE_PATH);
-    int length=swprintf_s(content,512,L"[Interface]\r\nLanguage=%s\r\n\r\n[Display]\r\nBackend=%s\r\nLanguage=%s\r\nRenderScale=%u\r\nWindowWidth=%u\r\nWindowHeight=%u\r\nAspectWidth=%u\r\nAspectHeight=%u\r\nRefreshHz=%u\r\nFixedAspectRatio=%u\r\n",
+    int length=swprintf_s(content,4096,L"[Interface]\r\nLanguage=%s\r\n\r\n[Display]\r\nBackend=%s\r\nLanguage=%s\r\nRenderScale=%u\r\nWindowWidth=%u\r\nWindowHeight=%u\r\nAspectWidth=%u\r\nAspectHeight=%u\r\nRefreshHz=%u\r\nFixedAspectRatio=%u\r\n",
         c->interface_language,c->backend,c->language,c->render_scale,c->window_width,c->window_height,c->aspect_width,c->aspect_height,c->refresh_hz,c->fixed_aspect);
+    for(unsigned section=0;section<2;section++) {
+        int added=swprintf_s(content+length,4096-length,L"\r\n[%s]\r\n",section?L"Gamepad":L"Keyboard");
+        if(added<0)return config_error(c,error,count,CE_WRITE);length+=added;
+        for(unsigned i=0;i<XBOX_BINDING_COUNT;i++) {
+            added=swprintf_s(content+length,4096-length,L"%s=%u\r\n",xbox_binding_ids[i],section?c->controls.gamepad[i]:c->controls.keyboard[i]);
+            if(added<0)return config_error(c,error,count,CE_WRITE);length+=added;
+        }
+    }
     HANDLE file=CreateFileW(temporary,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file==INVALID_HANDLE_VALUE)return config_error(c,error,count,CE_WRITE);
     WORD bom=0xfeff;DWORD written;DWORD bytes=(DWORD)length*sizeof(wchar_t);

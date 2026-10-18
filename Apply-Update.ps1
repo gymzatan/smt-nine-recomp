@@ -25,6 +25,9 @@ $bundle = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd([char[]]'\/')
 $manifest = Get-Content -LiteralPath (Join-Path $bundle 'UPDATE_MANIFEST.json') -Raw | ConvertFrom-Json
 if ($manifest.format -ne 'smt-nine-program-update') { throw 'This is not a supported program update package.' }
 if (-not (Test-Path -LiteralPath (Join-Path $destination 'smt9_recomp.exe') -PathType Leaf)) { throw 'Choose an existing game installation, not an empty directory.' }
+foreach ($name in $manifest.forbidden_files) {
+    if (Test-Path -LiteralPath (Resolve-SafeFile $destination $name)) { throw 'This update is for a different installed language selection. Choose the matching update package.' }
+}
 foreach ($identity in $manifest.required_files) {
     $installed = Resolve-SafeFile $destination $identity.path
     if (-not (Test-Path -LiteralPath $installed -PathType Leaf) -or (Get-SHA256 $installed) -ne $identity.sha256) { throw "Installed game data does not match this package: $($identity.path)" }
