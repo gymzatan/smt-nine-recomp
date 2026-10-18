@@ -39,6 +39,8 @@ The default `Auto` graphics selection attempts Vulkan, OpenGL, then system D3D11
 
 Direct GUI launches write diagnostics to `runtime/startup.log`, including each graphics attempt, failure code and selected adapter/backend. If graphics initialization fails, an error dialog points to that log and Config. Launches with redirected standard error retain their existing output destination.
 
+OpenGL requests a 1 ms Windows timer period after device creation and releases the request at process exit. WineD3D polls completion events on a command thread; coarse host waits can stall the original per-glyph fences even at 1x resolution. GPU completion checks, game clocks, the selected 30/60 Hz rate, glyph rendering and other backends retain their existing behavior.
+
 Chinese high-resolution font atlases use read-only file mappings. The existing texture cache reads the original pixels when a page is needed, without allocating a private copy of every atlas at startup. Keep `runtime/fonts` beside the executable while playing. This changes source memory use, not glyphs, layout, resolution or GPU texture sizes.
 
 If a build is interrupted, keep the unchanged checkout and completed outputs, then use:
