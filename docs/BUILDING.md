@@ -35,6 +35,12 @@ The pipeline extracts Japanese resources into `data/japanese`, creates Chinese r
 
 The native game and imported languages use the accepted `Release` compiler configuration. The resulting entry points are `Config.exe` and `smt9_recomp.exe` in the project root. Double-click either executable directly. The game opens without a console window. Runtime paths are resolved from the executable directory; keep `data`, `runtime` and `backends` beside the executables when moving the folder. No drive letter or launcher script is required. Config defaults to a Chinese interface and Chinese game language.
 
+The default `Auto` graphics selection attempts Vulkan, OpenGL, then system D3D11. Each implementation checks its own driver requirements. A failed DLL load, factory creation or device creation advances to the next backend. Partial device objects are released immediately; runtime DLLs load once and remain until process exit because unloading them can invalidate shared native-driver state even after another device is created. A manually selected backend is used exclusively. Errors after successful device initialization still stop explicitly; a driver crash or hang cannot return an initialization error to this loop.
+
+Direct GUI launches write diagnostics to `runtime/startup.log`, including each graphics attempt, failure code and selected adapter/backend. If graphics initialization fails, an error dialog points to that log and Config. Launches with redirected standard error retain their existing output destination.
+
+Chinese high-resolution font atlases use read-only file mappings. The existing texture cache reads the original pixels when a page is needed, without allocating a private copy of every atlas at startup. Keep `runtime/fonts` beside the executable while playing. This changes source memory use, not glyphs, layout, resolution or GPU texture sizes.
+
 If a build is interrupted, keep the unchanged checkout and completed outputs, then use:
 
 ```bat

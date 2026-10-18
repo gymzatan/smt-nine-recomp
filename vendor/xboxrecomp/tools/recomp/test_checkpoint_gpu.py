@@ -1165,6 +1165,24 @@ def test_automatic_backend_uses_opengl_when_vulkan_driver_is_unavailable(native_
     assert result.returncode==0,result.stdout+result.stderr
     assert '[GPU] active backend OpenGL' in result.stderr
 
+
+def test_automatic_backend_reaches_system_driver_after_two_failures(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    library=executable.parent/'backends/opengl/d3d11.dll'
+    saved=library.with_suffix('.disabled')
+    library.rename(saved)
+    try:
+        result=subprocess.run([str(executable),'save',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+            env={**os.environ,'RECOMP_GPU_BACKEND':'Auto','VK_LOADER_DRIVERS_DISABLE':'*',
+                 'VK_LOADER_LAYERS_DISABLE':'~implicit~','DXVK_LOG_PATH':str(tmp_path)},
+            capture_output=True,text=True,errors='replace',timeout=30)
+    finally:
+        saved.rename(library)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[GPU] Vulkan initialization failed:' in result.stderr
+    assert '[GPU] OpenGL initialization failed:' in result.stderr
+    assert '[GPU] active backend D3D11' in result.stderr
+
 @pytest.mark.parametrize('hardware,backend',[('0','D3D11'),('1','D3D11'),('1','Vulkan'),('1','OpenGL')])
 def test_original_dma_completion_aliases_and_checkpoint(native_gpu,tmp_path,hardware,backend):
     executable,xbe=native_gpu

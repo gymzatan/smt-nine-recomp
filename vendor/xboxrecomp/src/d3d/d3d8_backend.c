@@ -4,8 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <wchar.h>
-#define VK_NO_PROTOTYPES
-#include "vulkan/vulkan_core.h"
 
 typedef HRESULT (WINAPI *CreateFactory)(REFIID,void **);
 typedef HRESULT (WINAPI *CreateDevice)(IDXGIAdapter *,D3D_DRIVER_TYPE,HMODULE,UINT,
@@ -13,55 +11,6 @@ typedef HRESULT (WINAPI *CreateDevice)(IDXGIAdapter *,D3D_DRIVER_TYPE,HMODULE,UI
 static unsigned render_scale=1;
 static float game_aspect=4.0f/3.0f;
 static const char *active_backend="D3D11";
-static HRESULT vulkan_available(void)
-{
-    HMODULE loader=LoadLibraryExW(L"vulkan-1.dll",NULL,LOAD_LIBRARY_SEARCH_SYSTEM32);
-    if(!loader) {
-        DWORD error=GetLastError();
-        return error==ERROR_MOD_NOT_FOUND?DXGI_ERROR_UNSUPPORTED:HRESULT_FROM_WIN32(error);
-    }
-    PFN_vkGetInstanceProcAddr get=(PFN_vkGetInstanceProcAddr)GetProcAddress(loader,"vkGetInstanceProcAddr");
-    if(!get){FreeLibrary(loader);return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);}
-    PFN_vkCreateInstance create=(PFN_vkCreateInstance)get(VK_NULL_HANDLE,"vkCreateInstance");
-    PFN_vkEnumerateInstanceExtensionProperties extensions=(PFN_vkEnumerateInstanceExtensionProperties)get(VK_NULL_HANDLE,"vkEnumerateInstanceExtensionProperties");
-    if(!create || !extensions){FreeLibrary(loader);return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);}
-    uint32_t extension_count=0;VkResult extension_result=extensions(NULL,&extension_count,NULL);
-    if(extension_result!=VK_SUCCESS){FreeLibrary(loader);return extension_result==VK_ERROR_INCOMPATIBLE_DRIVER?DXGI_ERROR_UNSUPPORTED:E_FAIL;}
-    VkExtensionProperties *available=extension_count?malloc(sizeof *available*extension_count):NULL;
-    if(extension_count && !available){FreeLibrary(loader);return E_OUTOFMEMORY;}
-    extension_result=extensions(NULL,&extension_count,available);
-    int surface=0,win32=0;
-    if(extension_result==VK_SUCCESS)for(unsigned i=0;i<extension_count;i++) {
-        if(!strcmp(available[i].extensionName,"VK_KHR_surface"))surface=1;
-        if(!strcmp(available[i].extensionName,"VK_KHR_win32_surface"))win32=1;
-    }
-    free(available);
-    if(extension_result!=VK_SUCCESS){FreeLibrary(loader);return E_FAIL;}
-    if(!surface || !win32){FreeLibrary(loader);return DXGI_ERROR_UNSUPPORTED;}
-    VkApplicationInfo application={VK_STRUCTURE_TYPE_APPLICATION_INFO};application.pApplicationName="NINE";application.pEngineName="DXVK";application.apiVersion=VK_API_VERSION_1_4;
-    VkInstanceCreateInfo info={VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};info.pApplicationInfo=&application;
-    VkInstance instance=VK_NULL_HANDLE;VkResult result=create(&info,NULL,&instance);
-    if(result!=VK_SUCCESS){FreeLibrary(loader);return result==VK_ERROR_INCOMPATIBLE_DRIVER?DXGI_ERROR_UNSUPPORTED:result==VK_ERROR_OUT_OF_HOST_MEMORY?E_OUTOFMEMORY:E_FAIL;}
-    PFN_vkEnumeratePhysicalDevices enumerate=(PFN_vkEnumeratePhysicalDevices)get(instance,"vkEnumeratePhysicalDevices");
-    PFN_vkGetPhysicalDeviceProperties properties=(PFN_vkGetPhysicalDeviceProperties)get(instance,"vkGetPhysicalDeviceProperties");
-    PFN_vkDestroyInstance destroy=(PFN_vkDestroyInstance)get(instance,"vkDestroyInstance");
-    uint32_t count=0;result=enumerate(instance,&count,NULL);HRESULT hr=E_FAIL;
-    if(result==VK_SUCCESS) {
-        hr=DXGI_ERROR_UNSUPPORTED;
-        VkPhysicalDevice *devices=count?malloc(sizeof *devices*count):NULL;
-        if(count && !devices)hr=E_OUTOFMEMORY;
-        else if(count) {
-            result=enumerate(instance,&count,devices);
-            if(result!=VK_SUCCESS)hr=E_FAIL;
-            else for(unsigned i=0;i<count;i++) {
-                VkPhysicalDeviceProperties caps;properties(devices[i],&caps);
-                if(caps.deviceType!=VK_PHYSICAL_DEVICE_TYPE_CPU && caps.apiVersion>=VK_API_VERSION_1_4){hr=S_OK;break;}
-            }
-        }
-        free(devices);
-    }
-    destroy(instance,NULL);FreeLibrary(loader);return hr;
-}
 void d3d8_DisplayConfigure(unsigned scale,float aspect)
 {
     render_scale=scale;game_aspect=aspect;
@@ -78,11 +27,11 @@ static HRESULT load_backend(const wchar_t *name,HMODULE *dxgi,HMODULE *d3d)
     size_t remaining=32768-(size_t)(end+1-path);
     const wchar_t *dxgi_name=!wcscmp(name,L"vulkan")?L"nvgi.dll":L"nogi.dll";
     if(swprintf_s(end+1,remaining,L"backends\\%s\\%s",name,dxgi_name)<0)return E_INVALIDARG;
-    *dxgi=LoadLibraryExW(path,NULL,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    if(!*dxgi)*dxgi=LoadLibraryExW(path,NULL,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if(!*dxgi)return HRESULT_FROM_WIN32(GetLastError());
     if(swprintf_s(end+1,remaining,L"backends\\%s\\d3d11.dll",name)<0)return E_INVALIDARG;
-    *d3d=LoadLibraryExW(path,NULL,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-    if(!*d3d){HRESULT hr=HRESULT_FROM_WIN32(GetLastError());FreeLibrary(*dxgi);*dxgi=NULL;return hr;}
+    if(!*d3d)*d3d=LoadLibraryExW(path,NULL,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    if(!*d3d)return HRESULT_FROM_WIN32(GetLastError());
     return S_OK;
 }
 static HRESULT create_hardware(CreateFactory factory_fn,CreateDevice device_fn,
@@ -117,38 +66,44 @@ static HRESULT create_hardware(CreateFactory factory_fn,CreateDevice device_fn,
 }
 HRESULT d3d8_backend_create_device(ID3D11Device **device,ID3D11DeviceContext **context)
 {
+    if(!device || !context)return E_POINTER;
+    *device=NULL;*context=NULL;
     const char *requested=getenv("RECOMP_GPU_BACKEND");
     if(!requested)requested="D3D11";
     int automatic=!strcmp(requested,"Auto");
     const char *names[]={"Vulkan","OpenGL","D3D11"};
     const wchar_t *folders[]={L"vulkan",L"opengl"};
+    HRESULT last=E_INVALIDARG;
+    /* Driver dependencies have process lifetime: unloading a failed runtime
+     * can invalidate shared native-driver state during subsequent draws.
+     * Cache each load once; partial device/context objects are still released. */
+    static HMODULE modules[2][2];
     for(unsigned index=0;index<3;index++) {
         if(!automatic && strcmp(requested,names[index]))continue;
-        active_backend=names[index];HMODULE dxgi=NULL,d3d=NULL;HRESULT hr;
+        active_backend=names[index];HRESULT hr=S_OK;
         CreateFactory factory_fn=CreateDXGIFactory1;CreateDevice device_fn=D3D11CreateDevice;
-        if(index==0) {
-            hr=vulkan_available();
-            if(hr==DXGI_ERROR_UNSUPPORTED && automatic){fprintf(stderr,"[GPU] Vulkan loader/driver capabilities unavailable; trying OpenGL\n");continue;}
-            if(FAILED(hr))return hr;
-        }
+        fprintf(stderr,"[GPU] trying %s\n",active_backend);
         if(index<2) {
-            if(index==1 && (!SetEnvironmentVariableA("WINE_D3D_CONFIG","renderer=gl") || _putenv_s("WINE_D3D_CONFIG","renderer=gl")))return E_FAIL;
-            hr=load_backend(folders[index],&dxgi,&d3d);
-            /* Missing/corrupt deployment is not a hardware capability failure. */
-            if(FAILED(hr)){fprintf(stderr,"[STOP] %s runtime load failed: %08lX\n",active_backend,(unsigned long)hr);return hr;}
-            factory_fn=(CreateFactory)GetProcAddress(dxgi,"CreateDXGIFactory1");
-            device_fn=(CreateDevice)GetProcAddress(d3d,"D3D11CreateDevice");
-            if(!factory_fn || !device_fn){FreeLibrary(d3d);FreeLibrary(dxgi);return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);}
+            if(index==1 && (!SetEnvironmentVariableA("WINE_D3D_CONFIG","renderer=gl") || _putenv_s("WINE_D3D_CONFIG","renderer=gl")))hr=E_FAIL;
+            if(SUCCEEDED(hr))hr=load_backend(folders[index],&modules[index][0],&modules[index][1]);
+            if(SUCCEEDED(hr)) {
+                factory_fn=(CreateFactory)GetProcAddress(modules[index][0],"CreateDXGIFactory1");
+                device_fn=(CreateDevice)GetProcAddress(modules[index][1],"D3D11CreateDevice");
+                if(!factory_fn || !device_fn)hr=HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+            }
         }
-        hr=create_hardware(factory_fn,device_fn,device,context);
-        if(SUCCEEDED(hr)){fprintf(stderr,"[GPU] active backend %s\n",active_backend);return hr;}
+        /* Let the selected implementation check its own driver requirements.
+         * DXVK/WineD3D may return E_FAIL or another HRESULT for an unusable
+         * driver, not just DXGI_ERROR_UNSUPPORTED. */
+        if(SUCCEEDED(hr))hr=create_hardware(factory_fn,device_fn,device,context);
+        if(SUCCEEDED(hr)){fprintf(stderr,"[GPU] active backend %s\n",active_backend);last=hr;break;}
         if(*context){ID3D11DeviceContext_Release(*context);*context=NULL;}
         if(*device){ID3D11Device_Release(*device);*device=NULL;}
-        if(d3d)FreeLibrary(d3d);if(dxgi)FreeLibrary(dxgi);
-        if(!automatic || hr!=DXGI_ERROR_UNSUPPORTED)return hr;
-        fprintf(stderr,"[GPU] %s required hardware capabilities unavailable; trying %s\n",names[index],index<2?names[index+1]:"none");
+        last=hr;
+        fprintf(stderr,"[GPU] %s initialization failed: %08lX\n",names[index],(unsigned long)hr);
+        if(!automatic)break;
     }
-    return DXGI_ERROR_UNSUPPORTED;
+    return last;
 }
 
 static D3D8TextureAssetLookup texture_asset_lookup;

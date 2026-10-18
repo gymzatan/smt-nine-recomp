@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <io.h>
 typedef struct FontPage {uint8_t *base,*pixels;uint32_t width,height,base_bytes,pixel_bytes;int used;} FontPage;
 static FontPage *pages;static unsigned page_count;
 static uint8_t *title_base,*title_pixels;
@@ -61,18 +62,32 @@ int nine_font_assets_init(unsigned scale)
     if(scale==1)return 1;
     char path[MAX_PATH];snprintf(path,sizeof path,"%s/fonts/font%u.bin",SMT9_RUNTIME_DIR,scale);
     FILE *file=nine_fopen(path,"rb");if(!file){fprintf(stderr,"[FONT] missing generated font: %s\n",path);return 0;}
-    char magic[8];uint32_t parameters[2];int ok=fread(magic,8,1,file)==1 && !memcmp(magic,"N9FONT\0\0",8) && fread(parameters,sizeof parameters,1,file)==1 && parameters[0]==scale && parameters[1]>0 && parameters[1]<=128;
-    if(!ok){fclose(file);return 0;}
-    page_count=parameters[1];pages=calloc(page_count,sizeof *pages);if(!pages){fclose(file);return 0;}
+    HANDLE handle=(HANDLE)_get_osfhandle(_fileno(file));LARGE_INTEGER length;
+    int ok=GetFileSizeEx(handle,&length) && length.QuadPart>=16 && (uint64_t)length.QuadPart<=SIZE_MAX;
+    HANDLE mapping=ok?CreateFileMappingW(handle,NULL,PAGE_READONLY,0,0,NULL):NULL;
+    uint8_t *mapped=mapping?MapViewOfFile(mapping,FILE_MAP_READ,0,0,0):NULL;
+    if(mapping)CloseHandle(mapping);fclose(file);
+    if(!mapped)return 0;
+    size_t size=(size_t)length.QuadPart,offset=16;uint32_t parameters[2];memcpy(parameters,mapped+8,sizeof parameters);
+    ok=!memcmp(mapped,"N9FONT\0\0",8) && parameters[0]==scale && parameters[1]>0 && parameters[1]<=128;
+    if(!ok){UnmapViewOfFile(mapped);return 0;}
+    page_count=parameters[1];pages=calloc(page_count,sizeof *pages);
+    if(!pages){UnmapViewOfFile(mapped);page_count=0;return 0;}
+    /* The existing texture cache uploads these immutable pixels on demand.
+     * Keep the source file mapped instead of copying every unused atlas into
+     * private memory at startup. Windows can reclaim its clean file pages. */
     for(unsigned i=0;ok && i<page_count;i++) {
-        FontPage *p=&pages[i];uint32_t header[4];ok=fread(header,sizeof header,1,file)==1;
+        FontPage *p=&pages[i];uint32_t header[4];ok=size-offset>=sizeof header;
         if(!ok)break;
+        memcpy(header,mapped+offset,sizeof header);offset+=sizeof header;
         p->width=header[0];p->height=header[1];p->base_bytes=header[2];p->pixel_bytes=header[3];
         if(p->width!=512*scale || p->height!=512*scale || p->base_bytes!=131072 || p->pixel_bytes!=p->width*p->height*4){ok=0;break;}
-        p->base=malloc(p->base_bytes);p->pixels=malloc(p->pixel_bytes);
-        ok=p->base && p->pixels && fread(p->base,p->base_bytes,1,file)==1 && fread(p->pixels,p->pixel_bytes,1,file)==1;
+        if(p->base_bytes>size-offset){ok=0;break;}
+        p->base=mapped+offset;offset+=p->base_bytes;
+        if(p->pixel_bytes>size-offset){ok=0;break;}
+        p->pixels=mapped+offset;offset+=p->pixel_bytes;
     }
-    if(ok)ok=fgetc(file)==EOF && !ferror(file);fclose(file);
+    if(offset!=size)ok=0;
     unsigned page=0;
     for(unsigned font=0;ok && font<2;font++) {
         snprintf(path,sizeof path,"%s/Media/SysFont/sys_f%u.xpr",SMT9_GAME_DIR,font?18:24);file=nine_fopen(path,"rb");if(!file){ok=0;break;}
@@ -82,6 +97,6 @@ int nine_font_assets_init(unsigned scale)
         for(unsigned i=0;ok && i<(header[1]-header[2])/131072;i++,page++)ok=page<page_count && fread(base,131072,1,file)==1 && !memcmp(base,pages[page].base,131072);
         free(base);fclose(file);
     }
-    if(!ok || page!=page_count){fprintf(stderr,"[FONT] generated atlases differ from active font resources; run build_native_fonts.py\n");return 0;}
-    d3d8_SetTextureAssetLookup(lookup);fprintf(stderr,"[FONT] original maps, native scale=%u, pages=%u\n",scale,page_count);return 1;
+    if(!ok || page!=page_count){fprintf(stderr,"[FONT] generated atlases differ from active font resources; run build_native_fonts.py\n");free(pages);pages=NULL;page_count=0;UnmapViewOfFile(mapped);return 0;}
+    d3d8_SetTextureAssetLookup(lookup);fprintf(stderr,"[FONT] original maps, native scale=%u, pages=%u, read-only mapped pixels\n",scale,page_count);return 1;
 }

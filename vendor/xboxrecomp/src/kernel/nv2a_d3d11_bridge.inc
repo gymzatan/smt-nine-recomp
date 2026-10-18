@@ -191,7 +191,13 @@ static void hw_mark_cpu_write(HwMemory *memory,size_t offset,size_t bytes,HwQuer
 static void hw_initialize(void)
 {
     if(s_hw_initialized) return;
-    hw_check(d3d8_InitializeOffscreenDevice(640,480),"device initialization");
+    HRESULT initialized=d3d8_InitializeOffscreenDevice(640,480);
+    if(FAILED(initialized) && getenv("RECOMP_GPU_ERROR_DIALOG")) {
+        wchar_t message[512];
+        swprintf_s(message,512,L"\u663e\u5361\u521d\u59cb\u5316\u5931\u8d25 (0x%08lX)\u3002\u8bf7\u67e5\u770b runtime/startup.log\uff0c\u5e76\u5728 Config.exe \u68c0\u67e5\u56fe\u5f62\u540e\u7aef\u3002\nGraphics initialization failed. See runtime/startup.log and the graphics backend in Config.exe.",(unsigned long)initialized);
+        MessageBoxW(NULL,message,L"NINE",MB_OK|MB_ICONERROR);
+    }
+    hw_check(initialized,"device initialization");
     D3D11_BUFFER_DESC cb={0};
     cb.ByteWidth=sizeof(HwPixelState); cb.Usage=D3D11_USAGE_DYNAMIC; cb.BindFlags=D3D11_BIND_CONSTANT_BUFFER; cb.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
     hw_check(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&cb,NULL,&s_hw_ps_cb),"native pixel constants");

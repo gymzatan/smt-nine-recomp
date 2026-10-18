@@ -627,6 +627,16 @@ int main(int argc, char **argv)
     if(!nine_paths_init()) {
         MessageBoxW(NULL,L"无法确定程序所在目录。 / Cannot resolve the executable directory.",L"NINE",MB_OK|MB_ICONERROR);return 1;
     }
+    int gui_startup=GetFileType(GetStdHandle(STD_ERROR_HANDLE))==FILE_TYPE_UNKNOWN;
+    if(gui_startup) {
+        wchar_t path[MAX_PATH];FILE *stream=NULL;
+        if(swprintf_s(path,MAX_PATH,L"%s/startup.log",nine_paths.runtime_w)<0 ||
+           _wfreopen_s(&stream,path,L"w",stderr)!=0 ||
+           _putenv_s("RECOMP_GPU_ERROR_DIALOG","1")!=0) {
+            MessageBoxW(NULL,L"无法写入 runtime/startup.log，请检查游戏目录的写入权限。 / Cannot write runtime/startup.log.",L"NINE",MB_OK|MB_ICONERROR);return 1;
+        }
+        setvbuf(stderr,NULL,_IONBF,0);
+    }
     if(!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {
         fprintf(stderr,"[DISPLAY] per-monitor pixel sizing failed: %lu\n",GetLastError());return 1;
     }
@@ -639,5 +649,7 @@ int main(int argc, char **argv)
     (void)argc;
     (void)argv;
 #endif
-    return WinMain(GetModuleHandle(NULL), NULL, GetCommandLineA(), SW_SHOW);
+    int result=WinMain(GetModuleHandle(NULL), NULL, GetCommandLineA(), SW_SHOW);
+    if(result && gui_startup)MessageBoxW(NULL,L"游戏启动失败，详细信息见 runtime/startup.log。 / Startup failed. See runtime/startup.log.",L"NINE",MB_OK|MB_ICONERROR);
+    return result;
 }
