@@ -7,6 +7,47 @@ ROOT=Path(__file__).resolve().parents[1]
 def sha(data): return hashlib.sha256(data).hexdigest()
 def quoted(path): return "'"+str(path).replace("'","''")+"'"
 
+@pytest.mark.parametrize('language,encoding', [
+    ('Chinese','utf-16'), ('Japanese','utf-16'), ('English','utf-16'),
+    ('Japanese','ascii'), ('"English"','ascii'),
+])
+def test_interface_language_matches_config(tmp_path, language, encoding):
+    (tmp_path/'runtime').mkdir()
+    (tmp_path/'smt9_recomp.exe').write_bytes(b'game')
+    (tmp_path/'runtime/native_game_jp.xbe').write_bytes(b'Japanese')
+    ini=tmp_path/'runtime/NINE.ini'
+    content=f'[Interface]\nLanguage={language}\n\n[Display]\nLanguage=Chinese\n'
+    ini.write_text(content,encoding=encoding)
+    before=ini.read_bytes()
+    script=f'''
+. {quoted(ROOT/'tools/updater.ps1')} -Installer {quoted(ROOT/'Apply-Update.ps1')} -LibraryOnly
+[Threading.Thread]::CurrentThread.CurrentUICulture = [Globalization.CultureInfo]::GetCultureInfo('de-DE')
+$script:interfaceLanguage=Get-InterfaceLanguage {quoted(tmp_path)}
+$value=Text 'english-text' 'chinese-text' 'japanese-text'
+Write-Output ($script:interfaceLanguage+'|'+$value)
+'''
+    result=subprocess.run([shutil.which('powershell.exe'),'-NoProfile','-ExecutionPolicy','Bypass','-Command',script],capture_output=True)
+    expected=language.strip('"')
+    assert result.returncode==0,result.stderr
+    assert result.stdout.decode().strip()==expected+'|'+expected.lower()+'-text'
+    assert ini.read_bytes()==before
+
+@pytest.mark.parametrize('variant,expected', [('japanese','English'),('japanese-chinese','Chinese')])
+def test_interface_language_uses_config_build_default(tmp_path,variant,expected):
+    (tmp_path/'runtime').mkdir()
+    (tmp_path/'smt9_recomp.exe').write_bytes(b'game')
+    (tmp_path/'runtime/native_game_jp.xbe').write_bytes(b'Japanese')
+    if variant=='japanese-chinese':(tmp_path/'runtime/native_game.xbe').write_bytes(b'Chinese')
+    script=f'''
+. {quoted(ROOT/'tools/updater.ps1')} -Installer {quoted(ROOT/'Apply-Update.ps1')} -LibraryOnly
+[Threading.Thread]::CurrentThread.CurrentUICulture = [Globalization.CultureInfo]::GetCultureInfo('ja-JP')
+Get-InterfaceLanguage {quoted(tmp_path)}
+'''
+    result=subprocess.run([shutil.which('powershell.exe'),'-NoProfile','-ExecutionPolicy','Bypass','-Command',script],capture_output=True)
+    assert result.returncode==0,result.stderr
+    assert result.stdout.decode().strip()==expected
+    assert not (tmp_path/'runtime/NINE.ini').exists()
+
 @pytest.mark.parametrize('variant', ['japanese','japanese-chinese'])
 @pytest.mark.parametrize('case', ['valid','checksum','traversal','missing','tampered'])
 def test_online_update(tmp_path,variant,case):
