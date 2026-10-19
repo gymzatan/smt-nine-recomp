@@ -51,6 +51,12 @@ int main(void) {
     check(0,0,0,0,0,0,0);
     keyboard_key('1',XBOX_GAMEPAD_LEFT_THUMB,-1);
     keyboard_key('2',XBOX_GAMEPAD_RIGHT_THUMB,-1);
+    keyboard_key(VK_UP,XBOX_GAMEPAD_DPAD_UP,-1);
+    keyboard_key(VK_DOWN,XBOX_GAMEPAD_DPAD_DOWN,-1);
+    keyboard_key(VK_LEFT,XBOX_GAMEPAD_DPAD_LEFT,-1);
+    keyboard_key(VK_RIGHT,XBOX_GAMEPAD_DPAD_RIGHT,-1);
+    keyboard_key(VK_NUMPAD8,0,-1);keyboard_key(VK_NUMPAD2,0,-1);
+    keyboard_key(VK_NUMPAD4,0,-1);keyboard_key(VK_NUMPAD6,0,-1);
     keyboard_key(VK_OEM_4,0,XBOX_BUTTON_WHITE);
     keyboard_key(VK_OEM_6,0,XBOX_BUTTON_BLACK);
     keyboard_key('Q',0,XBOX_BUTTON_LTRIGGER);

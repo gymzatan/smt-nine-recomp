@@ -71,7 +71,10 @@ static INT_PTR CALLBACK dialog(HWND w,UINT m,WPARAM p,LPARAM l) {
         for(unsigned key=8;key<256;key++) {
             if(!xbox_binding_key_valid(key) || key==VK_SHIFT || key==VK_CONTROL || key==VK_MENU)continue;
             wchar_t name[80];UINT scan=MapVirtualKeyW(key,MAPVK_VK_TO_VSC_EX);
-            LONG parameter=(scan&255)<<16;if(scan&0xff00)parameter|=1<<24;
+            LONG parameter=(scan&255)<<16;
+            /* Navigation keys share scan codes with the numeric keypad. */
+            if((scan&0xff00) || (key>=VK_PRIOR && key<=VK_DOWN) ||
+               key==VK_INSERT || key==VK_DELETE || key==VK_NUMLOCK)parameter|=1<<24;
             if(!GetKeyNameTextW(parameter,name,80))continue;
             add_choice(w,402,name,key);
         }

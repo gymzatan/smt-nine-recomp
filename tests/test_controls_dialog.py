@@ -43,6 +43,25 @@ static INT_PTR WINAPI test_dialog(HINSTANCE instance,LPCWSTR resource,HWND paren
         unsigned key=(unsigned)SendDlgItemMessageW(w,402,CB_GETITEMDATA,i,0);
         assert(xbox_binding_key_valid(key));assert(key!=VK_F8 && key!=VK_F9);
     }
+    const unsigned distinct[][2]={{VK_UP,VK_NUMPAD8},{VK_DOWN,VK_NUMPAD2},
+        {VK_LEFT,VK_NUMPAD4},{VK_RIGHT,VK_NUMPAD6},{VK_HOME,VK_NUMPAD7},
+        {VK_END,VK_NUMPAD1},{VK_PRIOR,VK_NUMPAD9},{VK_NEXT,VK_NUMPAD3},
+        {VK_INSERT,VK_NUMPAD0},{VK_DELETE,VK_DECIMAL},{VK_NUMLOCK,VK_PAUSE}};
+    for(unsigned i=0;i<sizeof distinct/sizeof distinct[0];i++) {
+        wchar_t names[2][80];
+        for(unsigned j=0;j<2;j++) {
+            select_value(w,402,distinct[i][j]);
+            assert(SendDlgItemMessageW(w,402,CB_GETCURSEL,0,0)>=0);
+            assert(GetDlgItemTextW(w,402,names[j],80)>0);
+        }
+        assert(wcscmp(names[0],names[1]));
+    }
+    const unsigned arrows[]={VK_UP,VK_DOWN,VK_LEFT,VK_RIGHT};
+    for(unsigned i=0;i<4;i++) {
+        SendDlgItemMessageW(w,401,LB_SETCURSEL,i,0);command(w,401,LBN_SELCHANGE);
+        LRESULT selected=SendDlgItemMessageW(w,402,CB_GETCURSEL,0,0);
+        assert((unsigned)SendDlgItemMessageW(w,402,CB_GETITEMDATA,selected,0)==arrows[i]);
+    }
     SendDlgItemMessageW(w,401,LB_SETCURSEL,8,0);command(w,401,LBN_SELCHANGE);
     command(w,406,BN_CLICKED);assert(c->capture==1);
     SendMessageW(w,WM_ACTIVATE,WA_INACTIVE,0);assert(!c->capture);
