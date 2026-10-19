@@ -1,4 +1,4 @@
-"""Build Japanese NINE, optionally with Chinese, from a supported retail ISO."""
+"""Build Japanese NINE, optionally with Chinese, from a retail ISO or extracted folder."""
 from pathlib import Path
 import argparse
 import configparser
@@ -15,10 +15,10 @@ def build(iso, jobs, resume=False, with_chinese=False, update=False):
     os.environ['PYTHONUTF8']='1'
     if os.name != 'nt':
         raise RuntimeError('The native release currently requires Windows x64.')
+    from extract_iso import extract, input_record, verify_existing
     japanese,chinese = ROOT/'data/japanese',ROOT/'data/chinese'
     progress_path=ROOT/'build/progress.json'
     if update:
-        from extract_iso import verify_existing
         verify_existing(japanese)
         progress=json.loads(progress_path.read_text())
         previous=json.loads((ROOT/'build/completion.json').read_text())
@@ -36,14 +36,14 @@ def build(iso, jobs, resume=False, with_chinese=False, update=False):
             progress['completed'].pop(name,None)
     elif resume:
         progress=json.loads(progress_path.read_text())
-        if progress['iso_sha256']!=digest(iso):
-            raise ValueError('Resume ISO differs from the original build input')
+        if any(progress.get(key)!=value for key,value in input_record(iso).items()):
+            raise ValueError('Resume input differs from the original build input')
         if 'with_chinese' not in progress:
             raise ValueError('This build did not record its language selection; use a clean checkout')
         if progress['with_chinese']!=with_chinese:
             raise ValueError('Resume must use the same --with-chinese selection as the original build')
     else:
-        progress={'iso_sha256':digest(iso),'with_chinese':with_chinese,'completed':{}}
+        progress={**input_record(iso),'with_chinese':with_chinese,'completed':{}}
     if not resume and not update and (japanese.exists() or chinese.exists()):
         raise ValueError('A full source build needs an empty data directory; use a clean checkout or preserve and move your existing data first.')
     subtitle_tools = {name:str(required_program(name)) for name in ('ffmpeg','ffprobe')} if with_chinese and not update else {}
@@ -65,7 +65,6 @@ def build(iso, jobs, resume=False, with_chinese=False, update=False):
         progress['completed'][name]={p.relative_to(ROOT).as_posix():digest(p) for p in paths}
         progress_path.parent.mkdir(parents=True,exist_ok=True)
         progress_path.write_text(json.dumps(progress,indent=2)+'\n')
-    from extract_iso import extract
     phase('retail',lambda:extract(iso,japanese),lambda:[p for p in japanese.rglob('*') if p.is_file()])
     if update:
         resources=['base_resources','native_fonts','native_atlases','scripts','rts','staff','subtitles'] if with_chinese else []
@@ -120,8 +119,9 @@ def build(iso, jobs, resume=False, with_chinese=False, update=False):
             record=json.loads(language_receipt.read_text(encoding='utf-8'))
             record['executable_sha256']=digest(package/'bin/smt9_recomp.exe')
             language_receipt.write_text(json.dumps(record,indent=2)+'\n',encoding='utf-8')
-    receipt={'iso_sha256':progress['iso_sha256'],'seconds':time.monotonic()-start,'executable_sha256':digest(ROOT/'smt9_recomp.exe'),
-             'config_sha256':digest(ROOT/'Config.exe'),'source':'Retail ISO plus repository source/translation inputs and declared build dependencies',
+    source_record={key:progress[key] for key in ('iso_sha256','source_directory') if key in progress}
+    receipt={**source_record,'seconds':time.monotonic()-start,'executable_sha256':digest(ROOT/'smt9_recomp.exe'),
+             'config_sha256':digest(ROOT/'Config.exe'),'source':'Retail ISO or extracted folder plus repository source/translation inputs and declared build dependencies',
              'with_chinese':with_chinese,'program_update':update,**subtitle_tools,'python':sys.version,'gameplay_validation':'Build completion is not a full-playthrough claim.'}
     (ROOT/'build/completion.json').write_text(json.dumps(receipt,indent=2)+'\n')
     print('Build complete. Open Config.exe, then smt9_recomp.exe.',flush=True)
@@ -129,7 +129,7 @@ def build(iso, jobs, resume=False, with_chinese=False, update=False):
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--iso',type=Path)
+    parser.add_argument('--iso',type=Path,help='XISO, full-disc ISO, or extracted original game folder containing default.xbe and Media')
     parser.add_argument('--jobs',type=int,default=4)
     parser.add_argument('--resume',action='store_true',help='Resume an interrupted build in the same unchanged checkout')
     parser.add_argument('--update',action='store_true',help='Rebuild programs in place using verified installed resources; no ISO or resource regeneration')

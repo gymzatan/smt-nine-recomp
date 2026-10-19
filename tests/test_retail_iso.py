@@ -59,3 +59,38 @@ def test_reject_changed_game_contents(tmp_path, retail, change):
                                          'missing': 'complete retail file set',
                                          'extra': 'Unexpected or repeated ISO entry'}[change]):
         extractor.extract(disc, tmp_path/'extracted')
+
+
+def test_folder_copy_input_record_and_source_preserved(tmp_path, retail):
+    extractor, _, files, _, identity = retail
+    source = tmp_path/'original folder'
+    for name, data in files.items():
+        path = source/name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(data)
+    before = {name: (data, (source/name).stat().st_mtime_ns) for name, data in files.items()}
+    assert extractor.input_record(source) == {'source_directory': str(source.resolve())}
+    destination = tmp_path/'copied'
+    assert extractor.extract(source, destination) == identity
+    assert {p.relative_to(destination).as_posix(): p.read_bytes()
+            for p in destination.rglob('*') if p.is_file()} == files
+    assert all(((source/name).read_bytes(), (source/name).stat().st_mtime_ns) == value
+               for name, value in before.items())
+    with pytest.raises(ValueError, match='overlap'):
+        extractor.extract(source, source/'nested')
+    assert not (source/'nested').exists()
+    (source/'default.xbe').write_bytes(b'changed')
+    with pytest.raises(ValueError, match='retail resource identity differs'):
+        extractor.input_record(source)
+
+
+@pytest.mark.parametrize('change', ['modified', 'missing', 'extra'])
+def test_reject_invalid_folder_before_copying(tmp_path, retail, change):
+    extractor, _, files, _, _ = retail
+    source = tmp_path/'original'
+    for name, data in files.items():
+        path = source/name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(data)
+    if change == 'modified': (source/'default.xbe').write_bytes(b'modified')
+    elif change == 'missing': (source/'Media/test.bin').unlink()
+    else: (source/'extra.txt').write_bytes(b'extra')
+    destination = tmp_path/'copied'
+    with pytest.raises(ValueError): extractor.extract(source, destination)
+    assert not destination.exists()

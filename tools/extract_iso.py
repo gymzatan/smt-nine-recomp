@@ -1,7 +1,8 @@
-"""Extract and verify retail game files from an automatically detected XISO or full-disc ISO."""
+"""Prepare verified retail files from an extracted folder, XISO or full-disc ISO."""
 from pathlib import Path, PurePosixPath
 import argparse
 import json
+import shutil
 import sys
 from common import ROOT, digest
 
@@ -9,9 +10,17 @@ sys.path.insert(0, str(ROOT/'vendor/xboxrecomp'))
 from tools.xiso.xdvdfs import Xiso
 
 
-def verify_existing(destination):
+def verify_existing(destination, *, exact_files=False):
     """Verify installed retail inputs using the resource manifest, without writes."""
     identity = json.loads((ROOT/'config/retail.json').read_text())
+    destination = Path(destination)
+    if exact_files:
+        expected = {row['path'] for row in identity['files']}
+        actual = {path.relative_to(destination).as_posix() for path in destination.rglob('*') if path.is_file()}
+        if actual != expected:
+            missing, unexpected = sorted(expected-actual), sorted(actual-expected)
+            raise ValueError(f'Retail folder file set differs; {len(missing)} missing: {missing[:5]}; '
+                             f'{len(unexpected)} unexpected: {unexpected[:5]}')
     for row in identity['files']:
         target = Path(destination).joinpath(*PurePosixPath(row['path']).parts)
         if not target.is_file() or digest(target) != row['sha256']:
@@ -19,8 +28,31 @@ def verify_existing(destination):
     return identity
 
 
+def input_record(source):
+    """Identify the original input for build completion and same-input resume."""
+    source = Path(source)
+    if source.is_dir():
+        verify_existing(source, exact_files=True)
+        return {'source_directory': str(source.resolve())}
+    return {'iso_sha256': digest(source)}
+
+
 def extract(iso_path, destination):
+    source = Path(iso_path)
     destination = Path(destination)
+    if source.is_dir():
+        if destination.resolve().is_relative_to(source.resolve()) or source.resolve().is_relative_to(destination.resolve()):
+            raise ValueError('Retail source and destination folders must not overlap')
+        identity = verify_existing(source, exact_files=True)
+        print('Detected extracted retail folder; copying verified game files.', flush=True)
+        for row in identity['files']:
+            relative = Path(*PurePosixPath(row['path']).parts)
+            target = destination/relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source/relative, target)
+        verify_existing(destination)
+        print(f"Copied and verified {len(identity['files'])} retail files.", flush=True)
+        return identity
     identity = json.loads((ROOT/'config/retail.json').read_text())
     expected = {row['path']: row for row in identity['files']}
     seen = set()

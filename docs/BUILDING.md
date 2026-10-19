@@ -18,6 +18,14 @@ The initial build accepts unmodified Japanese game data in a bare game-partition
 
 The whole-disc checksum is not an acceptance requirement: padding, sector arrangement and the video partition can differ. Every extracted game file is still checked against the complete 3,515-file manifest in `config/retail.json`; modified, missing, unexpected or repeated files fail explicitly. The original `default.xbe` SHA-256 is `6c249401369ed41c2a319762f0b56b80aefde3efe766ac0d8731889a4150deac`. Supply the image yourself; externally translated images use the separate Config import flow, which uses the same layout detection.
 
+An already-extracted original Japanese folder is also accepted by the same option:
+
+```bat
+build.cmd --iso "D:\Games\NINE-original"
+```
+
+Select the folder containing `default.xbe` and `Media`, with the same complete original file set as the disc. The build checks all files before copying them into `data/japanese`; it does not edit the source folder. Modified or translated folders are not initial-build inputs. Source and destination folders must not overlap. Use a fresh checkout for the initial build, as with an ISO.
+
 ## Build
 
 In a fresh checkout:
@@ -57,7 +65,7 @@ build.cmd --iso "D:\Games\Shin Megami Tensei - Nine (Japan).iso" --resume
 
 Include `--with-chinese` again when resuming a Chinese-enabled build. The language selection is recorded in `build/progress.json`; changing it during resume fails explicitly. Completed phases are reused only after their recorded output hashes match. A failed phase is not marked complete. Do not use this continuation option to reuse outputs after changing source or translation inputs, or to resume a build created before this selection was recorded. Use a fresh checkout to change the initial language selection. For program updates after a successful build, use `update.cmd` (equivalent to `build.cmd --update`); see the README for source and compiled-play update commands. It retains and verifies the installed resource outputs rather than regenerating translations. Resource changes require a separate full build. Imported language build directories must remain available for their host updates.
 
-`build/completion.json` records the actual disc, tool paths, duration and executable identities. Build completion is separate from game-flow validation.
+`build/completion.json` records the actual ISO checksum or source-directory path, tool paths, duration and executable identities. Folder resumes require the same directory and recheck its complete original contents; ISO resumes require the same input checksum. Program updates use the installed verified resources without the original input. Build completion is separate from game-flow validation.
 
 ## Languages
 

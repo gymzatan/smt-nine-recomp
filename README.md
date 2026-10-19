@@ -45,7 +45,7 @@ Config.exe
 smt9_recomp.exe
 ```
 
-Both bare XISO (`.xiso.iso` or `.iso`) and full-disc ISO dumps are detected automatically by `--iso`. No conversion is needed; the extracted original game files are verified instead of requiring one whole-disc checksum.
+`--iso` automatically accepts bare XISO (`.xiso.iso` or `.iso`), full-disc ISO dumps, or an extracted original game folder containing `default.xbe` and `Media`. No conversion is needed; original game files are verified instead of requiring one whole-disc checksum. Folder contents are checked before copying into the build directory; the source folder is unchanged.
 
 To include Chinese, add the option to the initial build command:
 

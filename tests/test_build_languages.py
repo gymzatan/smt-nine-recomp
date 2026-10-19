@@ -12,7 +12,8 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize('chinese',[False,True])
-def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese):
+@pytest.mark.parametrize('directory',[False,True])
+def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese,directory):
     sys.path.insert(0,str(ROOT/'tools'))
     spec=importlib.util.spec_from_file_location('nine_build',ROOT/'tools/build.py')
     build=importlib.util.module_from_spec(spec);spec.loader.exec_module(build)
@@ -21,7 +22,9 @@ def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese):
     def write(relative):
         path=tmp_path/relative;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'fixture')
         return path
-    iso=write('disc.iso')
+    iso=tmp_path/'original folder' if directory else write('disc.iso')
+    if directory: iso.mkdir()
+    source_record={'source_directory':str(iso.resolve())} if directory else {'iso_sha256':build.digest(iso)}
     def tool(name):
         calls.append(name)
         assert chinese or name not in ('ffmpeg','ffprobe')
@@ -52,7 +55,8 @@ def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese):
     def generate(image,destination):
         assert image.is_file();calls.append('generation');write('build/generated/shared.c')
     modules={
-        'extract_iso':SimpleNamespace(extract=extract,verify_existing=lambda destination:{'iso_sha256':'reference-container-with-identical-game-files'}),
+        'extract_iso':SimpleNamespace(extract=extract,verify_existing=lambda destination:{'iso_sha256':'reference-container-with-identical-game-files'},
+            input_record=lambda path:source_record if path==iso else {'iso_sha256':'different-input'}),
         'prepare_fonts':SimpleNamespace(prepare=fonts),
         'prepare_resources':SimpleNamespace(scripts=scripts,
             rts=lambda *args:write('data/chinese/Media/RTS/Scripts/RTSScript.bin'),
@@ -81,9 +85,10 @@ def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese):
     assert not {'ffmpeg','ffprobe'} & set(calls[previous_calls:])
     assert all(p.read_bytes()==content for p,content in protected.items())
     assert json.loads((tmp_path/'build/completion.json').read_text())['with_chinese']==chinese
-    assert json.loads((tmp_path/'build/completion.json').read_text())['iso_sha256']==build.digest(iso)
+    final=json.loads((tmp_path/'build/completion.json').read_text())
+    assert all(final[key]==value for key,value in source_record.items())
     other_iso=write('other-container.iso');other_iso.write_bytes(b'different container')
-    with pytest.raises(ValueError,match='Resume ISO differs'):
+    with pytest.raises(ValueError,match='Resume input differs'):
         build.build(other_iso,2,resume=True,with_chinese=chinese)
     with pytest.raises(ValueError,match='same --with-chinese'):
         build.build(iso,2,resume=True,with_chinese=not chinese)
