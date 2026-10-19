@@ -129,8 +129,20 @@ typedef struct {
 } VertexAttr;
 
 #define NV_VERTEX_ATTRS 16
-#define NV_MAX_INDICES  4096
-#define NV_MAX_INLINE   65536           /* dwords of INLINE_ARRAY per batch */
+/* Use the existing NV2A batch bound for every producer and its consumers.
+ * A BEGIN/END may contain many method packets; 4096 is not a draw limit. */
+#define NV_MAX_INDICES  NV2A_MAX_BATCH_LENGTH
+#define NV_MAX_INLINE   NV2A_MAX_BATCH_LENGTH /* dwords of INLINE_ARRAY */
+
+static void require_batch_space(const char *kind, uint32_t used,
+                                uint32_t added, uint32_t capacity)
+{
+    if (used > capacity || added > capacity - used) {
+        fprintf(stderr, "[STOP] NV097 %s batch exceeds NV2A capacity: used=%u added=%u limit=%u\n",
+                kind, used, added, capacity);
+        exit(5);
+    }
+}
 
 /* Texture state decoded by the existing four-stage pixel consumer. */
 typedef struct {
@@ -3182,8 +3194,9 @@ static void imm_emit_vertex(void)
 {
     uint32_t at = s_gpu.imm_count * IMM_VERTEX_DWORDS;
 
-    if (!s_gpu.prim || at + IMM_VERTEX_DWORDS > NV_MAX_INLINE)
+    if (!s_gpu.prim)
         return;
+    require_batch_space("immediate", at, IMM_VERTEX_DWORDS, NV_MAX_INLINE);
     memcpy(&s_gpu.inline_buf[at], s_gpu.imm_attr, sizeof s_gpu.imm_attr);
     s_gpu.imm_count++;
 }
@@ -3546,8 +3559,10 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
     case NV097_INLINE_ARRAY:
         /* Vertex data, not a pointer to it. Buffered rather than decoded here
          * because the format is only fully known at END. */
-        if (s_gpu.prim && s_gpu.inline_count < NV_MAX_INLINE)
+        if (s_gpu.prim) {
+            require_batch_space("inline", s_gpu.inline_count, 1, NV_MAX_INLINE);
             s_gpu.inline_buf[s_gpu.inline_count++] = param;
+        }
         break;
 
     case NV097_DRAW_ARRAYS: {
@@ -3565,14 +3580,16 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
 
         if (!s_gpu.prim)
             break;
-        for (i = 0; i < count && s_gpu.idx_count < NV_MAX_INDICES; i++)
+        require_batch_space("index", s_gpu.idx_count, count, NV_MAX_INDICES);
+        for (i = 0; i < count; i++)
             s_gpu.idx[s_gpu.idx_count++] = start + i;
         break;
     }
 
     case NV097_ARRAY_ELEMENT16:
         /* Two 16-bit indices per parameter word. */
-        if (s_gpu.prim && s_gpu.idx_count + 2 <= NV_MAX_INDICES) {
+        if (s_gpu.prim) {
+            require_batch_space("index", s_gpu.idx_count, 2, NV_MAX_INDICES);
             s_gpu.idx[s_gpu.idx_count++] = (uint16_t)(param & 0xFFFF);
             s_gpu.idx[s_gpu.idx_count++] = (uint16_t)(param >> 16);
         }
@@ -3580,10 +3597,7 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
 
     case NV097_ARRAY_ELEMENT32:
         if (s_gpu.prim) {
-            if (s_gpu.idx_count >= NV_MAX_INDICES) {
-                fprintf(stderr, "[STOP] NV097 index batch exceeds existing capacity\n");
-                exit(5);
-            }
+            require_batch_space("index", s_gpu.idx_count, 1, NV_MAX_INDICES);
             s_gpu.idx[s_gpu.idx_count++] = param;
         }
         break;

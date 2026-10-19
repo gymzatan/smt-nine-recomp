@@ -949,6 +949,90 @@ static void verify_fixed_texgen_route(void) {
     }
     fprintf(stderr,"[FIXED TEXGEN] original methods route XYZRHW through fixed vertex consumer; all stage/component and matrix bindings exact; pixels preserved\n");
 }
+static void verify_batch_boundary(const char *producer) {
+    seed();method(NV097_SET_BEGIN_END,5);
+    if(!strcmp(producer,"inline")) {
+        for(unsigned i=0;i<NV2A_MAX_BATCH_LENGTH;i++)method(NV097_INLINE_ARRAY,i);
+        assert(s_gpu.inline_count==NV2A_MAX_BATCH_LENGTH);
+        assert(s_gpu.inline_buf[NV2A_MAX_BATCH_LENGTH-1]==NV2A_MAX_BATCH_LENGTH-1);
+        fprintf(stderr,"[BATCH BOUNDARY] full inline payload retained\n");
+        method(NV097_INLINE_ARRAY,0);
+    } else if(!strcmp(producer,"immediate")) {
+        for(unsigned i=0;i<NV2A_MAX_BATCH_LENGTH/64;i++)for(unsigned j=0;j<4;j++)method(NV097_SET_VERTEX4F+j*4,0);
+        assert(s_gpu.imm_count==NV2A_MAX_BATCH_LENGTH/64);
+        fprintf(stderr,"[BATCH BOUNDARY] full immediate payload retained\n");
+        method(NV097_SET_VERTEX4F+12,0);
+    } else {
+        unsigned i=0;
+        if(!strcmp(producer,"array16")) {
+            for(;i+1<NV2A_MAX_BATCH_LENGTH;i+=2)method(NV097_ARRAY_ELEMENT16,(i&0xffff)|(((i+1)&0xffff)<<16));
+        } else if(!strcmp(producer,"draw")) {
+            for(;i+255<NV2A_MAX_BATCH_LENGTH;i+=256)method(NV097_DRAW_ARRAYS,i|(255u<<24));
+        }
+        for(;i<NV2A_MAX_BATCH_LENGTH;i++)method(NV097_ARRAY_ELEMENT32,i);
+        assert(s_gpu.idx_count==NV2A_MAX_BATCH_LENGTH && s_gpu.idx[s_gpu.idx_count-1]==NV2A_MAX_BATCH_LENGTH-1);
+        fprintf(stderr,"[BATCH BOUNDARY] full index payload retained\n");
+        method(!strcmp(producer,"array16")?NV097_ARRAY_ELEMENT16:!strcmp(producer,"draw")?NV097_DRAW_ARRAYS:NV097_ARRAY_ELEMENT32,0);
+    }
+    assert(!"over-capacity producer must report its bound");
+}
+static void verify_large_batch(const char *producer) {
+    enum { count=6000 };
+    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+    method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_DEPTH_MASK,0);
+    struct Vertex {float position[4];uint32_t color;} *data=(void *)(xbox_GetMemoryOffset()+0x80040000u);
+    for(unsigned i=0;i<count;i++) {
+        data[i]=(struct Vertex){{i%3==1?8.0f:0.0f,i%3==2?8.0f:0.0f,1,1},0xffff0000};
+    }
+    for(unsigned primitive=5;primitive<=10;primitive++) {
+        unsigned before=s_gpu.verts;
+        method(NV097_SET_PROVOKING_VERTEX,1);
+        method(NV097_SET_BEGIN_END,primitive);
+        if(!strcmp(producer,"array32")) {
+            for(unsigned i=0;i<count;i++)method(NV097_ARRAY_ELEMENT32,i);
+        } else if(!strcmp(producer,"array16")) {
+            for(unsigned i=0;i<count;i+=2)method(NV097_ARRAY_ELEMENT16,i|((i+1)<<16));
+        } else if(!strcmp(producer,"draw")) {
+            for(unsigned i=0;i<count;i+=200)method(NV097_DRAW_ARRAYS,i|(199u<<24));
+        } else if(!strcmp(producer,"inline")) {
+            for(unsigned i=0;i<count;i++)for(unsigned word=0;word<5;word++)method(NV097_INLINE_ARRAY,((uint32_t *)&data[i])[word]);
+            assert(s_gpu.inline_count==count*5);
+        } else {
+            method(NV097_SET_VERTEX_DATA4UB+3*4,0xff0000ff);
+            for(unsigned i=0;i<count;i++)for(unsigned word=0;word<4;word++)method(NV097_SET_VERTEX4F+word*4,((uint32_t *)&data[i])[word]);
+            assert(s_gpu.imm_count==count);
+        }
+        if(strcmp(producer,"inline") && strcmp(producer,"immediate")) {
+            assert(s_gpu.idx_count==count);
+            for(unsigned i=0;i<count;i++)assert(s_gpu.idx[i]==i);
+        }
+        method(NV097_SET_BEGIN_END,0);
+        assert(s_gpu.verts==before+count && s_hw_program_vertex_count==count);
+        unsigned char *expected=malloc(count*(32+24));assert(expected);
+        for(unsigned i=0;i<count;i++) {
+            memcpy(expected+i*32,data[i].position,16);
+            const float red[4]={1,0,0,1};memcpy(expected+i*32+16,red,16);
+        }
+        uint32_t *indices=(uint32_t *)(expected+count*32);unsigned used=0;
+        for(unsigned i=0;i<count;i++) {
+            unsigned a,b,c,p;
+            if(primitive==5) {if(i%3 || i+2>=count)continue;a=i;b=i+1;c=i+2;p=i;}
+            else if(primitive==6) {if(i+2>=count)continue;a=i+(i&1);b=i+1-(i&1);c=i+2;p=i;}
+            else if(primitive==7 || primitive==10) {if(!i || i+1>=count)continue;a=0;b=i;c=i+1;p=primitive==10?i+1:0;}
+            else {
+                unsigned step=primitive==8?4:2;if(i%step || i+3>=count)continue;
+                a=i;b=i+1;c=primitive==8?i+2:i+3;p=i+3;
+                indices[used++]=a;indices[used++]=p;indices[used++]=b;indices[used++]=p;indices[used++]=c;indices[used++]=p;
+                b=c;c=primitive==8?i+3:i+2;
+            }
+            indices[used++]=a;indices[used++]=p;indices[used++]=b;indices[used++]=p;indices[used++]=c;indices[used++]=p;
+        }
+        verify_vertex_bytes(expected,count*32+used*4,count*32,32);free(expected);
+        nv2a_pb_checkpoint_publish();
+        assert(BRIDGE_MEM32(0x80020000u)==0xffff0000);
+    }
+    fprintf(stderr,"[LARGE BATCH] %s: 6000 vertices, six topologies, complete native payload and pixels passed\n",producer);
+}
 int main(int argc,char **argv) {
     assert(argc==6);_putenv_s("RECOMP_GUEST_LOCK","1");_putenv_s("RECOMP_GPU_D3D11",argv[5]);
     const char *render_scale=getenv("RECOMP_RENDER_SCALE");
@@ -959,7 +1043,11 @@ int main(int argc,char **argv) {
     NV2AState *gpu=nv2a_init_standalone((void *)xbox_GetMemoryOffset(),0x04000000,
                          (void *)(xbox_GetMemoryOffset()+0xfd700000u),0x100000);assert(gpu);
     gpu->pfifo.method_consumer=nv2a_pb_exec_method;assert(xbox_CheckpointBootstrapBegin());
-    if(!strcmp(argv[1],"fixed-texgen")) {
+    if(!strncmp(argv[1],"boundary-",9)) {
+        verify_batch_boundary(argv[1]+9);
+    } else if(!strncmp(argv[1],"large-",6)) {
+        verify_large_batch(argv[1]+6);
+    } else if(!strcmp(argv[1],"fixed-texgen")) {
         verify_fixed_texgen_route();
     } else if(!strcmp(argv[1],"vertex-payload")) {
         verify_vertex_payloads();
@@ -1060,7 +1148,7 @@ static HRESULT readback_map_for_test(ID3D11DeviceContext *context,ID3D11Resource
         '/I'+str(root/'src'),'/I'+str(root/'src/kernel'),'/I'+str(root/'src/d3d'),str(work/'gpu.c'),str(work/'resources_counted.c'),str(work/'combiner_counted.c'),
         '/Fe:'+str(work/'gpu.exe'),'/link','/OPT:REF',*[str(p) for p in libraries],
         'kernel32.lib','user32.lib','gdi32.lib','advapi32.lib','ole32.lib','shell32.lib',
-        'd3d11.lib','dxgi.lib','dxguid.lib','d3dcompiler.lib','winmm.lib','xaudio2_8.lib',
+        'd3d11.lib','d3d12.lib','dxgi.lib','dxguid.lib','d3dcompiler.lib','winmm.lib','xaudio2_8.lib',
         'xinput.lib','bcrypt.lib','ntdll.lib','userenv.lib','ws2_32.lib'],
         cwd=work,capture_output=True,text=True,errors='replace')
     assert result.returncode==0,result.stdout+result.stderr
@@ -1269,3 +1357,24 @@ def test_original_linear_texgen_fixed_consumer(native_gpu,tmp_path,backend):
         capture_output=True,text=True,errors='replace',timeout=30)
     assert result.returncode==0,result.stdout+result.stderr
     assert '[FIXED TEXGEN]' in result.stderr
+
+
+@pytest.mark.parametrize('producer',['array32','array16','draw','inline','immediate'])
+@pytest.mark.parametrize('backend',['D3D11','D3D12','Vulkan','OpenGL'])
+def test_large_batches_preserve_geometry(native_gpu,tmp_path,producer,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'large-'+producer,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[LARGE BATCH]' in result.stderr
+
+
+@pytest.mark.parametrize('producer',['array32','array16','draw','inline','immediate'])
+def test_batch_capacity_boundary_is_explicit(native_gpu,tmp_path,producer):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'boundary-'+producer,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
+        capture_output=True,text=True,errors='replace',timeout=30)
+    assert result.returncode==5,result.stdout+result.stderr
+    assert '[BATCH BOUNDARY] full' in result.stderr
+    assert 'batch exceeds NV2A capacity:' in result.stderr
