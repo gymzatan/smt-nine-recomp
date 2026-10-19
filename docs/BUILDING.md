@@ -14,13 +14,9 @@
 
 Gameplay hardware requirements and the limits of current GPU/VRAM verification are listed in the [README](../README.md#system-requirements). The RAM/disk guidance above is for building.
 
-The supported unmodified Japanese ISO is 2,188,050,432 bytes with SHA-256:
+The initial build accepts unmodified Japanese game data in a bare game-partition XISO (`.xiso.iso` or `.iso`) or a full-disc ISO dump containing the video partition. The existing XDVDFS reader automatically locates the game partition from its descriptor; no conversion or format option is needed. Use `build.cmd --iso "path to your image"` for either layout.
 
-```text
-eafcd00e7fbc53bb10a0ac5743faf2d5ea3e1be9f7351ddb3e97b3c8d916d446
-```
-
-Its `default.xbe` SHA-256 is `6c249401369ed41c2a319762f0b56b80aefde3efe766ac0d8731889a4150deac`. The complete 3,515-file identity list is in `config/retail.json`. Supply this disc image yourself. Other dumps or modified images are rejected by the initial build; externally translated images use the separate Config import flow.
+The whole-disc checksum is not an acceptance requirement: padding, sector arrangement and the video partition can differ. Every extracted game file is still checked against the complete 3,515-file manifest in `config/retail.json`; modified, missing, unexpected or repeated files fail explicitly. The original `default.xbe` SHA-256 is `6c249401369ed41c2a319762f0b56b80aefde3efe766ac0d8731889a4150deac`. Supply the image yourself; externally translated images use the separate Config import flow, which uses the same layout detection.
 
 ## Build
 

@@ -45,6 +45,8 @@ Config.exe
 smt9_recomp.exe
 ```
 
+Both bare XISO (`.xiso.iso` or `.iso`) and full-disc ISO dumps are detected automatically by `--iso`. No conversion is needed; the extracted original game files are verified instead of requiring one whole-disc checksum.
+
 To include Chinese, add the option to the initial build command:
 
 ```bat

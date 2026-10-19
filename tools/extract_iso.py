@@ -1,4 +1,4 @@
-"""Extract a user-supplied retail disc with xboxrecomp's existing XDVDFS reader."""
+"""Extract and verify retail game files from an automatically detected XISO or full-disc ISO."""
 from pathlib import Path, PurePosixPath
 import argparse
 import json
@@ -10,7 +10,7 @@ from tools.xiso.xdvdfs import Xiso
 
 
 def verify_existing(destination):
-    """Verify installed retail inputs using the extraction manifest, without writes."""
+    """Verify installed retail inputs using the resource manifest, without writes."""
     identity = json.loads((ROOT/'config/retail.json').read_text())
     for row in identity['files']:
         target = Path(destination).joinpath(*PurePosixPath(row['path']).parts)
@@ -22,11 +22,11 @@ def verify_existing(destination):
 def extract(iso_path, destination):
     destination = Path(destination)
     identity = json.loads((ROOT/'config/retail.json').read_text())
-    if digest(iso_path) != identity['iso_sha256']:
-        raise ValueError('Unsupported retail ISO identity; see docs/BUILDING.md.')
     expected = {row['path']: row for row in identity['files']}
     seen = set()
     with Xiso(str(iso_path)) as image:
+        layout = 'XISO (bare game partition)' if image.base == 0 else 'full-disc ISO'
+        print(f'Detected {layout}; game partition at 0x{image.base:X}. Verifying retail files.', flush=True)
         for directory, entry in image.walk():
             relative = PurePosixPath(directory)/entry.name
             if relative.is_absolute() or any(part in ('.', '..') or ':' in part or '\\' in part for part in relative.parts):

@@ -52,7 +52,7 @@ def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese):
     def generate(image,destination):
         assert image.is_file();calls.append('generation');write('build/generated/shared.c')
     modules={
-        'extract_iso':SimpleNamespace(extract=extract,verify_existing=lambda destination:{'iso_sha256':build.digest(iso)}),
+        'extract_iso':SimpleNamespace(extract=extract,verify_existing=lambda destination:{'iso_sha256':'reference-container-with-identical-game-files'}),
         'prepare_fonts':SimpleNamespace(prepare=fonts),
         'prepare_resources':SimpleNamespace(scripts=scripts,
             rts=lambda *args:write('data/chinese/Media/RTS/Scripts/RTSScript.bin'),
@@ -81,6 +81,10 @@ def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese):
     assert not {'ffmpeg','ffprobe'} & set(calls[previous_calls:])
     assert all(p.read_bytes()==content for p,content in protected.items())
     assert json.loads((tmp_path/'build/completion.json').read_text())['with_chinese']==chinese
+    assert json.loads((tmp_path/'build/completion.json').read_text())['iso_sha256']==build.digest(iso)
+    other_iso=write('other-container.iso');other_iso.write_bytes(b'different container')
+    with pytest.raises(ValueError,match='Resume ISO differs'):
+        build.build(other_iso,2,resume=True,with_chinese=chinese)
     with pytest.raises(ValueError,match='same --with-chinese'):
         build.build(iso,2,resume=True,with_chinese=not chinese)
     progress_path=tmp_path/'build/progress.json'

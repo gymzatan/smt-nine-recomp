@@ -19,10 +19,8 @@ def build(iso, jobs, resume=False, with_chinese=False, update=False):
     progress_path=ROOT/'build/progress.json'
     if update:
         from extract_iso import verify_existing
-        identity = verify_existing(japanese)
+        verify_existing(japanese)
         progress=json.loads(progress_path.read_text())
-        if progress['iso_sha256'] != identity['iso_sha256']:
-            raise ValueError('Installed retail identity differs from build progress')
         previous=json.loads((ROOT/'build/completion.json').read_text())
         recorded=previous.get('with_chinese',progress.get('with_chinese'))
         if recorded is None:
