@@ -3919,6 +3919,17 @@ int nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param, uint8_t
     return nv2a_pb_exec_state(method, param, output);
 }
 
+/* Both modes collect the same ordered completion queries. */
+void nv2a_pb_request_progress(void)
+{
+#if defined(_WIN32)
+    if (ReadAcquire64(&s_hw_query_count)) {
+        NV2AState *d=nv2a_get_state();
+        if (d && d->pfifo.thread.thread) nv2a_fifo_kick(d);
+        else if (hw_enabled()) hw_collect_queries(0);
+    }
+#endif
+}
 void nv2a_pb_progress(void)
 {
 #if defined(_WIN32)

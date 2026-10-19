@@ -15,6 +15,104 @@
  * The existing guest-memory renderer consumes resolved NV097 methods.
  */
 #include "nv2a_state.h"
+#include "kernel/kernel.h"
+
+extern void nv2a_pb_progress(void);
+static HANDLE s_fifo_ready, s_fifo_wake;
+
+/* The original PFIFO queue is the work queue. Submission only wakes its
+ * single consumer; GET still advances inside the original parser. */
+void nv2a_fifo_kick(NV2AState *d)
+{
+    if (!d->pfifo.thread.thread) {
+        nv2a_fifo_run(d);
+        return;
+    }
+    if (!ReadAcquire(&d->pfifo.fifo_kick) &&
+        !InterlockedExchange(&d->pfifo.fifo_kick, 1)) SetEvent(s_fifo_wake);
+}
+
+static DWORD WINAPI nv2a_fifo_worker(LPVOID opaque)
+{
+    NV2AState *d = opaque;
+    xbox_CheckpointDeviceEnter(XBOX_CHECKPOINT_GPU);
+    xbox_CheckpointDeviceLeave(XBOX_CHECKPOINT_GPU);
+    SetEvent(s_fifo_ready);
+    for (;;) {
+        if (WaitForSingleObject(s_fifo_wake, INFINITE) != WAIT_OBJECT_0) {
+            fprintf(stderr, "[STOP] PFIFO work wait failed\n");
+            exit(5);
+        }
+        qemu_mutex_lock(&d->pfifo.lock);
+        bool exiting = d->exiting;
+        qemu_mutex_unlock(&d->pfifo.lock);
+        if (exiting) break;
+
+        /* Never hold the device lock while waiting for checkpoint thaw. */
+        xbox_CheckpointDeviceEnter(XBOX_CHECKPOINT_GPU);
+        qemu_mutex_lock(&d->pfifo.lock);
+        InterlockedExchange(&d->pfifo.fifo_kick, 0);
+        nv2a_fifo_run(d);
+        nv2a_pb_progress();
+        qemu_cond_broadcast(&d->pfifo.fifo_idle_cond);
+        qemu_mutex_unlock(&d->pfifo.lock);
+        xbox_CheckpointDeviceLeave(XBOX_CHECKPOINT_GPU);
+    }
+    return 0;
+}
+
+int nv2a_fifo_start(NV2AState *d, int threaded)
+{
+    if (!d || d->pfifo.thread.thread) return 0;
+    if (!threaded) {
+        fprintf(stderr, "[PFIFO] graphics commands run on the guest execution thread\n");
+        return 1;
+    }
+    s_fifo_wake = CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (!s_fifo_wake) return 0;
+    s_fifo_ready = CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (!s_fifo_ready) { CloseHandle(s_fifo_wake);s_fifo_wake = NULL;return 0; }
+    d->exiting = false;
+    xbox_CheckpointDeviceCreating(XBOX_CHECKPOINT_GPU);
+    d->pfifo.thread.thread = CreateThread(NULL, 0, nv2a_fifo_worker, d, 0, NULL);
+    if (!d->pfifo.thread.thread) {
+        xbox_CheckpointDeviceCreated(XBOX_CHECKPOINT_GPU);
+        CloseHandle(s_fifo_ready);s_fifo_ready = NULL;
+        CloseHandle(s_fifo_wake);s_fifo_wake = NULL;
+        return 0;
+    }
+    DWORD result = WaitForSingleObject(s_fifo_ready, INFINITE);
+    CloseHandle(s_fifo_ready);s_fifo_ready = NULL;
+    if (result != WAIT_OBJECT_0) {
+        fprintf(stderr, "[STOP] PFIFO worker startup wait failed\n");
+        exit(5);
+    }
+    fprintf(stderr, "[PFIFO] ordered graphics consumer running on a host thread\n");
+    return 1;
+}
+
+void nv2a_fifo_wait_idle(NV2AState *d)
+{
+    qemu_mutex_lock(&d->pfifo.lock);
+    while (ReadAcquire(&d->pfifo.fifo_kick))
+        qemu_cond_wait(&d->pfifo.fifo_idle_cond, &d->pfifo.lock);
+    qemu_mutex_unlock(&d->pfifo.lock);
+}
+
+void nv2a_fifo_stop(NV2AState *d)
+{
+    if (!d || !d->pfifo.thread.thread) return;
+    qemu_mutex_lock(&d->pfifo.lock);
+    d->exiting = true;
+    SetEvent(s_fifo_wake);
+    qemu_mutex_unlock(&d->pfifo.lock);
+    if (WaitForSingleObject(d->pfifo.thread.thread, INFINITE) != WAIT_OBJECT_0) {
+        fprintf(stderr, "[STOP] PFIFO worker shutdown wait failed\n");
+        exit(5);
+    }
+    CloseHandle(d->pfifo.thread.thread);d->pfifo.thread.thread = NULL;
+    CloseHandle(s_fifo_wake);s_fifo_wake = NULL;
+}
 
 static void fifo_stop(NV2AState *d, const char *reason, uint32_t word)
 {
@@ -44,8 +142,13 @@ static uint32_t user_register(NV2AState *d, hwaddr addr, unsigned size)
 uint64_t user_read(void *opaque, hwaddr addr, unsigned size)
 {
     NV2AState *d = opaque;
+    /* Channel/mode are set by the serialized guest CPU. GET and PUT are
+     * the original queue's release/acquire ownership boundary. */
+    uint32_t reg = user_register(d, addr, size);
+    if (reg == NV_PFIFO_CACHE1_DMA_GET || reg == NV_PFIFO_CACHE1_DMA_PUT)
+        return (uint32_t)ReadAcquire((volatile LONG *)&d->pfifo.regs[reg]);
     qemu_mutex_lock(&d->pfifo.lock);
-    uint32_t value = d->pfifo.regs[user_register(d, addr, size)];
+    uint32_t value = d->pfifo.regs[reg];
     qemu_mutex_unlock(&d->pfifo.lock);
     return value;
 }
@@ -53,9 +156,15 @@ uint64_t user_read(void *opaque, hwaddr addr, unsigned size)
 void user_write(void *opaque, hwaddr addr, uint64_t value, unsigned size)
 {
     NV2AState *d = opaque;
+    uint32_t reg = user_register(d, addr, size);
+    if (reg == NV_PFIFO_CACHE1_DMA_PUT && d->pfifo.thread.thread) {
+        WriteRelease((volatile LONG *)&d->pfifo.regs[reg], (LONG)value);
+        nv2a_fifo_kick(d);
+        return;
+    }
     qemu_mutex_lock(&d->pfifo.lock);
-    d->pfifo.regs[user_register(d, addr, size)] = (uint32_t)value;
-    nv2a_fifo_run(d);
+    WriteRelease((volatile LONG *)&d->pfifo.regs[reg], (LONG)value);
+    nv2a_fifo_kick(d);
     qemu_mutex_unlock(&d->pfifo.lock);
 }
 
@@ -125,7 +234,7 @@ void nv2a_fifo_run(NV2AState *d)
     if (!(regs[NV_PFIFO_MODE] & (1u << channel)) ||
         !GET_MASK(regs[NV_PFIFO_CACHE1_PUSH1], NV_PFIFO_CACHE1_PUSH1_MODE))
         fifo_stop(d, "active pusher is not in DMA mode", channel);
-    if (regs[NV_PFIFO_CACHE1_DMA_GET] == regs[NV_PFIFO_CACHE1_DMA_PUT])
+    if (regs[NV_PFIFO_CACHE1_DMA_GET] == (uint32_t)ReadAcquire((volatile LONG *)&regs[NV_PFIFO_CACHE1_DMA_PUT]))
         return;
     hwaddr instance = GET_MASK(regs[NV_PFIFO_CACHE1_DMA_INSTANCE], NV_PFIFO_CACHE1_DMA_INSTANCE_ADDRESS) << 4;
     if (instance + 12 > memory_region_size(&d->ramin))
@@ -137,7 +246,7 @@ void nv2a_fifo_run(NV2AState *d)
     hwaddr dma_extent = memory_region_size(d->vram) - (hwaddr)(dma - d->vram_ptr);
     if (dma_length < dma_extent)
         dma_extent = dma_length + 1;
-    while (regs[NV_PFIFO_CACHE1_DMA_GET] != regs[NV_PFIFO_CACHE1_DMA_PUT]) {
+    while (regs[NV_PFIFO_CACHE1_DMA_GET] != (uint32_t)ReadAcquire((volatile LONG *)&regs[NV_PFIFO_CACHE1_DMA_PUT])) {
         uint32_t get = regs[NV_PFIFO_CACHE1_DMA_GET];
         if ((get & 3) || (hwaddr)get + 4 > dma_extent)
             fifo_stop(d, "DMA read outside mapped data", get);
@@ -155,17 +264,19 @@ void nv2a_fifo_run(NV2AState *d)
                 regs[NV_PFIFO_CACHE1_DMA_DATA_SHADOW] = word;
                 regs[NV_PFIFO_CACHE1_STATUS] &= ~NV_PFIFO_CACHE1_STATUS_LOW_MARK;
                 consume_method(d, subchannel, method, word);
+                uint32_t next_state = *state;
                 if (increment) {
                     method = (method + 4) & NV_PFIFO_CACHE1_DMA_STATE_METHOD;
-                    SET_MASK(*state, NV_PFIFO_CACHE1_DMA_STATE_METHOD, method >> 2);
+                    SET_MASK(next_state, NV_PFIFO_CACHE1_DMA_STATE_METHOD, method >> 2);
                 }
-                SET_MASK(*state, NV_PFIFO_CACHE1_DMA_STATE_METHOD_COUNT, --count);
+                SET_MASK(next_state, NV_PFIFO_CACHE1_DMA_STATE_METHOD_COUNT, --count);
+                *state = next_state;
                 regs[NV_PFIFO_CACHE1_DMA_DCOUNT]++;
                 regs[NV_PFIFO_CACHE1_STATUS] |= NV_PFIFO_CACHE1_STATUS_LOW_MARK;
-                regs[NV_PFIFO_CACHE1_DMA_GET] = next;
+                WriteRelease((volatile LONG *)&regs[NV_PFIFO_CACHE1_DMA_GET], (LONG)next);
                 if (d->pgraph.waiting_for_nop)
                     return;
-                if (!count || next == regs[NV_PFIFO_CACHE1_DMA_PUT])
+                if (!count || next == (uint32_t)ReadAcquire((volatile LONG *)&regs[NV_PFIFO_CACHE1_DMA_PUT]))
                     break;
                 get = next;
                 if ((get & 3) || (hwaddr)get + 4 > dma_extent)
@@ -204,7 +315,7 @@ void nv2a_fifo_run(NV2AState *d)
                 fifo_stop(d, "reserved DMA command", word);
             }
         }
-        regs[NV_PFIFO_CACHE1_DMA_GET] = next;
+        WriteRelease((volatile LONG *)&regs[NV_PFIFO_CACHE1_DMA_GET], (LONG)next);
         if (d->pgraph.waiting_for_nop)
             return;
     }

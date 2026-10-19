@@ -76,9 +76,11 @@ static inline int ctz32(uint32_t val) {
 }
 
 /* GET_MASK/SET_MASK - defined here, guarded in nv2a_regs.h */
-#define GET_MASK(v, mask) (((v) & (mask)) >> ctz32(mask))
+/* The lowest mask bit is a power of two. Constant masks therefore fold to
+ * immediate shifts even on MSVC, which retains _BitScanForward for ctz32. */
+#define GET_MASK(v, mask) (((v) & (mask)) / ((uint32_t)(mask) & (0u - (uint32_t)(mask))))
 #define SET_MASK(v, mask, val) \
-    do { (v) &= ~(mask); (v) |= ((val) << ctz32(mask)) & (mask); } while (0)
+    do { (v) &= ~(mask); (v) |= ((val) * ((uint32_t)(mask) & (0u - (uint32_t)(mask)))) & (mask); } while (0)
 
 /* muldiv64: (a * b) / c with 128-bit intermediate */
 #ifdef _MSC_VER

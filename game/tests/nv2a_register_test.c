@@ -52,6 +52,11 @@ static uint8_t *fixture_shared_ram(size_t bytes)
 }
 ptrdiff_t g_xbox_mem_offset;
 int xbox_CheckpointFrozen(void) { return 0; }
+static SRWLOCK s_fixture_devices=SRWLOCK_INIT;
+void xbox_CheckpointDeviceEnter(unsigned device) { (void)device;AcquireSRWLockShared(&s_fixture_devices); }
+void xbox_CheckpointDeviceLeave(unsigned device) { (void)device;ReleaseSRWLockShared(&s_fixture_devices); }
+void xbox_CheckpointDeviceCreating(unsigned device) { (void)device; }
+void xbox_CheckpointDeviceCreated(unsigned device) { (void)device; }
 static int s_test_clock;
 static LONGLONG s_test_counter;
 void xbox_RuntimePerformanceCounter(LARGE_INTEGER *counter) {
@@ -1039,8 +1044,99 @@ static int check_vblank_clock(NV2AState *gpu)
     return 0;
 }
 
+static int check_register_masks(void)
+{
+    uint32_t random=0x12345678u;
+    for(unsigned shift=0;shift<32;shift++) {
+        for(unsigned width=1;width<=32-shift;width++) {
+            uint32_t mask=(UINT32_MAX>>(32-width))<<shift;
+            for(unsigned sample=0;sample<128;sample++) {
+                random=random*1664525u+1013904223u;
+                uint32_t value=random, field=random^0xa5a5a5a5u, actual=value;
+                assert(GET_MASK(value,mask)==((value&mask)>>shift));
+                SET_MASK(actual,mask,field);
+                assert(actual==((value&~mask)|((field<<shift)&mask)));
+                uint64_t wide=((uint64_t)value<<32)|field;
+                assert(GET_MASK(wide,mask)==((wide&mask)>>shift));
+            }
+        }
+    }
+    for(unsigned sample=0;sample<10000;sample++) {
+        random=random*1664525u+1013904223u;
+        uint32_t mask=random?random:1u, value=random^0xdeadbeefu, actual=value;
+        unsigned shift=0;
+        while(!(mask&(1u<<shift)))++shift;
+        assert(GET_MASK(value,mask)==((value&mask)>>shift));
+        SET_MASK(actual,mask,value);
+        assert(actual==((value&~mask)|((value<<shift)&mask)));
+    }
+    fprintf(stderr,"[MASK] every contiguous 32-bit field and 10000 sparse masks preserve extraction and insertion\n");
+    return 0;
+}
+
+static HANDLE s_worker_entered,s_worker_continue;
+static DWORD s_worker_consumer_thread;
+static int consume_worker_packet(uint32_t subchannel,uint32_t method,uint32_t parameter,uint8_t *output)
+{
+    s_worker_consumer_thread=GetCurrentThreadId();
+    if(!s_packet_seen && s_worker_entered) {
+        SetEvent(s_worker_entered);
+        assert(WaitForSingleObject(s_worker_continue,5000)==WAIT_OBJECT_0);
+    }
+    return consume_packet(subchannel,method,parameter,output);
+}
+static int check_fifo_worker(NV2AState *gpu,uint8_t *ram,uint8_t *ramin)
+{
+    check_fifo_packets(gpu,ram,ramin);
+    uint32_t *r=gpu->pfifo.regs,*commands=(uint32_t *)ram;
+    s_packet_seen=0;s_packet_total=16;s_packet_increment=0;s_packet_stop=0;
+    commands[0]=0x40000000u|(16u<<18)|(3u<<13)|0xB80;
+    for(unsigned i=0;i<16;i++)commands[i+1]=0x43210000+i;
+    r[NV_PFIFO_CACHE1_DMA_GET]=r[NV_PFIFO_CACHE1_DMA_PUT]=r[NV_PFIFO_CACHE1_DMA_STATE]=0;
+    r[NV_PFIFO_CACHE1_DMA_DCOUNT]=0;
+    gpu->pfifo.method_consumer=consume_worker_packet;
+    s_worker_entered=CreateEvent(NULL,FALSE,FALSE,NULL);
+    s_worker_continue=CreateEvent(NULL,FALSE,FALSE,NULL);
+    assert(s_worker_entered && s_worker_continue && nv2a_fifo_start(gpu, 1));
+    AcquireSRWLockExclusive(&s_fixture_devices);
+    /* A frozen worker cannot consume
+     * or acknowledge these submitted bytes until the device barrier opens. */
+    nv2a_mmio_write(gpu,0x800040,36,4);
+    assert(nv2a_mmio_read(gpu,0x800044,4)==0 && s_packet_seen==0);
+    ReleaseSRWLockExclusive(&s_fixture_devices);
+    assert(WaitForSingleObject(s_worker_entered,5000)==WAIT_OBJECT_0);
+    assert(s_worker_consumer_thread!=GetCurrentThreadId());
+    assert(r[NV_PFIFO_CACHE1_DMA_GET]==4 && s_packet_seen==0);
+    assert(nv2a_mmio_read(gpu,0x800044,4)==4);
+    nv2a_mmio_write(gpu,0x100410,0x10000,4);
+    assert(nv2a_mmio_read(gpu,0x100410,4)==0);
+    nv2a_mmio_write(gpu,0x800040,36,4); /* PUT must not wait for the blocked consumer. */
+    SetEvent(s_worker_continue);nv2a_fifo_wait_idle(gpu);
+    assert(s_packet_seen==8 && r[NV_PFIFO_CACHE1_DMA_GET]==36);
+    CloseHandle(s_worker_entered);s_worker_entered=NULL;CloseHandle(s_worker_continue);
+    nv2a_mmio_write(gpu,0x800040,68,4);nv2a_fifo_wait_idle(gpu);
+    assert(s_packet_seen==16 && r[NV_PFIFO_CACHE1_DMA_GET]==68);
+    for(unsigned round=0;round<100;round++) {
+        qemu_mutex_lock(&gpu->pfifo.lock);
+        s_packet_seen=0;s_packet_stop=1;
+        r[NV_PFIFO_CACHE1_DMA_GET]=r[NV_PFIFO_CACHE1_DMA_STATE]=0;
+        nv2a_fifo_kick(gpu);qemu_mutex_unlock(&gpu->pfifo.lock);
+        nv2a_fifo_wait_idle(gpu);
+        assert(s_packet_seen==3 && r[NV_PFIFO_CACHE1_DMA_GET]==16);
+        qemu_mutex_lock(&gpu->pfifo.lock);
+        gpu->pgraph.waiting_for_nop=false;nv2a_fifo_kick(gpu);
+        qemu_mutex_unlock(&gpu->pfifo.lock);nv2a_fifo_wait_idle(gpu);
+        assert(s_packet_seen==16 && r[NV_PFIFO_CACHE1_DMA_GET]==68);
+    }
+    nv2a_fifo_stop(gpu);assert(!gpu->pfifo.thread.thread);
+    fprintf(stderr,"[FIFO WORKER] independent consumption, freeze, partial PUT, per-word visibility, 100 pause/resume cycles and shutdown passed\n");
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
+    check_register_masks();
+    if(argc==2 && !strcmp(argv[1],"--register-masks"))return 0;
     if (argc == 2 && !strcmp(argv[1], "--point-geometry"))
         return check_point_geometry(0);
     if(argc==2 && !strcmp(argv[1],"--reject-fixed-spot")) return check_point_geometry(1);
@@ -1052,6 +1148,7 @@ int main(int argc, char **argv)
     uint8_t ram[4096] = {0}, ramin[4096] = {0};
     NV2AState *gpu = nv2a_init_standalone(ram, sizeof(ram), ramin, sizeof(ramin));
     assert(gpu && gpu->vram_ptr == ram && gpu->ramin_ptr == ramin);
+    if(argc==2 && !strcmp(argv[1],"--fifo-worker")) return check_fifo_worker(gpu,ram,ramin);
     if(argc==2 && !strcmp(argv[1],"--fifo-packet-benchmark")) return benchmark_fifo_packets(gpu,ram,ramin);
     if(argc==2 && !strcmp(argv[1],"--fifo-packets")) return check_fifo_packets(gpu,ram,ramin);
     if(argc==2 && !strcmp(argv[1],"--vblank-clock")) return check_vblank_clock(gpu);

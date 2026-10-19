@@ -127,7 +127,7 @@ typedef struct NV2AState {
         QemuThread thread;
         QemuCond fifo_cond;
         QemuCond fifo_idle_cond;
-        bool fifo_kick;
+        volatile LONG fifo_kick;
         bool halt;
         int (*method_consumer)(uint32_t subchannel, uint32_t method, uint32_t parameter, uint8_t *output);
     } pfifo;
@@ -262,5 +262,10 @@ void *nv2a_prepare_checkpoint(FILE *);
 void nv2a_apply_checkpoint(const void *);
 /* Runs the device DMA state machine under pfifo.lock. */
 void nv2a_fifo_run(NV2AState *d);
+/* Kick requires pfifo.lock; start/stop/idle must be called without it. */
+void nv2a_fifo_kick(NV2AState *d);
+int nv2a_fifo_start(NV2AState *d, int threaded);
+void nv2a_fifo_wait_idle(NV2AState *d);
+void nv2a_fifo_stop(NV2AState *d);
 
 #endif /* BURNOUT3_NV2A_STATE_H */

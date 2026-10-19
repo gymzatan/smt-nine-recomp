@@ -591,7 +591,7 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         d->pgraph.regs[addr] = val;
         break;
     }
-    nv2a_fifo_run(d);
+    nv2a_fifo_kick(d);
     qemu_mutex_unlock(&d->pfifo.lock);
 }
 
@@ -1114,7 +1114,7 @@ void pfifo_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         d->pfifo.regs[addr] = val;
         break;
     }
-    nv2a_fifo_run(d);
+    nv2a_fifo_kick(d);
     qemu_mutex_unlock(&d->pfifo.lock);
 }
 
@@ -1243,6 +1243,10 @@ const NV2ABlockInfo blocktable[NV_NUM_BLOCKS] = {
  * MMIO dispatch (for VEH handler integration)
  * ============================================================ */
 
+/* PFB register state is guest-CPU-owned; neither the parser nor renderer
+ * reads it. Its write-combine flush does not wait for GPU completion.
+ * USER owns synchronization for the shared FIFO producer/consumer indices. */
+
 uint64_t nv2a_mmio_read(NV2AState *d, hwaddr addr, unsigned int size)
 {
     /* Find which block handles this address */
@@ -1256,7 +1260,10 @@ uint64_t nv2a_mmio_read(NV2AState *d, hwaddr addr, unsigned int size)
                         blocktable[i].name, (unsigned long long)addr, size);
                 exit(5);
             }
-            return blocktable[i].ops.read(d, block_addr, size);
+            if (i != NV_USER && i != NV_PFB) qemu_mutex_lock(&d->pfifo.lock);
+            uint64_t value = blocktable[i].ops.read(d, block_addr, size);
+            if (i != NV_USER && i != NV_PFB) qemu_mutex_unlock(&d->pfifo.lock);
+            return value;
         }
     }
     fprintf(stderr, "[STOP] unmapped NV2A read: offset=0x%llX size=%u\n",
@@ -1277,7 +1284,9 @@ void nv2a_mmio_write(NV2AState *d, hwaddr addr, uint64_t val, unsigned int size)
                         (unsigned long long)val);
                 exit(5);
             }
+            if (i != NV_USER && i != NV_PFB) qemu_mutex_lock(&d->pfifo.lock);
             blocktable[i].ops.write(d, block_addr, val, size);
+            if (i != NV_USER && i != NV_PFB) qemu_mutex_unlock(&d->pfifo.lock);
             return;
         }
     }
@@ -1350,7 +1359,7 @@ int nv2a_save_checkpoint(FILE *out) {
     for(unsigned i=0;i<NV_NUM_BLOCKS;i++) s->block_mmio[i].opaque=NULL;
     memset(&s->pfifo.lock,0,sizeof s->pfifo.lock);memset(&s->pfifo.thread,0,sizeof s->pfifo.thread);
     memset(&s->pfifo.fifo_cond,0,sizeof s->pfifo.fifo_cond);memset(&s->pfifo.fifo_idle_cond,0,sizeof s->pfifo.fifo_idle_cond);
-    s->pfifo.method_consumer=NULL;
+    s->pfifo.method_consumer=NULL;s->pfifo.fifo_kick=0;
     int ok=fwrite("XBNV2A",6,1,out)==1 && fwrite(saved,sizeof *saved,1,out)==1;
     qemu_mutex_unlock(&d->pfifo.lock);free(saved);return ok;
 }
@@ -1372,9 +1381,10 @@ void nv2a_apply_checkpoint(const void *prepared) {
     d->vga.vram_size=s->vga.vram_size;d->vga.cr_index=s->vga.cr_index;
     memcpy(d->vga.cr,s->vga.cr,sizeof d->vga.cr);memcpy(d->vga.sr,s->vga.sr,sizeof d->vga.sr);
     d->pmc=s->pmc;d->pfifo.pending_interrupts=s->pfifo.pending_interrupts;d->pfifo.enabled_interrupts=s->pfifo.enabled_interrupts;
-    memcpy(d->pfifo.regs,s->pfifo.regs,sizeof d->pfifo.regs);d->pfifo.fifo_kick=s->pfifo.fifo_kick;d->pfifo.halt=s->pfifo.halt;
+    memcpy(d->pfifo.regs,s->pfifo.regs,sizeof d->pfifo.regs);InterlockedExchange(&d->pfifo.fifo_kick,0);d->pfifo.halt=s->pfifo.halt;
     d->pvideo=s->pvideo;d->ptimer=s->ptimer;d->pfb=s->pfb;d->pgraph=s->pgraph;
     d->pcrtc=s->pcrtc;d->pramdac=s->pramdac;d->puserdac=s->puserdac;
     g_ptimer_clock_bias=saved->clock-qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    if (d->pfifo.thread.thread) nv2a_fifo_kick(d);
     qemu_mutex_unlock(&d->pfifo.lock);
 }

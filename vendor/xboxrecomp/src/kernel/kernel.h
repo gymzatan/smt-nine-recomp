@@ -813,7 +813,7 @@ int xbox_RestoreThreadCreationState(const XboxThreadCreationState *);
 enum XboxCheckpointDevice {
     XBOX_CHECKPOINT_TIMER=1, XBOX_CHECKPOINT_USB, XBOX_CHECKPOINT_APU,
     XBOX_CHECKPOINT_ACK, XBOX_CHECKPOINT_VIDEO, XBOX_CHECKPOINT_FRAMEBUFFER,
-    XBOX_CHECKPOINT_DEVICE_COUNT
+    XBOX_CHECKPOINT_GPU, XBOX_CHECKPOINT_DEVICE_COUNT
 };
 void xbox_CheckpointDeviceEnter(unsigned);
 void xbox_CheckpointDeviceLeave(unsigned);

@@ -3,7 +3,7 @@ typedef enum UiText {
     UI_TITLE,UI_BACKEND,UI_SCALE,UI_ASPECT,UI_GAME,UI_REFRESH,UI_SIZE,UI_HINT,
     UI_IMPORT,UI_SAVE,UI_CANCEL,UI_AUTO,UI_WIDE,UI_ULTRAWIDE,UI_IMPORT_TITLE,
     UI_ID,UI_NAME,UI_ID_HINT,UI_CHOOSE,UI_ID_ERROR,UI_DIALOG_ERROR,UI_START_ERROR,
-    UI_BUSY,UI_READY,UI_FAILED,UI_IMPORT_HELP,UI_LOG_ERROR,UI_INTEGER_ERROR,UI_CONTROLS,UI_CONTROLS_BODY,UI_CLOSE,UI_SIZE_CUSTOM,UI_FIXED_ASPECT
+    UI_BUSY,UI_READY,UI_FAILED,UI_IMPORT_HELP,UI_LOG_ERROR,UI_INTEGER_ERROR,UI_CONTROLS,UI_CONTROLS_BODY,UI_CLOSE,UI_SIZE_CUSTOM,UI_FIXED_ASPECT,UI_GRAPHICS,UI_MULTI,UI_SINGLE
 } UiText;
 static const wchar_t *const ui_ids[]={L"Chinese",L"Japanese",L"English"};
 static const wchar_t *const ui_text[][3]={
@@ -39,5 +39,8 @@ static const wchar_t *const ui_text[][3]={
      L"Game button names refer to the original Xbox controller. Each entry lists modern controller / keyboard. Punctuation keys use US keyboard labels.\r\n\r\n[D-pad and sticks]\r\nD-pad up, down, left, right: controller D-pad / arrow keys.\r\nLeft stick up, left, down, right: left stick / W, A, S, D.\r\nRight stick up, left, down, right: right stick / I, J, K, L.\r\nLeft stick press (L3): press left stick / number 1.\r\nRight stick press (R3): press right stick / number 2.\r\n\r\n[Buttons]\r\nGame A: controller A; keyboard . (period).\r\nGame B: controller B; keyboard / (slash).\r\nGame X: controller X; keyboard ; (semicolon).\r\nGame Y: controller Y; keyboard ' (apostrophe).\r\nGame L: LB / Q.\r\nGame R: RB / E.\r\nGame White: controller LT; keyboard [ (left bracket).\r\nGame Black: controller RT; keyboard ] (right bracket).\r\nGame Start: controller Start (Menu); keyboard Right Shift.\r\nGame Back: controller Back (View); keyboard Backspace.\r\n\r\nLT/RT retain pressure; keyboard buttons send full pressure. Follow the current game screen for each button's function.\r\n\r\n[Window and shortcuts]\r\nDouble-click the game picture: toggle borderless fullscreen; double-click again to restore the window's position and size.\r\nF8: save the game picture as BMP in runtime/Screenshots under the program folder, using the game aspect and render height without the title bar.\r\nF9: pause / resume the game, clock and audio. Screenshots and fullscreen switching remain available while paused.\r\nLeft Shift + F1-F5: save instant slots 1-5 respectively.\r\nF1-F5: load instant slots 1-5 respectively.\r\nResume with F9 before using instant states. They require the exact executable and game image used when saving. Keep ordinary saves before updating the program.\r\nClose the game window: exit the game.\r\n\r\nKeyboard, controller and shortcuts work while the game is in the foreground. Interface and game languages are independent. The selector at the top updates this help immediately; Save keeps the choice."},
     {L"关闭",L"閉じる",L"Close"},
     {L"自定义尺寸",L"カスタムサイズ",L"Custom size"},
-    {L"固定窗口宽高比（Fixed Aspect Ratio）",L"ウィンドウの縦横比を固定",L"Fixed Aspect Ratio (when resizing)"}
+    {L"固定窗口宽高比（Fixed Aspect Ratio）",L"ウィンドウの縦横比を固定",L"Fixed Aspect Ratio (when resizing)"},
+    {L"图形处理",L"描画処理",L"Graphics processing"},
+    {L"多线程（默认）",L"マルチスレッド（標準）",L"Multithreaded (default)"},
+    {L"单线程",L"シングルスレッド",L"Single-threaded"}
 };

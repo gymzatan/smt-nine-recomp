@@ -2279,10 +2279,10 @@ static int kernel_raise_interrupt(uint32_t vector)
  * original ISR returns, so its MMIO acknowledgements cannot run more guest
  * methods halfway through notification handling. */
 #define NV2A_VECTOR 3u
-extern void nv2a_pb_progress(void);
+extern void nv2a_pb_request_progress(void);
 static void kernel_nv2a_tick(void)
 {
-    nv2a_pb_progress();
+    nv2a_pb_request_progress();
     NV2AState *gpu = nv2a_get_state();
     if (!gpu) return;
     qemu_mutex_lock(&gpu->pfifo.lock);
@@ -2299,7 +2299,7 @@ static void kernel_nv2a_tick(void)
         if (shown++ < 8)
             fprintf(stderr, "[NV2A] IRQ -> original ISR %s; PGRAPH pending=0x%08X\n",
                     claimed ? "claimed" : "declined", gpu->pgraph.pending_interrupts);
-        nv2a_fifo_run(gpu);
+        nv2a_fifo_kick(gpu);
     }
     qemu_mutex_unlock(&gpu->pfifo.lock);
 }
@@ -10396,7 +10396,7 @@ void guest_cpu_yield(void)
     if (g_checkpoint_hook && t_guest_thread && t_guest_held &&
         !t_dispatch_depth && recomp_cont_active())
         g_checkpoint_hook();
-    if (t_guest_held) nv2a_pb_progress();
+    if (t_guest_held) nv2a_pb_request_progress();
     if (!t_guest_thread || !t_guest_held || t_dispatch_depth)
         return;
     now = GetTickCount64();

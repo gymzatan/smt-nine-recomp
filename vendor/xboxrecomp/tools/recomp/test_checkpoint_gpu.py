@@ -1033,6 +1033,48 @@ static void verify_large_batch(const char *producer) {
     }
     fprintf(stderr,"[LARGE BATCH] %s: 6000 vertices, six topologies, complete native payload and pixels passed\n",producer);
 }
+static void verify_fifo_worker_checkpoint(void) {
+    NV2AState *gpu=nv2a_get_state();
+    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+    gpu->vram_ptr=(uint8_t *)(xbox_GetMemoryOffset()+0x80000000u);
+    uint32_t *object=(uint32_t *)(gpu->ramin_ptr+0x400);
+    object[0]=2;object[1]=4095;object[2]=0x80000;
+    uint32_t *commands=(uint32_t *)(gpu->vram_ptr+0x80000);
+    commands[0]=(1u<<18)|NV097_SET_COLOR_CLEAR_VALUE;commands[1]=0xff445566;
+    commands[2]=(1u<<18)|NV097_CLEAR_SURFACE;commands[3]=0xf0;
+    commands[4]=(1u<<18)|NV097_SET_SEMAPHORE_OFFSET;commands[5]=0x70000;
+    commands[6]=(1u<<18)|NV097_BACK_END_WRITE_SEMAPHORE_RELEASE;commands[7]=0x12345678;
+    method(NV097_SET_CONTEXT_DMA_SEMAPHORE,0x100);
+    BRIDGE_MEM32(0x80070000u)=0;
+    uint32_t *r=gpu->pfifo.regs;
+    r[NV_PFIFO_MODE]=1;r[NV_PFIFO_CACHE1_PUSH1]=0x100;r[NV_PFIFO_CACHE1_PUSH0]=1;
+    r[NV_PFIFO_CACHE1_DMA_PUSH]=1;r[NV_PFIFO_CACHE1_PULL0]=1;r[NV_PFIFO_CACHE1_DMA_INSTANCE]=0x40;
+    r[NV_PFIFO_CACHE1_DMA_GET]=r[NV_PFIFO_CACHE1_DMA_STATE]=0;
+    gpu->pgraph.waiting_for_nop=false;gpu->pgraph.regs[NV_PGRAPH_FIFO]=1;
+    /* Frozen submission remains pending in the canonical saved FIFO. */
+    nv2a_mmio_write(gpu,0x800040,32,4);
+    assert(r[NV_PFIFO_CACHE1_DMA_GET]==0 && BRIDGE_MEM32(0x80070000u)==0);
+    FILE *snapshot=tmpfile(),*devices=tmpfile();assert(snapshot && devices);
+    assert(nv2a_gpu_save_checkpoint(snapshot) && xbox_CheckpointWriteDevices(devices));
+    rewind(devices);assert(xbox_CheckpointLoadDevices(devices));fclose(devices);
+    for(unsigned pass=0;pass<2;pass++) {
+        xbox_CheckpointEnd();nv2a_fifo_wait_idle(gpu);
+        ULONGLONG deadline=GetTickCount64()+5000;
+        while(BRIDGE_MEM32(0x80070000u)!=0x12345678 && GetTickCount64()<deadline) {
+            nv2a_pb_request_progress();Sleep(1);
+        }
+        assert(BRIDGE_MEM32(0x80070000u)==0x12345678);
+        assert(xbox_CheckpointBootstrapBegin());nv2a_pb_checkpoint_publish();
+        assert(r[NV_PFIFO_CACHE1_DMA_GET]==32 && BRIDGE_MEM32(0x80020000u)==0xff445566);
+        if(!pass) {
+            BRIDGE_MEM32(0x80070000u)=0;rewind(snapshot);
+            assert(nv2a_gpu_load_checkpoint(snapshot));
+            assert(r[NV_PFIFO_CACHE1_DMA_GET]==0 && BRIDGE_MEM32(0x80070000u)==0);
+        }
+    }
+    fclose(snapshot);
+    fprintf(stderr,"[FIFO CHECKPOINT] frozen queued commands, device barrier, restored pending FIFO, native pixels and real semaphore completion passed\n");
+}
 int main(int argc,char **argv) {
     assert(argc==6);_putenv_s("RECOMP_GUEST_LOCK","1");_putenv_s("RECOMP_GPU_D3D11",argv[5]);
     const char *render_scale=getenv("RECOMP_RENDER_SCALE");
@@ -1042,8 +1084,12 @@ int main(int argc,char **argv) {
     assert(xbox_MemoryLayoutInit(xbe,bytes));free(xbe);
     NV2AState *gpu=nv2a_init_standalone((void *)xbox_GetMemoryOffset(),0x04000000,
                          (void *)(xbox_GetMemoryOffset()+0xfd700000u),0x100000);assert(gpu);
-    gpu->pfifo.method_consumer=nv2a_pb_exec_method;assert(xbox_CheckpointBootstrapBegin());
-    if(!strncmp(argv[1],"boundary-",9)) {
+    gpu->pfifo.method_consumer=nv2a_pb_exec_method;
+    if(!strcmp(argv[1],"fifo-worker"))assert(nv2a_fifo_start(gpu, 1));
+    assert(xbox_CheckpointBootstrapBegin());
+    if(!strcmp(argv[1],"fifo-worker")) {
+        verify_fifo_worker_checkpoint();
+    } else if(!strncmp(argv[1],"boundary-",9)) {
         verify_batch_boundary(argv[1]+9);
     } else if(!strncmp(argv[1],"large-",6)) {
         verify_large_batch(argv[1]+6);
@@ -1094,7 +1140,7 @@ int main(int argc,char **argv) {
         }
         assert(nv2a_gpu_load_checkpoint(file));fclose(file);verify();verify_consumers();
     }
-    xbox_CheckpointEnd();xbox_MemoryLayoutShutdown();return 0;
+    xbox_CheckpointEnd();nv2a_fifo_stop(gpu);xbox_MemoryLayoutShutdown();return 0;
 }
 '''
     # Count calls in the actual compiled decoder without a production tracing hook.
@@ -1254,7 +1300,7 @@ def test_automatic_backend_uses_opengl_when_vulkan_driver_is_unavailable(native_
     assert '[GPU] active backend OpenGL' in result.stderr
 
 
-def test_automatic_backend_reaches_system_driver_after_two_failures(native_gpu,tmp_path):
+def test_automatic_backend_reaches_direct3d_after_two_failures(native_gpu,tmp_path):
     executable,xbe=native_gpu
     library=executable.parent/'backends/opengl/d3d11.dll'
     saved=library.with_suffix('.disabled')
@@ -1269,7 +1315,10 @@ def test_automatic_backend_reaches_system_driver_after_two_failures(native_gpu,t
     assert result.returncode==0,result.stdout+result.stderr
     assert '[GPU] Vulkan initialization failed:' in result.stderr
     assert '[GPU] OpenGL initialization failed:' in result.stderr
-    assert '[GPU] active backend D3D11' in result.stderr
+    assert '[GPU] trying D3D12' in result.stderr
+    if '[GPU] active backend D3D12' not in result.stderr:
+        assert '[GPU] D3D12 initialization failed:' in result.stderr
+        assert '[GPU] active backend D3D11' in result.stderr
 
 @pytest.mark.parametrize('hardware,backend',[('0','D3D11'),('1','D3D11'),('1','Vulkan'),('1','OpenGL')])
 def test_original_dma_completion_aliases_and_checkpoint(native_gpu,tmp_path,hardware,backend):
@@ -1378,3 +1427,13 @@ def test_batch_capacity_boundary_is_explicit(native_gpu,tmp_path,producer):
     assert result.returncode==5,result.stdout+result.stderr
     assert '[BATCH BOUNDARY] full' in result.stderr
     assert 'batch exceeds NV2A capacity:' in result.stderr
+
+
+@pytest.mark.parametrize('backend',['D3D11','D3D12','Vulkan','OpenGL'])
+def test_fifo_worker_preserves_pending_checkpoint_and_gpu_completion(native_gpu,tmp_path,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'fifo-worker',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=30)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[FIFO CHECKPOINT]' in result.stderr

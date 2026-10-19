@@ -482,6 +482,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* Step 3: Initialize Xbox kernel */
     printf("Initializing Xbox kernel replacement...\n");
     xbox_kernel_init();
+    if (!nv2a_fifo_start(nv2a_get_state(), s_display.multithreaded_graphics)) {
+        fprintf(stderr, "[STOP] graphics consumer startup failed\n");
+        return 5;
+    }
 
     /* Step 4: Set game directory for file I/O path translation */
     {
@@ -588,6 +592,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     printf("\nGame returned. Cleaning up...\n");
 
     /* Cleanup */
+    nv2a_fifo_stop(nv2a_get_state());
     xbox_kernel_shutdown();
     nv2a_pb_release_memory_views();
     xbox_MemoryLayoutShutdown();

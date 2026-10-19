@@ -125,6 +125,13 @@ int main(void) {
     _set_error_mode(_OUT_TO_STDERR);_set_abort_behavior(0,_WRITE_ABORT_MSG|_CALL_REPORTFAULT);
     assert(nine_paths_init());
     NineConfig config;wchar_t error[256];assert(nine_config_read(&config,error,256));
+    assert(config.multithreaded_graphics==1);
+    config.multithreaded_graphics=0;assert(nine_config_write(&config,error,256));
+    assert(nine_config_read(&config,error,256) && config.multithreaded_graphics==0);
+    config.multithreaded_graphics=2;assert(!nine_config_write(&config,error,256));
+    assert(nine_config_read(&config,error,256) && config.multithreaded_graphics==0);
+    config.multithreaded_graphics=1;assert(nine_config_write(&config,error,256));
+    assert(nine_config_read(&config,error,256) && config.multithreaded_graphics==1);
     assert(!wcscmp(config.language,SMT9_WITH_CHINESE?L"Chinese":L"Japanese"));
     assert(!wcscmp(config.interface_language,SMT9_WITH_CHINESE?L"Chinese":L"English"));
     NineLanguage item,languages[8];unsigned count=nine_language_list(languages,8);

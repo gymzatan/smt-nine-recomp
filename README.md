@@ -57,6 +57,8 @@ The build extracts and verifies the ISO, prepares native code and title resource
 
 The two executables are in the project root. Double-click `smt9_recomp.exe` to play and `Config.exe` for settings; no command script is needed. Runtime paths follow the executable, so the folder can be moved to another drive while keeping its resources together. The default build starts with English settings and Japanese game text; a Chinese-enabled build starts with Chinese settings and game text. Existing saved settings remain in effect.
 
+Config also offers **Graphics processing: Multithreaded (default) / Single-threaded**. Multithreaded processing runs the ordered graphics-command consumer alongside game execution. Single-threaded processing runs the same consumer on the game thread for comparison and troubleshooting; it does not set whole-process CPU affinity. Save and restart the game to apply it.
+
 In Config, interface language and game language are independent. Japanese is built in; Chinese appears only when enabled at build time. To play Japanese and English only, use the default build, then **Import or update language ISO…**, enter `English` as its identifier and display name, and select your already-patched ISO. Import compiles a separate language package; it does not include or apply an English translation patch for you.
 
 ## Repository layout

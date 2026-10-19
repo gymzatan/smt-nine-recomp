@@ -109,8 +109,17 @@ static BOOL CALLBACK hw_lock_initialize(PINIT_ONCE once, PVOID parameter, PVOID 
 {
     (void)once;(void)parameter;(void)context;InitializeCriticalSection(&s_hw_lock);return TRUE;
 }
-static void hw_enter(void) { if(!InitOnceExecuteOnce(&s_hw_lock_once,hw_lock_initialize,NULL,NULL)) hw_check(E_FAIL,"memory lock initialization");EnterCriticalSection(&s_hw_lock); }
-static void hw_leave(void) { LeaveCriticalSection(&s_hw_lock); }
+/* CPU memory faults and the command consumer share this lock order. The
+ * outer device lock also protects the render state used by publication. */
+static void hw_enter(void) {
+    NV2AState *d=nv2a_get_state();if(d)qemu_mutex_lock(&d->pfifo.lock);
+    if(!InitOnceExecuteOnce(&s_hw_lock_once,hw_lock_initialize,NULL,NULL)) hw_check(E_FAIL,"memory lock initialization");
+    EnterCriticalSection(&s_hw_lock);
+}
+static void hw_leave(void) {
+    LeaveCriticalSection(&s_hw_lock);
+    NV2AState *d=nv2a_get_state();if(d)qemu_mutex_unlock(&d->pfifo.lock);
+}
 static HwMemory *hw_memory(const XboxSharedMemoryViews *views)
 {
     for(HwMemory *m=s_hw_memories;m;m=m->next) if(m->views.section==views->section) return m;
@@ -324,8 +333,9 @@ static void hw_cpu_write_begin(uint32_t address,size_t bytes)
 }
 int nv2a_pb_handle_memory_fault(uintptr_t address,int is_write)
 {
-    if(!s_hw_initialized || !hw_enabled()) return 0;
-    hw_enter();HwColor *owner=NULL;HwMemory *memory=NULL;size_t offset=0;
+    hw_enter();
+    if(!s_hw_initialized || !hw_enabled()) {hw_leave();return 0;}
+    HwColor *owner=NULL;HwMemory *memory=NULL;size_t offset=0;
     for(HwColor *c=s_hw_colors;c && !owner;c=c->next) {
         size_t lo=c->memory_offset&~(size_t)4095,hi=(c->memory_offset+hw_color_bytes(c)+4095)&~(size_t)4095;
         for(unsigned i=0;i<c->memory->views.view_count;i++) {

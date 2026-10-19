@@ -24,12 +24,12 @@
 
 /* GET_MASK/SET_MASK provided by qemu_shim.h (MSVC-compatible) */
 #ifndef GET_MASK
-#define GET_MASK(v, mask) (((v) & (mask)) >> ctz32(mask))
+#define GET_MASK(v, mask) (((v) & (mask)) / ((uint32_t)(mask) & (0u - (uint32_t)(mask))))
 #endif
 
 #ifndef SET_MASK
 #define SET_MASK(v, mask, val) \
-    do { (v) &= ~(mask); (v) |= ((val) << ctz32(mask)) & (mask); } while (0)
+    do { (v) &= ~(mask); (v) |= ((val) * ((uint32_t)(mask) & (0u - (uint32_t)(mask)))) & (mask); } while (0)
 #endif
 
 // clang-format off
