@@ -4,6 +4,7 @@ import hashlib
 import json
 import shutil
 import tarfile
+import tempfile
 import urllib.request
 import zipfile
 from common import ROOT, digest
@@ -19,12 +20,19 @@ def prepare():
         archive = cache/entry['archive']
         if archive.exists():
             if digest(archive) != entry['sha256']:
-                raise ValueError('Pinned archive checksum differs: '+archive.name)
+                raise ValueError('Pinned archive checksum differs: '+str(archive)+
+                                 '. Remove this cached file and rerun your build.')
         else:
             print('Downloading pinned dependency:',entry['url'],flush=True)
-            urllib.request.urlretrieve(entry['url'],archive)
-            if digest(archive) != entry['sha256']:
-                raise ValueError('Downloaded dependency checksum differs: '+archive.name)
+            with tempfile.TemporaryDirectory(prefix=archive.name+'.',dir=cache) as directory:
+                pending = Path(directory)/archive.name
+                urllib.request.urlretrieve(entry['url'],pending)
+                actual = digest(pending)
+                if actual != entry['sha256']:
+                    raise ValueError(f"Downloaded dependency checksum differs: {archive.name} "
+                                     f"({pending.stat().st_size} bytes; expected {entry['sha256']}, got {actual}). "
+                                     'The failed download is discarded; rerun your build to try again.')
+                pending.replace(archive)
         target = reference/entry['name']
         target.mkdir(parents=True,exist_ok=True)
         if entry['name']=='dxvk':

@@ -67,6 +67,14 @@ Include `--with-chinese` again when resuming a Chinese-enabled build. The langua
 
 `build/completion.json` records the actual ISO checksum or source-directory path, tool paths, duration and executable identities. Folder resumes require the same directory and recheck its complete original contents; ISO resumes require the same input checksum. Program updates use the installed verified resources without the original input. Build completion is separate from game-flow validation.
 
+GPU dependencies are downloaded into temporary files and enter `build/downloads` only after their pinned SHA-256 matches. Failed downloads are discarded; dependency checksums remain required. If a damaged archive is already in the cache, the error names its path. For example, remove a failed WineD3D download from PowerShell in the project directory:
+
+```powershell
+Remove-Item -LiteralPath ".\build\downloads\wined3d.zip"
+```
+
+Then rerun the original initial-build command with `--resume`, retaining the same input and `--with-chinese` selection. If the failure occurred during a program-only update, rerun `update.cmd`. A repeated download failure reports the received size and hash for diagnosis; it does not switch download sources or skip verification.
+
 ## Languages
 
 Config lists Japanese after the default build, and additionally Chinese with `--with-chinese`. Interface language (Chinese/Japanese/English) and game language are independent. Selecting an unavailable Chinese game through a manually edited INI fails explicitly; it does not change the selected language automatically.
