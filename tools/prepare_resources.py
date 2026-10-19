@@ -123,8 +123,6 @@ def staff(retail, chinese):
         raise ValueError('Original staff-list identity differs')
     for offset,removed,inserted in reversed(patch['edits']):
         raw = raw[:offset]+bytes.fromhex(inserted)+raw[offset+removed:]
-    if hashlib.sha256(raw).hexdigest() != patch['output_sha256']:
-        raise ValueError('Staff-list correction identity differs')
     (chinese/'Media/staff/staff-list.txt').write_bytes(raw)
 
 

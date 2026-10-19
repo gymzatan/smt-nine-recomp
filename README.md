@@ -65,7 +65,7 @@ In Config, interface language and game language are independent. Japanese is bui
 | --- | --- |
 | `game/` | Native host, Config, game-specific overrides and tests |
 | `vendor/xboxrecomp/` | Pinned recompiler/runtime with the project's accepted changes |
-| `config/` | Function identities, ABI, dependency checksums and code-generation edits |
+| `config/` | Function identities, ABI, dependency downloads and code-generation edits |
 | `translations/zh-CN/` | Chinese text, encoding and original-reference identities |
 | `font_pipeline/`, `localization/`, `writers/` | Existing font, subtitle and text builders |
 | `patches/` | Rebuildable title corrections and staff-list edits |

@@ -5,3 +5,4 @@ numpy==2.4.4
 scipy==1.17.1
 fonttools==4.55.3
 pypinyin==0.55.0
+pefile==2024.8.26

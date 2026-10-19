@@ -2,7 +2,6 @@
 from pathlib import Path
 import argparse
 import collections
-import hashlib
 import json
 import re
 import shutil
@@ -20,6 +19,18 @@ def normalize(body):
         body = body.replace('    #define fp_stack_top g_fp_top\n', '')
         body = body.replace('    #undef fp_stack_top\n', '')
         body = body.replace('fp_stack_top', 'g_fp_top')
+    return body
+
+
+def apply_project_edits(body, row):
+    previous_end=0
+    for offset,removed,inserted,before,after in row['edits']:
+        end=offset+len(removed)
+        if offset<previous_end or end>len(body) or body[max(0,offset-len(before)):end+len(after)]!=before+removed+after:
+            raise ValueError('Project codegen edit context differs at '+row['name'])
+        previous_end=end
+    for offset,removed,inserted,before,after in reversed(row['edits']):
+        body=body[:offset]+inserted+body[offset+len(removed):]
     return body
 
 
@@ -44,12 +55,7 @@ def generate(image, destination):
         body = generated[definition.start():].strip()
         body = re.sub(r'^void \w+\(void\)', 'void '+row['name']+'(void)', body, count=1)
         body = normalize(body)
-        if hashlib.sha256(body.encode()).hexdigest() != row['generated_sha256']:
-            raise ValueError('Codegen input/template differs at '+row['name'])
-        for offset, removed, inserted in reversed(row['edits']):
-            body = body[:offset]+inserted+body[offset+removed:]
-        if hashlib.sha256(body.encode()).hexdigest() != row['accepted_sha256']:
-            raise ValueError('Project codegen edit does not reproduce '+row['name'])
+        body=apply_project_edits(body,row)
         units[row['file']].append(body)
         if index % 1000 == 0:
             print(f'Generated {index+1}/{len(recipe["functions"])} functions', flush=True)

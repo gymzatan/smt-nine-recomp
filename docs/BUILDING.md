@@ -8,7 +8,7 @@
 - [Rustup](https://rust-lang.org/tools/install/) installed and on PATH. The default Windows installer adds `%USERPROFILE%\.cargo\bin` to the user PATH; fully close and reopen the terminal or editor afterward, then verify `rustup --version`. `setup.cmd` installs the pinned Rust toolchain, not Rustup itself.
 - For `--with-chinese` only: FFmpeg and FFprobe on PATH, with WMV2 encoding and the subtitles/libass filter enabled.
 - For `--with-chinese` only: Windows Simplified Chinese supplemental fonts, `%WINDIR%\Fonts\simsun.ttc` and `%WINDIR%\Fonts\simhei.ttf`. Font files are not included in this project. Chinese glyph identities, encodings, layout and rendering rules are supplied by the repository. Japanese builds and English imports do not require these fonts or FFmpeg/FFprobe.
-- Internet access for the declared Python, Cargo, DXVK and WineD3D dependencies. Their origins and the GPU archive checksums are recorded in `requirements.txt`, `Cargo.lock` and `config/dependencies.json`.
+- Internet access for the declared Python, Cargo, DXVK and WineD3D dependencies. Their origins and GPU archive layouts are recorded in `requirements.txt`, `Cargo.lock` and `config/dependencies.json`. Rerun `setup.cmd` after pulling changes to Python requirements; it installs the PE parser used for GPU dependency preparation.
 
 ## Supported input
 
@@ -67,13 +67,11 @@ Include `--with-chinese` again when resuming a Chinese-enabled build. The langua
 
 `build/completion.json` records the actual ISO checksum or source-directory path, tool paths, duration and executable identities. Folder resumes require the same directory and recheck its complete original contents; ISO resumes require the same input checksum. Program updates use the installed verified resources without the original input. Build completion is separate from game-flow validation.
 
-GPU dependencies are downloaded into temporary files and enter `build/downloads` only after their pinned SHA-256 matches. Failed downloads are discarded; dependency checksums remain required. If a damaged archive is already in the cache, the error names its path. For example, remove a failed WineD3D download from PowerShell in the project directory:
+Only original Japanese game files and their source fragments have fixed hash requirements. GPU archives, GPU DLLs, generated function bodies and translated outputs are not compared against hard-coded hashes. Build receipts, checkpoint identities and release manifests describe the actual build or release and retain their dynamic integrity checks. Project code-generation edits check the targeted text and its context before applying changes.
 
-```powershell
-Remove-Item -LiteralPath ".\build\downloads\wined3d.zip"
-```
+GPU dependencies enter `build/downloads` only after the archive is readable, required DLLs are present, and their x64 PE structures are valid. The D3D11 DXGI import is located through the PE import table and renamed in place, without a fixed file offset. Failed new downloads are discarded. A changed upstream archive is accepted when these structural requirements hold; this does not establish gameplay compatibility with every upstream revision.
 
-Then rerun the original initial-build command with `--resume`, retaining the same input and `--with-chinese` selection. If the failure occurred during a program-only update, rerun `update.cmd`. A repeated download failure reports the received size and hash for diagnosis; it does not switch download sources or skip verification.
+If a download fails in the build but works in your browser, use the direct URL shown in the error and save the archive, **without extracting it**, at the cache path shown there. For WineD3D, the path is `build/downloads/wined3d.zip`. The [WineD3D direct download](https://downloads.fdossena.com/Projects/WineD3D/Builds/WineD3DForWindows_11.19-x86_64.zip) is the same URL used by the build. Replace an invalid cached file with the working browser download, then rerun the initial-build command with `--resume`, keeping the same input and `--with-chinese` selection. For a program-only update, rerun `update.cmd`. The cache is checked structurally and reused; no automatic source switching is performed.
 
 ## Languages
 
