@@ -24,14 +24,14 @@ def test_update_preserves_data_and_checks_entire_payload(tmp_path):
     before={p:(p.read_bytes(),p.stat().st_mtime_ns) for p in protected}
     identity=write(target,'runtime/native_game_jp.xbe',b'compatible game')
     rows=[]
-    for name,data in [('smt9_recomp.exe',b'new program'),('Config.exe',b'new config program')]:
+    for name,data in [('smt9_recomp.exe',b'new program'),('Config.exe',b'new config program'),('Updater.exe',b'new updater')]:
         write(bundle/'payload',name,data)
         rows.append({'path':name,'sha256':hashlib.sha256(data).hexdigest()})
     manifest={'format':'smt-nine-program-update','required_files':[{'path':'runtime/native_game_jp.xbe','sha256':hashlib.sha256(identity.read_bytes()).hexdigest()}],'files':rows}
     manifest_path=bundle/'UPDATE_MANIFEST.json'
-    def run():
+    def run(*extra):
         manifest_path.write_text(json.dumps(manifest))
-        return subprocess.run([shell,'-NoProfile','-ExecutionPolicy','Bypass','-File',str(bundle/'Apply-Update.ps1'),'-Target',str(target)],capture_output=True)
+        return subprocess.run([shell,'-NoProfile','-ExecutionPolicy','Bypass','-File',str(bundle/'Apply-Update.ps1'),'-Target',str(target),*extra],capture_output=True)
     write(bundle/'payload','Config.exe',b'broken')
     assert run().returncode!=0
     assert (target/'smt9_recomp.exe').read_bytes()==b'old program'
@@ -44,6 +44,9 @@ def test_update_preserves_data_and_checks_entire_payload(tmp_path):
     assert run().returncode!=0
     assert (target/'smt9_recomp.exe').read_bytes()==b'old program'
     marker.unlink()
+    assert run('-CheckOnly').returncode==0
+    assert (target/'smt9_recomp.exe').read_bytes()==b'old program'
+    assert not (target/'Updater.exe').exists()
     assert run().returncode==0
     assert (target/'smt9_recomp.exe').read_bytes()==b'new program'
     stamps={p:p.stat().st_mtime_ns for p in (target/'smt9_recomp.exe',target/'Config.exe')}

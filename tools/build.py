@@ -102,7 +102,7 @@ def build(iso, jobs, resume=False, with_chinese=False, update=False):
          '-DCMAKE_RUNTIME_OUTPUT_DIRECTORY='+str(ROOT)],env=environment)
     # CMake/Ninja owns the dependency graph. Translation units and Cargo crates
     # have separate outputs; preparation and code generation remain sequential.
-    run([cmake,'--build',ROOT/'build/native','--target','smt9_recomp','Config','--parallel',jobs],env=environment)
+    run([cmake,'--build',ROOT/'build/native','--target','smt9_recomp','Config','Updater','--parallel',jobs],env=environment)
     if update:
         for registration in sorted((ROOT/'runtime/languages').glob('*.ini')):
             language=configparser.ConfigParser()
@@ -121,7 +121,7 @@ def build(iso, jobs, resume=False, with_chinese=False, update=False):
             language_receipt.write_text(json.dumps(record,indent=2)+'\n',encoding='utf-8')
     source_record={key:progress[key] for key in ('iso_sha256','source_directory') if key in progress}
     receipt={**source_record,'seconds':time.monotonic()-start,'executable_sha256':digest(ROOT/'smt9_recomp.exe'),
-             'config_sha256':digest(ROOT/'Config.exe'),'source':'Retail ISO or extracted folder plus repository source/translation inputs and declared build dependencies',
+             'config_sha256':digest(ROOT/'Config.exe'),'updater_sha256':digest(ROOT/'Updater.exe'),'source':'Retail ISO or extracted folder plus repository source/translation inputs and declared build dependencies',
              'with_chinese':with_chinese,'program_update':update,**subtitle_tools,'python':sys.version,'gameplay_validation':'Build completion is not a full-playthrough claim.'}
     (ROOT/'build/completion.json').write_text(json.dumps(receipt,indent=2)+'\n')
     print('Build complete. Open Config.exe, then smt9_recomp.exe.',flush=True)

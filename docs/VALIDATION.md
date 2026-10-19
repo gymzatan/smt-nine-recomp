@@ -86,6 +86,8 @@ D3D12 was exercised through the actual D3D11On12 device path in the same ordinar
 
 The source program-update command reuses the original lifter, Cargo and CMake dependency graphs. Installer tests check a complete payload before any copy, reject escaping paths, preserve data/configuration/saves, apply changed programs and leave identical files' timestamps alone. The program update deliberately retains installed translated resources; it does not claim to rebuild changed translation data.
 
+The desktop updater uses that same installer for its read-only preflight and application. Local release fixtures exercise both language variants, changed programs under an unchanged tag, downloaded-byte corruption, escaping ZIP paths, absent matching assets and payload changes between checking and applying. Existing ordinary saves, instant states and settings remain unchanged in those checks.
+
 The complete local source-check selection passed 32 checks. An actual in-place source update completed without an ISO or Chinese font/movie imports, retaining bytes and timestamps for 14,080 data/configuration/language files and all 96 generated C/header files. Both native and imported-English Ninja builds reported no work after the D3D12 build, demonstrating reuse of the existing compiled outputs.
 
 ## Custom keyboard and controller bindings

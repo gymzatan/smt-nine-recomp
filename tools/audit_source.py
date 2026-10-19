@@ -19,7 +19,7 @@ def source_files(root=ROOT):
             continue
         if relative.parts[:2] == ('reference','gpu_runtime'):
             continue
-        if len(relative.parts)==1 and (path.name in {'smt9_recomp.exe','Config.exe','smt9_recomp.pdb','Config.pdb'} or path.name=='backends'):
+        if len(relative.parts)==1 and (path.name in {'smt9_recomp.exe','Config.exe','Updater.exe','smt9_recomp.pdb','Config.pdb','Updater.pdb'} or path.name=='backends'):
             continue
         if relative.parts[0]=='backends':
             continue

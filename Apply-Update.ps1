@@ -1,4 +1,4 @@
-param([string]$Target = $PSScriptRoot)
+param([string]$Target = $PSScriptRoot, [switch]$CheckOnly, [switch]$FunctionsOnly, [string]$Bundle = $PSScriptRoot)
 $ErrorActionPreference = 'Stop'
 
 function Get-SHA256([string]$Path) {
@@ -20,8 +20,9 @@ function Resolve-SafeFile([string]$Root, [string]$Relative) {
     return $absolute
 }
 
+if ($FunctionsOnly) { return }
 $destination = [IO.Path]::GetFullPath($Target).TrimEnd([char[]]'\/')
-$bundle = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd([char[]]'\/')
+$bundle = [IO.Path]::GetFullPath($Bundle).TrimEnd([char[]]'\/')
 $manifest = Get-Content -LiteralPath (Join-Path $bundle 'UPDATE_MANIFEST.json') -Raw | ConvertFrom-Json
 if ($manifest.format -ne 'smt-nine-program-update') { throw 'This is not a supported program update package.' }
 if (-not (Test-Path -LiteralPath (Join-Path $destination 'smt9_recomp.exe') -PathType Leaf)) { throw 'Choose an existing game installation, not an empty directory.' }
@@ -36,7 +37,7 @@ $copies = @()
 $seen = @{}
 foreach ($entry in $manifest.files) {
     $name = [string]$entry.path
-    if ($name -notmatch '^(smt9_recomp\.exe|Config\.exe|LICENSE|THIRD_PARTY\.md|CONTROLS\.zh-CN\.md|backends/[^/]+/[^/]+\.dll|LICENSES/[^/]+|runtime/(native_game(_jp)?\.xbe|title_layers\.bin|fonts/font[234]\.bin))$') { throw "Not a program update file: $name" }
+    if ($name -notmatch '^(smt9_recomp\.exe|Config\.exe|Updater\.exe|LICENSE|THIRD_PARTY\.md|CONTROLS\.zh-CN\.md|backends/[^/]+/[^/]+\.dll|LICENSES/[^/]+|runtime/(native_game(_jp)?\.xbe|title_layers\.bin|fonts/font[234]\.bin))$') { throw "Not a program update file: $name" }
     if ($seen.ContainsKey($name)) { throw "Repeated update path: $name" }
     $seen[$name] = $true
     $source = Resolve-SafeFile $bundle ('payload/' + $name)
@@ -45,13 +46,17 @@ foreach ($entry in $manifest.files) {
     $copies += [pscustomobject]@{Source=$source; Destination=$installed; Hash=$entry.sha256}
 }
 if (-not $seen.ContainsKey('smt9_recomp.exe') -or -not $seen.ContainsKey('Config.exe')) { throw 'The update is missing its programs.' }
+$pending = @($copies | Where-Object { -not (Test-Path -LiteralPath $_.Destination -PathType Leaf) -or (Get-SHA256 $_.Destination) -ne $_.Hash })
+if ($CheckOnly) {
+    [pscustomobject]@{ChangedFiles=$pending.Count; PayloadFiles=$copies.Count; SourceCommit=$manifest.source_commit}
+    return
+}
 foreach ($process in Get-Process -Name smt9_recomp,Config -ErrorAction SilentlyContinue) {
     if (-not $process.Path) { throw 'Cannot check a running game process; close the game and Config first.' }
     if ($process.Path.StartsWith($destination + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Close the game and Config before updating.' }
 }
 $changed = 0
-foreach ($copy in $copies) {
-    if ((Test-Path -LiteralPath $copy.Destination -PathType Leaf) -and (Get-SHA256 $copy.Destination) -eq $copy.Hash) { continue }
+foreach ($copy in $pending) {
     $directory = [IO.Path]::GetDirectoryName($copy.Destination)
     [void][IO.Directory]::CreateDirectory($directory)
     $temporary = Join-Path $directory ([IO.Path]::GetRandomFileName())

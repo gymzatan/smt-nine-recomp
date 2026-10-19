@@ -39,7 +39,7 @@ def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese,dir
             assert chinese
             for n in (27,28,33,35,60):write(f'data/chinese/Media/Videos/video_{n}.xmv')
         elif command[0]=='rustup':write('build_dsp_jit/x86_64-pc-windows-msvc/release/dsp56300_emu_ffi.lib')
-        elif '--build' in command:write('smt9_recomp.exe');write('Config.exe')
+        elif '--build' in command:write('smt9_recomp.exe');write('Config.exe');write('Updater.exe')
     monkeypatch.setattr(build,'run',run)
     def extract(*args):
         calls.append('retail');write('data/japanese/default.xbe')
