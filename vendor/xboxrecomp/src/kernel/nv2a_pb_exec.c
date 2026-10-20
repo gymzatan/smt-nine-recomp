@@ -2548,6 +2548,8 @@ static void raster_batch_vertices(int fixed)
     struct PGRAPHState *pg=s_gpu.prim==NV_PRIM_POINTS?NULL:&nv2a_get_state()->pgraph;
 #if defined(_WIN32)
     uint64_t transform_start = gpu_timing_clock();
+    unsigned attributes[16],attribute_count=0;
+    float (*packed)[4]=s_hw_program_upload.vertex;
 #endif
 
     /* Attributes and the program are fixed during this synchronous batch.
@@ -2562,6 +2564,13 @@ static void raster_batch_vertices(int fixed)
         if(!fixed && !nv2a_vsh_program(&length)) hw_check(E_NOTIMPL,"vertex program context writes or missing final");
         s_hw_program_active=1;s_hw_fixed_active=fixed;s_hw_program_vertex_count=0;
         s_hw_program_inputs=inputs;
+        /* The native input layout uses this same decoded input mask, in
+         * ascending attribute order. Write its packed rows directly. */
+        uint32_t remaining=inputs&0xFFFFu;
+        while(remaining) {
+            attributes[attribute_count++]=(unsigned)ctz32(remaining);
+            remaining&=remaining-1;
+        }
         s_hw_topology=s_gpu.prim==NV_PRIM_POINTS?D3D11_PRIMITIVE_TOPOLOGY_POINTLIST:s_gpu.prim<=NV_PRIM_LINE_STRIP?D3D11_PRIMITIVE_TOPOLOGY_LINELIST_ADJ:D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ;
         s_hw_bounds=(RECT){(LONG)s_gpu.clip_x,(LONG)s_gpu.clip_y,(LONG)(s_gpu.clip_x+s_gpu.clip_w),(LONG)(s_gpu.clip_y+s_gpu.clip_h)};
     }
@@ -2583,11 +2592,9 @@ static void raster_batch_vertices(int fixed)
 #if defined(_WIN32)
             if(s_hw_program_active) {
                 uint32_t row=s_hw_program_vertex_count++;s_hw_program_vertex_rows[i]=row;
-                uint32_t remaining=inputs&0xFFFFu;
-                while(remaining) {
-                    unsigned attr=(unsigned)ctz32(remaining);
-                    remaining&=remaining-1;
-                    fetch_attr(&s_gpu.attr[attr],s_gpu.idx[i],s_hw_program_upload.vertex[row][attr]);
+                for(unsigned a=0;a<attribute_count;++a) {
+                    unsigned attr=attributes[a];
+                    fetch_attr(&s_gpu.attr[attr],s_gpu.idx[i],*packed++);
                 }
             } else
 #endif

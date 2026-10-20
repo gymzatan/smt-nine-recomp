@@ -48,7 +48,7 @@ static D3D11_PRIMITIVE_TOPOLOGY s_hw_topology;
 static uint32_t s_hw_program_vertex_count;
 static uint32_t s_hw_program_inputs;
 static uint32_t s_hw_program_vertex_rows[NV_MAX_INDICES];
-static struct { float vertex[NV_MAX_INDICES][16][4]; uint32_t indices[NV_MAX_INDICES*6]; } s_hw_program_upload;
+static struct { float vertex[NV_MAX_INDICES*16][4]; uint32_t indices[NV_MAX_INDICES*6]; } s_hw_program_upload;
 static void hw_program_triangle(uint32_t a,uint32_t b,uint32_t c,uint32_t p)
 {
     uint32_t *indices=s_hw_program_upload.indices+s_hw_count;
@@ -1028,23 +1028,13 @@ static void hw_flush_batch(void)
     timing_start=gpu_timing_clock();
     UINT vertex_stride=sizeof *s_hw_vertices;
     if(s_hw_program_active) {
-        unsigned attributes[16],count=0;
+        unsigned count=0;
         uint32_t remaining=s_hw_program_inputs;
         while(remaining) {
-            attributes[count++]=(unsigned)ctz32(remaining);
+            ++count;
             remaining&=remaining-1;
         }
         vertex_stride=count*16;
-        if(count!=16) {
-            uint8_t *packed=(uint8_t *)&s_hw_program_upload;
-            /* Ascending rows and attributes keep the destination before all
-             * unread source bytes, including overlapping compacted rows. */
-            for(uint32_t row=0;row<s_hw_program_vertex_count;++row)
-                for(unsigned attr=0;attr<count;++attr) {
-                    memmove(packed,s_hw_program_upload.vertex[row][attributes[attr]],16);
-                    packed+=16;
-                }
-        }
     }
     uint32_t vertex_bytes=s_hw_program_vertex_count*vertex_stride;
     uint32_t bytes=s_hw_program_active ? vertex_bytes+s_hw_count*sizeof(uint32_t) : s_hw_count*sizeof *s_hw_vertices;
