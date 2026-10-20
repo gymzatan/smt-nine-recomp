@@ -61,13 +61,17 @@ def test_online_update(tmp_path,variant,case):
     identities=[{'path':'runtime/native_game_jp.xbe','sha256':sha(b'Japanese')}]
     if variant=='japanese-chinese':
         (target/'runtime/native_game.xbe').write_bytes(b'Chinese')
-        identities.append({'path':'runtime/native_game.xbe','sha256':sha(b'Chinese')})
-    rows=[{'path':n,'sha256':sha(data)} for n,data in [('smt9_recomp.exe',b'new game'),('Config.exe',b'new config'),('Updater.exe',b'new updater')]]
+        (target/'runtime/fonts').mkdir()
+        (target/'runtime/fonts/font2.bin').write_bytes(b'Chinese font')
+        identities.append({'path':'runtime/fonts/font2.bin','sha256':sha(b'Chinese font')})
+    payload={'smt9_recomp.exe':b'new game','Config.exe':b'new config','Updater.exe':b'new updater'}
+    if variant=='japanese-chinese':payload['runtime/native_game.xbe']=b'Updated Chinese text'
+    rows=[{'path':n,'sha256':sha(data)} for n,data in payload.items()]
     manifest={'format':'smt-nine-program-update','source_commit':'a'*40,'required_files':identities,'files':rows}
     name='SMT-NINE-recomp-v8.7.6-update-'+variant+'.zip'
     archive=tmp_path/name
     with zipfile.ZipFile(archive,'w') as z:
-        for row in rows:z.writestr('payload/'+row['path'],{'smt9_recomp.exe':b'new game','Config.exe':b'new config','Updater.exe':b'new updater'}[row['path']])
+        for row in rows:z.writestr('payload/'+row['path'],payload[row['path']])
         z.writestr('UPDATE_MANIFEST.json',json.dumps(manifest))
         if case=='traversal':z.writestr('../outside.txt',b'unsafe')
     sums=tmp_path/'SHA256SUMS.txt';sums.write_text(sha(archive.read_bytes())+'  '+name+'\n')
@@ -86,7 +90,7 @@ function Invoke-WebRequest {{ param($Uri,$Headers,[switch]$UseBasicParsing,$OutF
     Copy-Item -LiteralPath (Join-Path {quoted(tmp_path)} ([Uri]$Uri).Segments[-1]) -Destination $OutFile
 }}
 $plan=Get-UpdatePlan {quoted(target)} {quoted(work)} {quoted(ROOT/'Apply-Update.ps1')}
-if ($plan.ChangedFiles -ne 3) {{ throw 'Wrong pending count' }}
+if ($plan.ChangedFiles -ne {len(rows)}) {{ throw 'Wrong pending count' }}
 if (([IO.File]::ReadAllText({quoted(target/'smt9_recomp.exe')})) -ne 'old game') {{ throw 'Check wrote installed files' }}
 {("[IO.File]::WriteAllText("+quoted(work/'bundle/payload/Config.exe')+",'tampered')") if case=='tampered' else ''}
 Install-UpdatePlan {quoted(target)} {quoted(work)} {quoted(ROOT/'Apply-Update.ps1')} | ConvertTo-Json
@@ -102,4 +106,8 @@ if ($again.ChangedFiles -ne 0) {{ throw 'Not current after update' }}
     assert (target/'runtime/NINE.ini').read_bytes()==b'keep settings'
     assert (target/'runtime/instant.slot1.state').read_bytes()==b'keep checkpoint'
     assert (target/'data/save.bin').read_bytes()==b'keep save'
+    if variant=='japanese-chinese':
+        assert (target/'runtime/native_game.xbe').read_bytes()==(b'Updated Chinese text' if case=='valid' else b'Chinese')
+        assert (target/'runtime/fonts/font2.bin').read_bytes()==b'Chinese font'
+    else:assert not (target/'runtime/native_game.xbe').exists()
     assert not (tmp_path/'outside.txt').exists()

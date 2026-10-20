@@ -80,7 +80,8 @@ def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese,dir
     protected={p:p.read_bytes() for p in (tmp_path/'data').rglob('*') if p.is_file()}
     previous_calls=len(calls)
     build.build(None,2,update=True)
-    assert calls.count('retail')==calls.count('images')==1
+    assert calls.count('retail')==1
+    assert calls.count('images')==(2 if chinese else 1)
     assert calls.count('generation')==2
     assert not {'ffmpeg','ffprobe'} & set(calls[previous_calls:])
     assert all(p.read_bytes()==content for p,content in protected.items())

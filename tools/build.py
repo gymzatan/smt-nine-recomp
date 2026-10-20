@@ -51,7 +51,7 @@ def build(iso, jobs, resume=False, with_chinese=False, update=False):
     cmake,ninja,environment = visual_studio()
     def phase(name,action,outputs):
         completed=progress['completed'].get(name)
-        if update and name not in ('generation','gpu_dependencies','dsp') and completed is None:
+        if update and completed is None and name not in ('generation','gpu_dependencies','dsp') and not (name=='images' and action is not None):
             raise ValueError('Missing installed resource receipt for '+name+'; finish the original build first')
         if completed is not None:
             for path,expected in completed.items():
@@ -80,9 +80,12 @@ def build(iso, jobs, resume=False, with_chinese=False, update=False):
         phase('rts',lambda:rts(japanese,chinese),[chinese/'Media/RTS/Scripts/RTSScript.bin'])
         phase('staff',lambda:staff(japanese,chinese),[chinese/'Media/staff/staff-list.txt'])
     codegen_image=ROOT/('runtime/native_game.xbe' if with_chinese else 'build/localization/native_codegen.xbe')
-    if not update:
+    if not update or with_chinese:
         from prepare_images import prepare as images
+        if update:
+            progress['completed'].pop('images')
         phase('images',lambda:images(with_chinese=with_chinese),[codegen_image,ROOT/'runtime/native_game_jp.xbe'])
+    if not update:
         from prepare_title import prepare as title
         phase('title',title,[ROOT/'runtime/title_layers.bin',ROOT/'game/src/app_icon.ico'])
     if with_chinese and not update:

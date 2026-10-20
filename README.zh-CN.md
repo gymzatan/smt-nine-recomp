@@ -2,7 +2,7 @@
 
 《真·女神转生 NINE》原 Xbox 版的 Windows 原生静态重编译项目，基于 [xboxrecomp](https://github.com/sp00nznet/xboxrecomp)。使用者提供原始日版 ISO，在本地提取资源、生成游戏代码并编译程序。默认只构建日文，本项目中文翻译为可选项；英文通过 Config 导入使用者另行准备的已打补丁 ISO，不需要先构建中文。
 
-仓库只提供源码、重建规则、中文翻译与稳定身份。源码仓库与源码 ZIP 不包含原游戏、生成的游戏 C、微软字体、存档或外部英文翻译；GitHub 发行另提供已有安装使用的纯程序更新包，不附日中原始数据。
+仓库只提供源码、重建规则、中文翻译与稳定身份。源码仓库与源码 ZIP 不包含原游戏、生成的游戏 C、微软字体、存档或外部英文翻译；GitHub 发行另提供已有安装使用的更新包；中文包包含中文运行镜像，日文包不包含。两者均不附原始 Media、日文镜像、设置和存档。
 
 ## 运行配置与验证范围
 
@@ -28,7 +28,7 @@ Config 提供 Auto、Vulkan、OpenGL、D3D12 和 D3D11。Auto 在初始化失败
 - **已编译的游玩目录：** 关闭游戏和 Config，双击 **Updater.exe**，点击**立即更新**。旧目录若没有更新器，从[发行页](https://github.com/gymzatan/smt-nine-recomp/releases/latest)下载 `Updater.exe`，放在 `smt9_recomp.exe` 旁边即可。自动匹配日文／日中安装，保留游戏数据、设置和存档；也可继续手动使用更新 ZIP 和 `Apply-Update.cmd`。
 - **源码目录（含已导入英文）：** 运行 `git pull`，再用原构建环境执行 `.\update.cmd`，不需要 ISO。
 
-保留游戏数据、设置和普通存档。[详细更新说明](docs/BUILDING.md#compiled-program-updates)。
+保留原始游戏数据、设置和普通存档。已安装中文的目录同时更新中文运行文本；未安装中文的目录不下载中文资源。[详细更新说明](docs/BUILDING.md#compiled-program-updates)。
 
 ### 首次安装
 

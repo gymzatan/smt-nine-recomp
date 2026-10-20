@@ -2,7 +2,7 @@
 
 A native Windows port of **Shin Megami Tensei NINE** for the original Xbox, built with [xboxrecomp](https://github.com/sp00nznet/xboxrecomp). Game code is statically translated from your Japanese retail disc and compiled locally. The default build provides Japanese; the project's Chinese translation is optional. Config can import an ISO that you have separately patched with an English translation, with or without Chinese support.
 
-This repository contains project source, configuration, patch rules and Chinese translation inputs. Supply your own supported Japanese ISO. Game executables, disc assets, generated game C, Microsoft fonts, saves and external translations are excluded from the repository and source archive. Separate release update assets contain program files for existing installations, without original Japanese/Chinese data.
+This repository contains project source, configuration, patch rules and Chinese translation inputs. Supply your own supported Japanese ISO. Game executables, disc assets, generated game C, Microsoft fonts, saves and external translations are excluded from the repository and source archive. Separate release update assets contain programs for existing installations and, only for Chinese-enabled installations, the Chinese runtime image. Original Media, Japanese game images, settings and saves are excluded.
 
 [中文说明](README.zh-CN.md) · [Build instructions](docs/BUILDING.md) · [Controls](docs/CONTROLS.md) · [Status and limits](docs/STATUS.md) · [Build validation](docs/VALIDATION.md) · [Third-party notices](THIRD_PARTY.md)
 
@@ -30,7 +30,7 @@ Config offers Auto, Vulkan, OpenGL, D3D12 and D3D11. Auto tries **Vulkan → Ope
 - **Prebuilt game:** Close the game and Config, then open **Updater.exe** and click **Update now**. If your folder does not have it yet, download `Updater.exe` from [Releases](https://github.com/gymzatan/smt-nine-recomp/releases/latest) and place it beside `smt9_recomp.exe`. It selects the Japanese or Japanese/Chinese package and preserves game data, settings and saves. Manual update ZIPs and `Apply-Update.cmd` remain available.
 - **Source build (including imported English):** Run `git pull`, then `.\update.cmd` using the existing build environment. No ISO is needed.
 
-Game data, settings and ordinary saves are kept. [Update details](docs/BUILDING.md#compiled-program-updates).
+Original game data, settings and ordinary saves are kept. Chinese-enabled installations also receive Chinese runtime text updates; Japanese-only installations do not. [Update details](docs/BUILDING.md#compiled-program-updates).
 
 ### First installation
 
