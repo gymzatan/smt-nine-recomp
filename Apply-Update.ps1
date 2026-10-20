@@ -26,6 +26,10 @@ $bundle = [IO.Path]::GetFullPath($Bundle).TrimEnd([char[]]'\/')
 $manifest = Get-Content -LiteralPath (Join-Path $bundle 'UPDATE_MANIFEST.json') -Raw | ConvertFrom-Json
 if ($manifest.format -ne 'smt-nine-program-update') { throw 'This is not a supported program update package.' }
 if (-not (Test-Path -LiteralPath (Join-Path $destination 'smt9_recomp.exe') -PathType Leaf)) { throw 'Choose an existing game installation, not an empty directory.' }
+if ($manifest.language_resources -eq 'JapaneseChinese' -and
+    -not (Test-Path -LiteralPath (Resolve-SafeFile $destination 'runtime/native_game.xbe') -PathType Leaf)) {
+    throw 'This update requires an existing Chinese installation. Choose the matching update package.'
+}
 foreach ($name in $manifest.forbidden_files) {
     if (Test-Path -LiteralPath (Resolve-SafeFile $destination $name)) { throw 'This update is for a different installed language selection. Choose the matching update package.' }
 }

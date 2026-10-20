@@ -63,11 +63,11 @@ def test_online_update(tmp_path,variant,case):
         (target/'runtime/native_game.xbe').write_bytes(b'Chinese')
         (target/'runtime/fonts').mkdir()
         (target/'runtime/fonts/font2.bin').write_bytes(b'Chinese font')
-        identities.append({'path':'runtime/fonts/font2.bin','sha256':sha(b'Chinese font')})
     payload={'smt9_recomp.exe':b'new game','Config.exe':b'new config','Updater.exe':b'new updater'}
     if variant=='japanese-chinese':payload['runtime/native_game.xbe']=b'Updated Chinese text'
     rows=[{'path':n,'sha256':sha(data)} for n,data in payload.items()]
-    manifest={'format':'smt-nine-program-update','source_commit':'a'*40,'required_files':identities,'files':rows}
+    manifest={'format':'smt-nine-program-update','source_commit':'a'*40,'required_files':identities,'files':rows,
+              'language_resources':'JapaneseChinese' if variant=='japanese-chinese' else 'Japanese'}
     name='SMT-NINE-recomp-v8.7.6-update-'+variant+'.zip'
     archive=tmp_path/name
     with zipfile.ZipFile(archive,'w') as z:

@@ -44,6 +44,11 @@ def test_update_preserves_data_and_checks_entire_payload(tmp_path):
     assert run().returncode!=0
     assert (target/'smt9_recomp.exe').read_bytes()==b'old program'
     marker.unlink()
+    manifest['forbidden_files']=[]
+    manifest['language_resources']='JapaneseChinese'
+    assert run().returncode!=0
+    assert (target/'smt9_recomp.exe').read_bytes()==b'old program'
+    write(target,'runtime/native_game.xbe',b'Installed Chinese text may differ')
     assert run('-CheckOnly').returncode==0
     assert (target/'smt9_recomp.exe').read_bytes()==b'old program'
     assert not (target/'Updater.exe').exists()
