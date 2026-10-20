@@ -127,6 +127,13 @@ static void prepare_original_ui_quad(void)
         return;
     }
     switch(caller){
+    case 0x001C4CF4u:
+        /* 190AC6 and 19264C rebuild item icons with 1C4A75 before drawing.
+         * Their 28-byte quads share the surrounding panel's UI X mapping. */
+        if(smt9_game_aspect()==4.0f/3.0f)return;
+        if(MEM32(g_esp+4)!=8 || MEM32(g_esp+8)!=0 || MEM32(g_esp+12)!=4){fprintf(stderr,"[STOP] original item icon contract\n");exit(5);}
+        buffer=MEM32(MEM32(g_esi+0x14)+4)|0x80000000u;
+        break;
     case 0x001C4888u:
         /* 1958EE rebuilds command panels with 1C3D5F before 195FD2 draws them.
          * The original 1C4800 frame retains this at its saved stack slot. */

@@ -182,6 +182,30 @@ static void check_window_transition(void) {
         assert(!memcmp(ram+g_ecx+0x34,original,sizeof original));
     }
 }
+static void check_item_icons(void) {
+    /* Reward frame 208..432, icon 220..236, text starts at 248.
+     * At 1920x1080 the unmapped icon was left of the mapped frame. */
+    for(unsigned frame=0;frame<120;frame++)for(unsigned row=0;row<2;row++) {
+        memset(ram,0,sizeof ram);g_esi=0x2000;MEM32(g_esi+0x14)=0x3000;MEM32(0x3004)=0x4000;
+        MEM32(g_esp)=0x001C4CF4;MEM32(g_esp+4)=8;MEM32(g_esp+8)=0;MEM32(g_esp+12)=4;
+        for(unsigned i=0;i<4;i++) {
+            unsigned vertex=0x4000+i*28;
+            MEMF(vertex)=220+(i&1?16:0);MEMF(vertex+4)=244+row*22+(i&2?16:0);
+            for(unsigned offset=8;offset<28;offset+=4)MEM32(vertex+offset)=0x3f000000+i+offset;
+        }
+        unsigned char before[112];memcpy(before,ram+0x4000,sizeof before);
+        prepare_original_ui_quad();
+        float factor=(4.0f/3.0f)/aspect;
+        float panel_left=320+(208-320)*factor,text_left=320+(248-320)*factor;
+        for(unsigned i=0;i<4;i++) {
+            float x;memcpy(&x,before+i*28,4);
+            assert(MEMF(0x4000+i*28)==320+(x-320)*factor);
+            assert(MEMF(0x4000+i*28)>panel_left && MEMF(0x4000+i*28)<text_left);
+            assert(!memcmp(before+i*28+4,ram+0x4000+i*28+4,24));
+        }
+        if(aspect==4.0f/3.0f)assert(!memcmp(before,ram+0x4000,sizeof before));
+    }
+}
 int main(int argc,char **argv) {
     assert(argc==2);aspect=atoi(argv[1])==4?4.0f/3.0f:16.0f/9.0f;
     check(0,0,640,480,1);check(-0.5f,-0.5f,640,480,1);
@@ -189,6 +213,7 @@ int main(int argc,char **argv) {
     check_rgb(0,1);check_rgb(0.5f,1);check_rgb(32,1);check_rgb(80,1);check_rgb(127.5f,1);check_rgb(80,0);
     check_portrait_strip(352,164,272);check_portrait_strip(171,217,216);check_portrait_strip(202,163,80);
     check_dialogue_connector();check_speech_anchor();
+    check_item_icons();
     check_window_transition();
     memset(ram,0,sizeof ram);g_ecx=0x2000;MEM32(g_ecx+0x50)=640;MEM32(g_ecx+0x54)=480;
     smt9_prepare_window_transition(g_ecx);assert(MEMF(g_ecx+0x3c)==0 && MEM32(g_ecx+0x50)==640);
