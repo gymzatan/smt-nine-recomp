@@ -9,7 +9,8 @@ Window size offers 640×480, 960×720, 1280×720, 1280×960, 1600×900, 1920×10
 - F9 pauses/resumes guest execution, devices, game clock and audio.
 - Closing the game window exits the process, including while paused.
 - Left Shift+F1 through Left Shift+F5 save instant slots 1 through 5 respectively; F1 through F5 load those slots. Resume from F9 pause before using an instant state.
-- Instant states must match their exact program and game image. Keep normal saves for moving between builds.
+- Instant states are in `save/states/<language>` and must match their exact program and game image. Keep normal saves for moving between builds.
+- Config → Save folder opens `save`. Ordinary saves in `save/UDATA` are shared by all languages; back up the whole folder. Old saves are copied on first use, with their originals retained. Archived instant states still require the original executable/image.
 
 Pause and instant-save requests require the runtime's existing safe boundary. If a request is rejected, the window reports it and no valid instant state is created by that attempt. Keep ordinary saves.
 

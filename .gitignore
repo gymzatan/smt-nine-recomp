@@ -1,6 +1,8 @@
 # Locally supplied game content and all derived outputs
 /data/
 /runtime/
+/save/
+/save.migrating/
 /bin/
 /backends/
 /build/

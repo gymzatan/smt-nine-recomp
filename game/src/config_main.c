@@ -1,6 +1,7 @@
 #include "config.h"
 #include "game_paths.h"
 #include <commdlg.h>
+#include <shellapi.h>
 #include <stdio.h>
 #include "config_ui.h"
 #include "config_controls.h"
@@ -75,6 +76,7 @@ static void apply_ui(HWND window)
         {127,UI_REFRESH},{128,UI_SIZE},{129,UI_HINT},{108,UI_IMPORT},{133,UI_SIZE_CUSTOM},{132,UI_FIXED_ASPECT},
         {111,UI_CONTROLS},{IDOK,UI_SAVE},{IDCANCEL,UI_CANCEL}};
     SetWindowTextW(window,tr(UI_TITLE));
+    SetDlgItemTextW(window,115,ui_language==0?L"存档文件夹":ui_language==1?L"セーブフォルダー":L"Save folder");
     SetDlgItemTextW(window,113,ui_language==0?L"按键设置":ui_language==1?L"入力設定":L"Bindings");
     for(unsigned i=0;i<sizeof labels/sizeof labels[0];i++)SetDlgItemTextW(window,labels[i].id,tr(labels[i].text));
     SetDlgItemTextW(window,109,tr(status_text));
@@ -136,6 +138,13 @@ static INT_PTR CALLBACK config_dialog(HWND window,UINT message,WPARAM wparam,LPA
         }
         if(LOWORD(wparam)==111){DialogBoxParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(300),window,controls_dialog,0);return TRUE;}
         if(LOWORD(wparam)==113){nine_controls_dialog(window,&settings.controls,ui_language);return TRUE;}
+        if(LOWORD(wparam)==115){
+            wchar_t error[400];
+            if(!nine_saves_prepare(NULL,error,400))MessageBoxW(window,error,tr(UI_TITLE),MB_OK|MB_ICONERROR);
+            else if((INT_PTR)ShellExecuteW(window,L"open",nine_paths.user_w,NULL,NULL,SW_SHOWNORMAL)<=32)
+                MessageBoxW(window,nine_paths.user_w,tr(UI_TITLE),MB_OK|MB_ICONERROR);
+            return TRUE;
+        }
         if(LOWORD(wparam)==108){
             if(importing.hProcess)return TRUE;
             INT_PTR dialog=DialogBoxParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(200),window,import_dialog,0);

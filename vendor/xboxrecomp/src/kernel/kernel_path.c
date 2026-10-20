@@ -40,14 +40,14 @@ static int match_prefix(const char* path, const char* prefix)
 /* A device-path translation rule, shared by both backends. */
 typedef struct {
     const char* prefix;     /* Xbox path prefix (backslash form)         */
-    int         to_save;    /* 1 = under save_dir, 0 = under game_dir    */
+    int         to_save;    /* 0 = game, 1 = runtime, 2 = Partition1, 3 = U: */
     const char* sub_win;    /* sub-directory, Win32 backslash form       */
     const char* sub_posix;  /* sub-directory, POSIX slash form           */
 } path_rule;
 
 static const path_rule s_rules[] = {
     { "\\Device\\CdRom0\\",                   0, NULL,         NULL          },
-    { "\\Device\\Harddisk0\\Partition1\\",    0, NULL,         NULL          },
+    { "\\Device\\Harddisk0\\Partition1\\",    2, NULL,         NULL          },
     /* Xbox volume paths use ordinary PC directories. Root system-volume
      * access uses SystemData; paths below it retain the game asset mapping. */
     { "\\Device\\Harddisk0\\Partition2\\",    0, NULL,         NULL          },
@@ -64,7 +64,7 @@ static const path_rule s_rules[] = {
     { "Y:\\",                                 0, NULL,         NULL          },
     { "y:\\",                                 0, NULL,         NULL          },
     { "T:\\",                                 1, "\\TitleData","/TitleData"  },
-    { "U:\\",                                 1, "\\UserData", "/UserData"   },
+    { "U:\\",                                 3, "\\UserData", "/UserData"   },
     { "Z:\\",                                 1, "\\Cache",    "/Cache"      },
     { "\\??\\D:\\",                           0, NULL,         NULL          },
     { "\\??\\Y:\\",                           0, NULL,         NULL          },
@@ -163,6 +163,8 @@ const wchar_t *xbox_LastHostPath(void)
 
 static WCHAR s_game_dir[MAX_PATH];
 static WCHAR s_save_dir[MAX_PATH];
+static WCHAR s_user_dir[MAX_PATH];
+static WCHAR s_partition1_dir[MAX_PATH];
 static BOOL  s_initialized = FALSE;
 static char s_language_cache[80],s_language_title[80];
 static WCHAR s_language_media_root[MAX_PATH];
@@ -178,6 +180,11 @@ void xbox_path_set_language_media(const char *language,const char *media_root)
         swprintf_s(path,MAX_PATH,L"%s%hs",s_save_dir,s_language_cache);CreateDirectoryW(path,NULL);
         swprintf_s(path,MAX_PATH,L"%s%hs",s_save_dir,s_language_title);CreateDirectoryW(path,NULL);
     }
+}
+BOOL xbox_path_set_user_directory(const char *directory)
+{
+    if(!s_initialized||!directory||!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,directory,-1,s_user_dir,MAX_PATH))return FALSE;
+    wcscpy_s(s_partition1_dir,MAX_PATH,s_user_dir);return TRUE;
 }
 
 void xbox_path_init(const char* game_dir, const char* save_dir)
@@ -210,6 +217,7 @@ void xbox_path_init(const char* game_dir, const char* save_dir)
     size_t len = wcslen(s_game_dir);
     if (len > 0 && s_game_dir[len - 1] == L'\\')
         s_game_dir[len - 1] = L'\0';
+    wcscpy_s(s_partition1_dir,MAX_PATH,s_game_dir);
 
     len = wcslen(s_save_dir);
     if (len > 0 && s_save_dir[len - 1] == L'\\')
@@ -244,6 +252,7 @@ void xbox_path_init(const char* game_dir, const char* save_dir)
     }
 
     s_initialized = TRUE;
+    wcscpy_s(s_user_dir,MAX_PATH,s_save_dir);
     xbox_log(XBOX_LOG_INFO, XBOX_LOG_PATH, "Path init: game=%S, save=%S", s_game_dir, s_save_dir);
 }
 
@@ -286,7 +295,8 @@ BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, D
         skip = match_prefix(xbox_path, s_rules[i].prefix);
         if (skip) {
             remainder = xbox_path + skip;
-            base_dir  = s_rules[i].to_save ? s_save_dir : s_game_dir;
+            const WCHAR *roots[]={s_game_dir,s_save_dir,s_partition1_dir,s_user_dir};
+            base_dir=roots[s_rules[i].to_save];
             sub_dir   = s_rules[i].sub_win;
             if(s_language_media_root[0] && base_dir==s_game_dir && _strnicmp(remainder,"Media\\",6)==0)base_dir=s_language_media_root;
             if(s_language_cache[0] && sub_dir) {
@@ -356,7 +366,14 @@ translate:
 
 static char s_game_dir[MAX_PATH];
 static char s_save_dir[MAX_PATH];
+static char s_user_dir[MAX_PATH];
+static char s_partition1_dir[MAX_PATH];
 static BOOL s_initialized = FALSE;
+BOOL xbox_path_set_user_directory(const char *directory)
+{
+    if(!s_initialized||!directory||strlen(directory)>=sizeof s_user_dir)return FALSE;
+    strcpy(s_user_dir,directory);strcpy(s_partition1_dir,directory);return TRUE;
+}
 
 /* Strip a single trailing '/' (but never the root '/'). */
 static void strip_trailing_slash(char* s)
@@ -415,6 +432,7 @@ void xbox_path_init(const char* game_dir, const char* save_dir)
 
     strip_trailing_slash(s_game_dir);
     strip_trailing_slash(s_save_dir);
+    strcpy(s_partition1_dir,s_game_dir);strcpy(s_user_dir,s_save_dir);
 
     s_initialized = TRUE;
     xbox_log(XBOX_LOG_INFO, XBOX_LOG_PATH, "Path init: game=%s, save=%s",
@@ -444,7 +462,8 @@ BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, D
         skip = match_prefix(xbox_path, s_rules[i].prefix);
         if (skip) {
             remainder = xbox_path + skip;
-            base_dir  = s_rules[i].to_save ? s_save_dir : s_game_dir;
+            const char *roots[]={s_game_dir,s_save_dir,s_partition1_dir,s_user_dir};
+            base_dir=roots[s_rules[i].to_save];
             sub_dir   = s_rules[i].sub_posix;
             goto translate;
         }

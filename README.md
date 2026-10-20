@@ -30,7 +30,7 @@ Config offers Auto, Vulkan, OpenGL, D3D12 and D3D11. Auto tries **Vulkan → Ope
 - **Prebuilt game:** Close the game and Config, then open **Updater.exe** and click **Update now**. If your folder does not have it yet, download `Updater.exe` from [Releases](https://github.com/gymzatan/smt-nine-recomp/releases/latest) and place it beside `smt9_recomp.exe`. It selects the Japanese or Japanese/Chinese package and preserves game data, settings and saves. Manual update ZIPs and `Apply-Update.cmd` remain available.
 - **Source build (including imported English):** Run `git pull`, then `.\update.cmd` using the existing build environment. No ISO is needed.
 
-Original game data, settings and ordinary saves are kept. Chinese-enabled installations also receive Chinese runtime text updates; Japanese-only installations do not. [Update details](docs/BUILDING.md#compiled-program-updates).
+Original game data, settings and ordinary saves are kept. All languages share ordinary saves in **`save/UDATA`**; back up the **`save`** folder or open it with **Config → Save folder**. Old saves are copied automatically on first use, with originals retained. Chinese-enabled installations also receive Chinese runtime text updates; Japanese-only installations do not. [Update details](docs/BUILDING.md#compiled-program-updates).
 
 ### First installation
 

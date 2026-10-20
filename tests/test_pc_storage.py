@@ -22,18 +22,20 @@ void xbox_path_set_language_media(const char *, const char *);
 const char *xbox_LookupSymbolicLink(const char *name) { return NULL; }
 int main(void) {
     _set_error_mode(_OUT_TO_STDERR);_set_abort_behavior(0,_WRITE_ABORT_MSG|_CALL_REPORTFAULT);
-    char root[MAX_PATH],game[MAX_PATH],save[MAX_PATH];
+    char root[MAX_PATH],game[MAX_PATH],save[MAX_PATH],user[MAX_PATH];
     GetCurrentDirectoryA(MAX_PATH,root);
     sprintf_s(game,MAX_PATH,"%s\\game",root);
     sprintf_s(save,MAX_PATH,"%s\\runtime\\save",root);
     CreateDirectoryA(game,NULL);
     xbox_path_init(game,save);
+    sprintf_s(user,MAX_PATH,"%s\\save",root);CreateDirectoryA(user,NULL);
+    assert(xbox_path_set_user_directory(user));
     WCHAR pattern[MAX_PATH];swprintf_s(pattern,MAX_PATH,L"%hs\\Partition*.img",save);
     WIN32_FIND_DATAW found;HANDLE scan=FindFirstFileW(pattern,&found);
     if(scan!=INVALID_HANDLE_VALUE){FindClose(scan);fprintf(stderr,"unexpected partition image\n");return 2;}
     WCHAR target[MAX_PATH],expected[MAX_PATH];
     assert(xbox_translate_path("\\Device\\Harddisk0\\partition1\\",target,MAX_PATH));
-    swprintf_s(expected,MAX_PATH,L"%hs",game);assert(!_wcsicmp(target,expected));
+    swprintf_s(expected,MAX_PATH,L"%hs",user);assert(!_wcsicmp(target,expected));
     assert(xbox_translate_path("\\Device\\Harddisk0\\Partition5\\",target,MAX_PATH));
     swprintf_s(expected,MAX_PATH,L"%hs\\Cache",save);assert(!_wcsicmp(target,expected));
     XBOX_ANSI_STRING name={0};XBOX_OBJECT_ATTRIBUTES oa={0};
@@ -55,9 +57,11 @@ int main(void) {
     assert(NT_SUCCESS(xbox_NtReadFile(handle,NULL,NULL,NULL,&ios,actual,sizeof(actual),&offset)));
     assert(ios.Information==sizeof(payload)&&!memcmp(actual,payload,sizeof(payload)));
     xbox_FileHandleClosed(handle);CloseHandle(handle);
+    assert(xbox_translate_path("U:\\user.sav",target,MAX_PATH));
+    swprintf_s(expected,MAX_PATH,L"%hs\\UserData\\user.sav",user);assert(!_wcsicmp(target,expected));
     xbox_path_set_language_media("English","external/MediaRoot");
     assert(xbox_translate_path("\\Device\\Harddisk0\\partition1\\UDATA",target,MAX_PATH));
-    swprintf_s(expected,MAX_PATH,L"%hs\\UDATA",game);assert(!_wcsicmp(target,expected));
+    swprintf_s(expected,MAX_PATH,L"%hs\\UDATA",user);assert(!_wcsicmp(target,expected));
     assert(xbox_translate_path("\\Device\\Harddisk0\\Partition5\\cache.tmp",target,MAX_PATH));
     WCHAR normalized[MAX_PATH];assert(GetFullPathNameW(target,MAX_PATH,normalized,NULL));
     swprintf_s(expected,MAX_PATH,L"%hs\\CacheEnglish\\cache.tmp",save);assert(!_wcsicmp(normalized,expected));

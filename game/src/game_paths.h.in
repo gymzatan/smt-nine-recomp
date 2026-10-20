@@ -11,12 +11,14 @@
 #endif
 typedef struct NinePaths {
     char game_dir[MAX_PATH*4],xbe[MAX_PATH*4],save[MAX_PATH*4];
-    char checkpoint[MAX_PATH*4],jp_xbe[MAX_PATH*4],jp_game_dir[MAX_PATH*4],runtime[MAX_PATH*4];
+    char checkpoint[MAX_PATH*4],jp_xbe[MAX_PATH*4],jp_game_dir[MAX_PATH*4],runtime[MAX_PATH*4],user[MAX_PATH*4];
+    wchar_t root_w[MAX_PATH],user_w[MAX_PATH];
     wchar_t config[MAX_PATH],runtime_w[MAX_PATH],screenshots[MAX_PATH];
     wchar_t languages[MAX_PATH],builtin[MAX_PATH],python[MAX_PATH],importer[MAX_PATH];
 } NinePaths;
 extern NinePaths nine_paths;
 int nine_paths_init(void);
+int nine_saves_prepare(const wchar_t *language,wchar_t *error,size_t count);
 FILE *nine_fopen(const char *path,const char *mode);
 #define SMT9_ROOT_FROM_EXE_W L"@SMT9_ROOT_FROM_EXE@"
 #define SMT9_IMAGE_RELATIVE_W L"@SMT9_IMAGE_RELATIVE@"
@@ -25,6 +27,7 @@ FILE *nine_fopen(const char *path,const char *mode);
 #define SMT9_GAME_DIR nine_paths.game_dir
 #define SMT9_XBE_PATH nine_paths.xbe
 #define SMT9_SAVE_DIR nine_paths.save
+#define SMT9_USER_DIR nine_paths.user
 #define SMT9_CHECKPOINT_PATH nine_paths.checkpoint
 #define SMT9_CONFIG_PATH_W nine_paths.config
 #define SMT9_JP_XBE_PATH nine_paths.jp_xbe

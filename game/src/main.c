@@ -486,20 +486,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         fprintf(stderr, "[STOP] graphics consumer startup failed\n");
         return 5;
     }
+    if(!nine_saves_prepare(s_language.id,config_error,256)) {
+        MessageBoxW(NULL,config_error,L"NINE",MB_OK|MB_ICONERROR);return 1;
+    }
 
     /* Step 4: Set game directory for file I/O path translation */
     {
         extern void xbox_path_init(const char *game_dir, const char *save_dir);
-        /* Partition1 opens the shared save root before any Media access.
-         * Its existing path must also exist when Chinese assets are omitted. */
-        wchar_t shared_save_root[MAX_PATH];
-        if(!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,YOUR_GAME_DIR,-1,shared_save_root,MAX_PATH))return 1;
-        int directory_result=SHCreateDirectoryExW(NULL,shared_save_root,NULL);
-        if(directory_result!=ERROR_SUCCESS && directory_result!=ERROR_ALREADY_EXISTS) {
-            fprintf(stderr,"Cannot create the shared save directory (Windows error %d).\n",directory_result);
-            return 1;
-        }
+        extern BOOL xbox_path_set_user_directory(const char *directory);
         xbox_path_init(YOUR_GAME_DIR, SMT9_SAVE_DIR);
+        if(!xbox_path_set_user_directory(SMT9_USER_DIR))return 1;
         char media_root[MAX_PATH],cache_id[64];
         extern void xbox_path_set_language_media(const char *language,const char *media_root);
         if(s_language.external) {

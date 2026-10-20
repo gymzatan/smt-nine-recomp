@@ -20,7 +20,7 @@ def test_update_preserves_data_and_checks_entire_payload(tmp_path):
     write(target,'smt9_recomp.exe',b'old program')
     write(target,'Config.exe',b'old config program')
     protected=[write(target,name,b'keep '+name.encode()) for name in
-               ('runtime/NINE.ini','data/japanese/Media/resource.bin','data/chinese/Media/resource.bin','data/japanese/UDATA/save.bin','runtime/languages/English.ini')]
+               ('runtime/NINE.ini','data/japanese/Media/resource.bin','data/chinese/Media/resource.bin','data/japanese/UDATA/save.bin','runtime/languages/English.ini','save/UDATA/ordinary.sav','save/states/Japanese/instant.slot1.state')]
     before={p:(p.read_bytes(),p.stat().st_mtime_ns) for p in protected}
     identity=write(target,'runtime/native_game_jp.xbe',b'compatible game')
     rows=[]

@@ -28,7 +28,7 @@ Config 提供 Auto、Vulkan、OpenGL、D3D12 和 D3D11。Auto 在初始化失败
 - **已编译的游玩目录：** 关闭游戏和 Config，双击 **Updater.exe**，点击**立即更新**。旧目录若没有更新器，从[发行页](https://github.com/gymzatan/smt-nine-recomp/releases/latest)下载 `Updater.exe`，放在 `smt9_recomp.exe` 旁边即可。自动匹配日文／日中安装，保留游戏数据、设置和存档；也可继续手动使用更新 ZIP 和 `Apply-Update.cmd`。
 - **源码目录（含已导入英文）：** 运行 `git pull`，再用原构建环境执行 `.\update.cmd`，不需要 ISO。
 
-保留原始游戏数据、设置和普通存档。已安装中文的目录同时更新中文运行文本；未安装中文的目录不下载中文资源。[详细更新说明](docs/BUILDING.md#compiled-program-updates)。
+保留原始游戏数据、设置和普通存档。各语言共用 **`save/UDATA`** 中的普通存档；备份整个 **`save`** 文件夹即可，也可用 **Config → 存档文件夹** 打开。首次使用自动复制旧存档并保留原件。已安装中文的目录同时更新中文运行文本；未安装中文的目录不下载中文资源。[详细更新说明](docs/BUILDING.md#compiled-program-updates)。
 
 ### 首次安装
 

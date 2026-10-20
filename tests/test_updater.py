@@ -58,6 +58,9 @@ def test_online_update(tmp_path,variant,case):
     (target/'runtime/NINE.ini').write_bytes(b'keep settings')
     (target/'runtime/instant.slot1.state').write_bytes(b'keep checkpoint')
     (target/'data').mkdir();(target/'data/save.bin').write_bytes(b'keep save')
+    (target/'save/states/Japanese').mkdir(parents=True)
+    (target/'save/ordinary.sav').write_bytes(b'keep shared save')
+    (target/'save/states/Japanese/instant.slot1.state').write_bytes(b'keep new checkpoint')
     identities=[{'path':'runtime/native_game_jp.xbe','sha256':sha(b'Japanese')}]
     if variant=='japanese-chinese':
         (target/'runtime/native_game.xbe').write_bytes(b'Chinese')
@@ -106,6 +109,8 @@ if ($again.ChangedFiles -ne 0) {{ throw 'Not current after update' }}
     assert (target/'runtime/NINE.ini').read_bytes()==b'keep settings'
     assert (target/'runtime/instant.slot1.state').read_bytes()==b'keep checkpoint'
     assert (target/'data/save.bin').read_bytes()==b'keep save'
+    assert (target/'save/ordinary.sav').read_bytes()==b'keep shared save'
+    assert (target/'save/states/Japanese/instant.slot1.state').read_bytes()==b'keep new checkpoint'
     if variant=='japanese-chinese':
         assert (target/'runtime/native_game.xbe').read_bytes()==(b'Updated Chinese text' if case=='valid' else b'Chinese')
         assert (target/'runtime/fonts/font2.bin').read_bytes()==b'Chinese font'
