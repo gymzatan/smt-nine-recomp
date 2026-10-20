@@ -859,11 +859,27 @@ static void verify_completed_output_work(void) {
     assert(event_query_creates==0);
     /* Neither a second pending output nor a synchronous barrier may reuse
      * an event whose original queue entry has not retired. */
+    protection_test_calls=0;
     hw_defer_output(output,101);hw_defer_output(output+4,102);
+    assert(protection_test_calls==views.view_count);
+    protection_pages_for_test(memory,views.offset&~(size_t)4095,1,PAGE_READONLY);
     assert(s_hw_query_count==2 && s_hw_queries[0].query!=s_hw_queries[1].query);
     ID3D11Query *first=s_hw_queries[0].query,*second=s_hw_queries[1].query;
     hw_complete_commands();assert(s_hw_completion!=first && s_hw_completion!=second);
+    protection_test_calls=0;
     hw_collect_queries(1);assert(!s_hw_query_count && ldl_le_p(output)==101 && ldl_le_p(output+4)==102);
+    assert(protection_test_calls==views.view_count);
+    /* Different and straddling output pages retain their own protection. */
+    uint8_t *edge=output-4+4094;
+    hw_defer_output(output,103);hw_defer_output(edge,104);
+    protection_pages_for_test(memory,views.offset&~(size_t)4095,2,PAGE_READONLY);
+    protection_test_calls=0;
+    hw_protect(memory,(views.offset&~(size_t)4095)+8192,4096,PAGE_READWRITE,NULL);
+    assert(protection_test_calls==views.view_count);
+    protection_pages_for_test(memory,views.offset&~(size_t)4095,2,PAGE_READONLY);
+    hw_collect_queries(1);
+    assert(ldl_le_p(output)==103 && ldl_le_p(edge)==104);
+    protection_pages_for_test(memory,views.offset&~(size_t)4095,3,PAGE_READWRITE);
     assert(s_hw_completion);
     protection_test_inspect=1;
 }

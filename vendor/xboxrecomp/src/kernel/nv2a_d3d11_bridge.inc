@@ -55,19 +55,21 @@ static void hw_program_triangle(uint32_t a,uint32_t b,uint32_t c,uint32_t p)
     indices[0]=s_hw_program_vertex_rows[a];indices[1]=s_hw_program_vertex_rows[p];
     indices[2]=s_hw_program_vertex_rows[b];indices[3]=s_hw_program_vertex_rows[p];
     indices[4]=s_hw_program_vertex_rows[c];indices[5]=s_hw_program_vertex_rows[p];
+    if(!s_hw_count) note_drawn();
     s_hw_count+=6;
-    note_drawn();
 }
 static void hw_program_line(uint32_t a,uint32_t b,uint32_t p)
 {
     uint32_t *indices=s_hw_program_upload.indices+s_hw_count;
     indices[0]=s_hw_program_vertex_rows[p];indices[1]=s_hw_program_vertex_rows[a];
     indices[2]=s_hw_program_vertex_rows[b];indices[3]=s_hw_program_vertex_rows[p];
-    s_hw_count+=4;note_drawn();
+    if(!s_hw_count) note_drawn();
+    s_hw_count+=4;
 }
 static void hw_program_point(uint32_t i)
 {
-    s_hw_program_upload.indices[s_hw_count++]=s_hw_program_vertex_rows[i];note_drawn();
+    if(!s_hw_count) note_drawn();
+    s_hw_program_upload.indices[s_hw_count++]=s_hw_program_vertex_rows[i];
 }
 static ID3D11Buffer *s_hw_ps_cb;
 typedef struct HwPixelState {
@@ -146,25 +148,51 @@ static int hw_pending_output(HwMemory *memory,size_t offset,size_t bytes)
     }
     return 0;
 }
-static void hw_output_page_protection(HwQuery *query)
+enum HwOutputProtection { HW_OUTPUT_REFRESH, HW_OUTPUT_APPEND, HW_OUTPUT_COMPLETE };
+static void hw_output_page_protection(HwQuery *query, enum HwOutputProtection transition)
 {
     size_t lo=query->offset&~(size_t)4095,hi=(query->offset+4+4095)&~(size_t)4095;
     for(size_t page=lo;page<hi;page+=4096) {
-        DWORD protection=hw_pending_output(query->memory,page,4096)?PAGE_READONLY:PAGE_READWRITE;
+        /* Appending an output cannot change a page already protected by a
+         * pending output. The original queue is the sole pending identity. */
+        if(transition==HW_OUTPUT_APPEND) {
+            int protected=0;
+            for(size_t i=0;i<(size_t)s_hw_query_count;i++) {
+                HwQuery *q=&s_hw_queries[i];
+                if(q->memory==query->memory && q->query && q->query!=query->query &&
+                   hw_ranges_overlap(page,4096,q->offset,4)) {protected=1;break;}
+            }
+            if(protected) continue;
+        }
+        int pending=hw_pending_output(query->memory,page,4096),colour=0;
+        DWORD protection=pending?PAGE_READONLY:PAGE_READWRITE;
         for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==query->memory && hw_ranges_overlap(page,4096,c->memory_offset,hw_color_bytes(c))) {
+            colour=1;
             if(c->dirty) {protection=PAGE_NOACCESS;break;}
             if(!c->upload_needed) protection=PAGE_READONLY;
         }
+        /* Other pending outputs still own this already read-only page. */
+        if(transition==HW_OUTPUT_COMPLETE && pending && !colour) continue;
         hw_protect_views(query->memory,page,4096,protection);
     }
 }
 static void hw_protect(HwMemory *memory,size_t offset,size_t bytes,DWORD protection,HwQuery *completed)
 {
-    if(completed) hw_output_page_protection(completed);
-    else hw_protect_views(memory,offset,bytes,protection);
+    /* Completion already resolves every owner of its output pages. No
+     * other page was changed, so pending outputs elsewhere stay protected. */
+    size_t lo=offset&~(size_t)4095,hi=(offset+bytes+4095)&~(size_t)4095;
+    if(completed) {
+        hw_output_page_protection(completed,HW_OUTPUT_COMPLETE);
+        /* A colour readback can change ownership on its other pages too. */
+        int colour=0;
+        for(HwColor *c=s_hw_colors;c;c=c->next)
+            if(c->memory==memory && hw_ranges_overlap(lo,hi-lo,c->memory_offset,hw_color_bytes(c))) {colour=1;break;}
+        if(!colour)return;
+    } else hw_protect_views(memory,offset,bytes,protection);
     for(size_t i=0;i<(size_t)s_hw_query_count;i++) {
         HwQuery *q=&s_hw_queries[i];
-        if(q->memory==memory && q->query) hw_output_page_protection(q);
+        if(q->memory==memory && q->query && (completed || hw_ranges_overlap(lo,hi-lo,q->offset,4)))
+            hw_output_page_protection(q,HW_OUTPUT_REFRESH);
     }
 }
 static void hw_append_query(HwQuery query)
@@ -187,7 +215,7 @@ static void hw_defer_output(uint8_t *output,uint32_t value)
         hw_check(ID3D11Device_CreateQuery(d3d8_GetD3D11Device(),&desc,&query.query),"semaphore completion event");
     }
     ID3D11DeviceContext_End(d3d8_GetD3D11Context(),(ID3D11Asynchronous *)query.query);
-    hw_append_query(query);hw_output_page_protection(&query);
+    hw_append_query(query);hw_output_page_protection(&query,HW_OUTPUT_APPEND);
     gpu_timing_finish(start,&s_gpu.hardware_gpu_completion_ticks);
     hw_leave();
 }

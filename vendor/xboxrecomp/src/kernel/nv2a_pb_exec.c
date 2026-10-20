@@ -3312,7 +3312,12 @@ static int imm_vertex_method(uint32_t method, uint32_t param)
  * 0x1B00 + 0x40*i onwards; only stage 0 used to be decoded, which was
  * enough for menus drawn one texture at a time and not for a 3D frame that
  * composites its scene through a second stage. */
-static void tex_stage_method(uint32_t method, uint32_t param)
+#if defined(_MSC_VER)
+#define NV_NOINLINE __declspec(noinline)
+#else
+#define NV_NOINLINE __attribute__((noinline))
+#endif
+static NV_NOINLINE void tex_stage_method(uint32_t method, uint32_t param)
 {
     uint32_t stage = (method - NV_TEX_FIRST) / 0x40;
     uint32_t reg = NV_TEX_FIRST + ((method - NV_TEX_FIRST) & 0x3F);
@@ -3858,7 +3863,30 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
     return 0;
 }
 
-int nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param, uint8_t *output)
+/* Keep initialization and tracing out of the per-word dispatch body. The
+ * same consumer handles both diagnostic and ordinary calls. */
+static int nv2a_pb_exec_active(uint32_t subch, uint32_t method, uint32_t param, uint8_t *output)
+{
+    if (subch == 0 && method >= NV_TEX_FIRST && method <= NV_TEX_LAST) {
+        tex_stage_method(method, param);
+        return 0;
+    }
+    if (subch != 0) {                      /* 3D class lives on subchannel 0 */
+        note_unhandled(method, param);
+        return 0;
+    }
+    if (method >= 0x0B00 && method < 0x0B80) {    /* TRANSFORM_PROGRAM(i) */
+        nv2a_vsh_program_word(param);
+        return 0;
+    }
+    if (method >= 0x0B80 && method < 0x0C00) {    /* TRANSFORM_CONSTANT(i) */
+        nv2a_vsh_constant_word(param);
+        return 0;
+    }
+    return nv2a_pb_exec_state(method, param, output);
+}
+
+static NV_NOINLINE int nv2a_pb_exec_diagnostic(uint32_t subch, uint32_t method, uint32_t param, uint8_t *output)
 {
     static int inited;
     if (!inited) {
@@ -3907,23 +3935,14 @@ int nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param, uint8_t
             fprintf(stderr, "[FTRACE]   m %u:%04X = %08X%c", subch, method,
                     param, 10);
     }
-    if (subch == 0 && method >= NV_TEX_FIRST && method <= NV_TEX_LAST) {
-        tex_stage_method(method, param);
-        return 0;
-    }
-    if (subch != 0) {                      /* 3D class lives on subchannel 0 */
-        note_unhandled(method, param);
-        return 0;
-    }
-    if (method >= 0x0B00 && method < 0x0B80) {    /* TRANSFORM_PROGRAM(i) */
-        nv2a_vsh_program_word(param);
-        return 0;
-    }
-    if (method >= 0x0B80 && method < 0x0C00) {    /* TRANSFORM_CONSTANT(i) */
-        nv2a_vsh_constant_word(param);
-        return 0;
-    }
-    return nv2a_pb_exec_state(method, param, output);
+    return nv2a_pb_exec_active(subch,method,param,output);
+}
+
+int nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param, uint8_t *output)
+{
+    if(s_pb_exec_verbose || s_ftrace==2)
+        return nv2a_pb_exec_diagnostic(subch,method,param,output);
+    return nv2a_pb_exec_active(subch,method,param,output);
 }
 
 /* Both modes collect the same ordered completion queries. */
