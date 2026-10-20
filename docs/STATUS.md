@@ -10,6 +10,8 @@ Window entry effects reuse the visible UI rectangle for both the original transi
 
 Config supports independently saved keyboard and XInput bindings for 24 game actions, input capture, unbound inputs and restoring defaults. It reuses the existing window-key and controller polling paths; analog pressure, foreground gating and the keyboard/controller merge remain in place.
 
+The original callback catalog includes long exception-handled callbacks, forwarding entries and conditionally selected pointers, with their original out-of-line branch ranges. The supplied Shibuya story battle state runs through a 30-minute supervised replay without the reported unresolved-call exit; displayed verification includes later battle turns and skill effects. Full-game computed-target and battle coverage remains incomplete.
+
 Known coverage limits:
 
 - Horizontal character gaps and incorrect occlusion have been reported on some player configurations. Local four-backend street samples and an AMD-integrated D3D11 sample did not reproduce them; the exact female-player and restaurant scenes, affected builds and drivers remain unverified. A graphics-memory cause has not been established, and 512 MiB support is not certified. See the README for hardware requirements and memory-report fields.

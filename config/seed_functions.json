@@ -353,5 +353,1750 @@
   "start": "0x0002268C",
   "observed": true,
   "note": "Original fusion callback registered by 00022978 at 00022A10; actual unresolved call from 0003D548 return 0003D54A in chapter2_current/run.err."
+ },
+ {
+  "start": "0x000484CE",
+  "observed": true,
+  "note": "Effect callback passed to the original effect registrar; complete body validated with the existing disassembler."
+ },
+ {
+  "start": "0x0008C721",
+  "observed": false,
+  "note": "Effect callback passed to the original effect registrar; complete body validated with the existing disassembler."
+ },
+ {
+  "start": "0x0009ACE7",
+  "observed": false,
+  "note": "Effect callback passed to the original effect registrar; complete body validated with the existing disassembler."
+ },
+ {
+  "start": "0x000C9927",
+  "observed": false,
+  "note": "Effect callback passed to the original effect registrar; complete body validated with the existing disassembler."
+ },
+ {
+  "start": "0x000CFBC4",
+  "observed": false,
+  "note": "Effect callback passed to the original effect registrar; complete body validated with the existing disassembler."
+ },
+ {
+  "start": "0x000DA481",
+  "observed": false,
+  "note": "Effect callback passed to the original effect registrar; complete body validated with the existing disassembler."
+ },
+ {
+  "start": "0x000DD869",
+  "observed": false,
+  "note": "Effect callback passed to the original effect registrar; complete body validated with the existing disassembler."
+ },
+ {
+  "start": "0x000E4331",
+  "observed": false,
+  "note": "Effect callback passed to the original effect registrar; complete body validated with the existing disassembler."
+ },
+ {
+  "start": "0x00035A68",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00033823"
+  ]
+ },
+ {
+  "start": "0x00054059",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00054117"
+  ]
+ },
+ {
+  "start": "0x00056FCC",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00057031"
+  ]
+ },
+ {
+  "start": "0x00088EBB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0008AF40"
+  ]
+ },
+ {
+  "start": "0x000898AA",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0008B56B"
+  ]
+ },
+ {
+  "start": "0x00089E25",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0008AF2B"
+  ]
+ },
+ {
+  "start": "0x0008A316",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0008B54E"
+  ]
+ },
+ {
+  "start": "0x0008A573",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0008AF55",
+   "0x0008B073"
+  ]
+ },
+ {
+  "start": "0x0008A7EF",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0008B57A",
+   "0x0008B6AF"
+  ]
+ },
+ {
+  "start": "0x0009A1F2",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0009F351"
+  ]
+ },
+ {
+  "start": "0x000BE9BB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000C06BA"
+  ]
+ },
+ {
+  "start": "0x001E183F",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x001CDE51"
+  ]
+ },
+ {
+  "start": "0x001E1AB4",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x001CDE25"
+  ]
+ },
+ {
+  "start": "0x001FE639",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x001FEACE"
+  ]
+ },
+ {
+  "start": "0x0001D0EE",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0001F85F",
+   "0x0001F905",
+   "0x00245EC1"
+  ]
+ },
+ {
+  "start": "0x0001F765",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000202A6",
+   "0x0002033B",
+   "0x00246062"
+  ]
+ },
+ {
+  "start": "0x0004D151",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0004DD2D",
+   "0x0004DD4A"
+  ]
+ },
+ {
+  "start": "0x0004F7A8",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00050255",
+   "0x00050991",
+   "0x002475AC",
+   "0x00247648"
+  ]
+ },
+ {
+  "start": "0x00056FF0",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0005702C",
+   "0x000571D3",
+   "0x0024786E"
+  ]
+ },
+ {
+  "start": "0x00060B8A",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00060BE9",
+   "0x00060D7F",
+   "0x00247D6C"
+  ]
+ },
+ {
+  "start": "0x00060BB3",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000612CB",
+   "0x0006154F",
+   "0x00247E09"
+  ]
+ },
+ {
+  "start": "0x00063791",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00063751",
+   "0x000637CA"
+  ]
+ },
+ {
+  "start": "0x00067B34",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00068E28",
+   "0x00092CB1"
+  ]
+ },
+ {
+  "start": "0x0006B63E",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0006BDD8",
+   "0x000988CB",
+   "0x00248951",
+   "0x0024B116"
+  ]
+ },
+ {
+  "start": "0x0006E5B8",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00074205",
+   "0x00074530",
+   "0x00249107",
+   "0x0024914A"
+  ]
+ },
+ {
+  "start": "0x00072E96",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00074225",
+   "0x00074510",
+   "0x00249120"
+  ]
+ },
+ {
+  "start": "0x0008E7D0",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0008F596",
+   "0x0008F832",
+   "0x0024A9A8"
+  ]
+ },
+ {
+  "start": "0x000A47FB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000A6346",
+   "0x000A6AA6",
+   "0x0024BC39"
+  ]
+ },
+ {
+  "start": "0x000A91AF",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000B0878",
+   "0x000B09B6",
+   "0x0024C33B"
+  ]
+ },
+ {
+  "start": "0x000B8327",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000B8D8A",
+   "0x000B9013",
+   "0x0024CB5D"
+  ]
+ },
+ {
+  "start": "0x000C3CEB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000C52E6",
+   "0x000C54AF",
+   "0x0024D566"
+  ]
+ },
+ {
+  "start": "0x000E37B9",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000E4B62",
+   "0x000E4CBD",
+   "0x0024EF57",
+   "0x0024EF92"
+  ]
+ },
+ {
+  "start": "0x0016B01B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0016B025"
+  ]
+ },
+ {
+  "start": "0x0024574B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00011906"
+  ]
+ },
+ {
+  "start": "0x0024576B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00015C6B"
+  ]
+ },
+ {
+  "start": "0x0024578B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00017B92"
+  ]
+ },
+ {
+  "start": "0x002457AE",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00017EAE"
+  ]
+ },
+ {
+  "start": "0x0024EFF2",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000E5192"
+  ]
+ },
+ {
+  "start": "0x0024F00B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000E81A2"
+  ]
+ },
+ {
+  "start": "0x0024F032",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000E82A2"
+  ]
+ },
+ {
+  "start": "0x0024F048",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000E8462"
+  ]
+ },
+ {
+  "start": "0x0024F068",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000EABC2"
+  ]
+ },
+ {
+  "start": "0x0024F0B8",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000ECE42"
+  ]
+ },
+ {
+  "start": "0x0024F16B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000EF722"
+  ]
+ },
+ {
+  "start": "0x0024F188",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000EFA22"
+  ]
+ },
+ {
+  "start": "0x0024F218",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000F0342"
+  ]
+ },
+ {
+  "start": "0x0024F238",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000F03D2"
+  ]
+ },
+ {
+  "start": "0x0024F258",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000F0442"
+  ]
+ },
+ {
+  "start": "0x0024F99B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000F5A82"
+  ]
+ },
+ {
+  "start": "0x0024F9BB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000F6752"
+  ]
+ },
+ {
+  "start": "0x0024F9DB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000F7EC2"
+  ]
+ },
+ {
+  "start": "0x0024FAB8",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000FA302"
+  ]
+ },
+ {
+  "start": "0x0024FAD8",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000FA38C"
+  ]
+ },
+ {
+  "start": "0x0024FAF8",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000FA43C"
+  ]
+ },
+ {
+  "start": "0x0024FBB2",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000FB292"
+  ]
+ },
+ {
+  "start": "0x0024FEDB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000FD9E2"
+  ]
+ },
+ {
+  "start": "0x0024FEFB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000FDA42"
+  ]
+ },
+ {
+  "start": "0x0024FF1B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000FDAA2"
+  ]
+ },
+ {
+  "start": "0x0024FF3B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000FDB42"
+  ]
+ },
+ {
+  "start": "0x0024FF5B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000FDBE2"
+  ]
+ },
+ {
+  "start": "0x0024FF7B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000FDC62"
+  ]
+ },
+ {
+  "start": "0x0024FFC8",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x000FDFB2"
+  ]
+ },
+ {
+  "start": "0x0025012B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00101332"
+  ]
+ },
+ {
+  "start": "0x00250188",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00102228"
+  ]
+ },
+ {
+  "start": "0x002501A8",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x001022FC"
+  ]
+ },
+ {
+  "start": "0x002501FB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00102B38"
+  ]
+ },
+ {
+  "start": "0x0025021B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00102E28"
+  ]
+ },
+ {
+  "start": "0x0025023B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00102F28"
+  ]
+ },
+ {
+  "start": "0x00250562",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x001051E2"
+  ]
+ },
+ {
+  "start": "0x0025057B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x001056E2"
+  ]
+ },
+ {
+  "start": "0x00250598",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00107332"
+  ]
+ },
+ {
+  "start": "0x002505D8",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0010744C"
+  ]
+ },
+ {
+  "start": "0x00250628",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00107682"
+  ]
+ },
+ {
+  "start": "0x0025078B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00108482"
+  ]
+ },
+ {
+  "start": "0x002507B2",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00108638"
+  ]
+ },
+ {
+  "start": "0x002507C8",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00108E72"
+  ]
+ },
+ {
+  "start": "0x002526DB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x001A7C98"
+  ]
+ },
+ {
+  "start": "0x00254178",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0020D992"
+  ]
+ },
+ {
+  "start": "0x00254198",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0020D9E2"
+  ]
+ },
+ {
+  "start": "0x002541B8",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00210922"
+  ]
+ },
+ {
+  "start": "0x002541D8",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00210972"
+  ]
+ },
+ {
+  "start": "0x00254238",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00214C12"
+  ]
+ },
+ {
+  "start": "0x00254258",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00214C62"
+  ]
+ },
+ {
+  "start": "0x0025D330",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00254ABA"
+  ]
+ },
+ {
+  "start": "0x0025D33A",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00254AD2"
+  ]
+ },
+ {
+  "start": "0x0025D344",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00254B08"
+  ]
+ },
+ {
+  "start": "0x0025D359",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00022D65"
+  ]
+ },
+ {
+  "start": "0x0025D363",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002569C1"
+  ]
+ },
+ {
+  "start": "0x0025D36D",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002569D9"
+  ]
+ },
+ {
+  "start": "0x0025D377",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002569EF"
+  ]
+ },
+ {
+  "start": "0x0025D381",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256A05"
+  ]
+ },
+ {
+  "start": "0x0025D38B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256A1B"
+  ]
+ },
+ {
+  "start": "0x0025D395",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256A31"
+  ]
+ },
+ {
+  "start": "0x0025D39F",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256A47"
+  ]
+ },
+ {
+  "start": "0x0025D3A9",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256B1D"
+  ]
+ },
+ {
+  "start": "0x0025D3B3",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256B33"
+  ]
+ },
+ {
+  "start": "0x0025D3BD",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256B49"
+  ]
+ },
+ {
+  "start": "0x0025D3C7",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256B5F"
+  ]
+ },
+ {
+  "start": "0x0025D3D1",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256B75"
+  ]
+ },
+ {
+  "start": "0x0025D3DB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256B8B"
+  ]
+ },
+ {
+  "start": "0x0025D3E5",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256BA1"
+  ]
+ },
+ {
+  "start": "0x0025D3EF",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256BB7"
+  ]
+ },
+ {
+  "start": "0x0025D3F9",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256BCD"
+  ]
+ },
+ {
+  "start": "0x0025D403",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256DF1"
+  ]
+ },
+ {
+  "start": "0x0025D40D",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256E07"
+  ]
+ },
+ {
+  "start": "0x0025D417",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256E1D"
+  ]
+ },
+ {
+  "start": "0x0025D421",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256E33"
+  ]
+ },
+ {
+  "start": "0x0025D42B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256EDF"
+  ]
+ },
+ {
+  "start": "0x0025D435",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256EF5"
+  ]
+ },
+ {
+  "start": "0x0025D43F",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256F0B"
+  ]
+ },
+ {
+  "start": "0x0025D449",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256F21"
+  ]
+ },
+ {
+  "start": "0x0025D453",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256F37"
+  ]
+ },
+ {
+  "start": "0x0025D45D",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256F4D"
+  ]
+ },
+ {
+  "start": "0x0025D467",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256F63"
+  ]
+ },
+ {
+  "start": "0x0025D471",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256FE5"
+  ]
+ },
+ {
+  "start": "0x0025D47B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00256FFB"
+  ]
+ },
+ {
+  "start": "0x0025D485",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257011"
+  ]
+ },
+ {
+  "start": "0x0025D48F",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257027"
+  ]
+ },
+ {
+  "start": "0x0025D499",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257063"
+  ]
+ },
+ {
+  "start": "0x0025D4A3",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257079"
+  ]
+ },
+ {
+  "start": "0x0025D4AD",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025710B"
+  ]
+ },
+ {
+  "start": "0x0025D4B7",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002573EA"
+  ]
+ },
+ {
+  "start": "0x0025D4C1",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257400"
+  ]
+ },
+ {
+  "start": "0x0025D4CB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257416"
+  ]
+ },
+ {
+  "start": "0x0025D4D5",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025763B"
+  ]
+ },
+ {
+  "start": "0x0025D4DF",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257651"
+  ]
+ },
+ {
+  "start": "0x0025D4E9",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002576C0"
+  ]
+ },
+ {
+  "start": "0x0025D4F3",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257790"
+  ]
+ },
+ {
+  "start": "0x0025D4FD",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002577A6"
+  ]
+ },
+ {
+  "start": "0x0025D507",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002577BC"
+  ]
+ },
+ {
+  "start": "0x0025D511",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002577D2"
+  ]
+ },
+ {
+  "start": "0x0025D51B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002577E8"
+  ]
+ },
+ {
+  "start": "0x0025D525",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002577FE"
+  ]
+ },
+ {
+  "start": "0x0025D52F",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257814"
+  ]
+ },
+ {
+  "start": "0x0025D539",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025782A"
+  ]
+ },
+ {
+  "start": "0x0025D543",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257840"
+  ]
+ },
+ {
+  "start": "0x0025D54D",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257856"
+  ]
+ },
+ {
+  "start": "0x0025D557",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025786C"
+  ]
+ },
+ {
+  "start": "0x0025D561",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257882"
+  ]
+ },
+ {
+  "start": "0x0025D56B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257898"
+  ]
+ },
+ {
+  "start": "0x0025D575",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002578AE"
+  ]
+ },
+ {
+  "start": "0x0025D57F",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002578C4"
+  ]
+ },
+ {
+  "start": "0x0025D589",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002578DA"
+  ]
+ },
+ {
+  "start": "0x0025D593",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002578F0"
+  ]
+ },
+ {
+  "start": "0x0025D59D",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00257906"
+  ]
+ },
+ {
+  "start": "0x0025D5A7",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002580BC"
+  ]
+ },
+ {
+  "start": "0x0025D5B1",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002580D2"
+  ]
+ },
+ {
+  "start": "0x0025D5BB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002582EF"
+  ]
+ },
+ {
+  "start": "0x0025D5C5",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258305"
+  ]
+ },
+ {
+  "start": "0x0025D5CF",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025831B"
+  ]
+ },
+ {
+  "start": "0x0025D5D9",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002583EB"
+  ]
+ },
+ {
+  "start": "0x0025D5E3",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002584EF"
+  ]
+ },
+ {
+  "start": "0x0025D5ED",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258678"
+  ]
+ },
+ {
+  "start": "0x0025D5F7",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025868E"
+  ]
+ },
+ {
+  "start": "0x0025D601",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002586A4"
+  ]
+ },
+ {
+  "start": "0x0025D60B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002586BA"
+  ]
+ },
+ {
+  "start": "0x0025D615",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002586D0"
+  ]
+ },
+ {
+  "start": "0x0025D61F",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002586E6"
+  ]
+ },
+ {
+  "start": "0x0025D629",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002586FC"
+  ]
+ },
+ {
+  "start": "0x0025D633",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258712"
+  ]
+ },
+ {
+  "start": "0x0025D63D",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258967"
+  ]
+ },
+ {
+  "start": "0x0025D647",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025897D"
+  ]
+ },
+ {
+  "start": "0x0025D651",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258993"
+  ]
+ },
+ {
+  "start": "0x0025D65B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258C5C"
+  ]
+ },
+ {
+  "start": "0x0025D665",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258D5F"
+  ]
+ },
+ {
+  "start": "0x0025D66F",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258DD6"
+  ]
+ },
+ {
+  "start": "0x0025D679",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258DEC"
+  ]
+ },
+ {
+  "start": "0x0025D683",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258E97"
+  ]
+ },
+ {
+  "start": "0x0025D68D",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258F32"
+  ]
+ },
+ {
+  "start": "0x0025D697",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258F69"
+  ]
+ },
+ {
+  "start": "0x0025D6A1",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258F7F"
+  ]
+ },
+ {
+  "start": "0x0025D6AB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258F95"
+  ]
+ },
+ {
+  "start": "0x0025D6B5",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258FAB"
+  ]
+ },
+ {
+  "start": "0x0025D6BF",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258FC1"
+  ]
+ },
+ {
+  "start": "0x0025D6C9",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00258FD7"
+  ]
+ },
+ {
+  "start": "0x0025D6D3",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00259033"
+  ]
+ },
+ {
+  "start": "0x0025D6DD",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00259151"
+  ]
+ },
+ {
+  "start": "0x0025D6E7",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002592AD"
+  ]
+ },
+ {
+  "start": "0x0025D6F1",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002592C3"
+  ]
+ },
+ {
+  "start": "0x0025D6FB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002592D9"
+  ]
+ },
+ {
+  "start": "0x0025D705",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002592EF"
+  ]
+ },
+ {
+  "start": "0x0025D70F",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00259345"
+  ]
+ },
+ {
+  "start": "0x0025D719",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00259435"
+  ]
+ },
+ {
+  "start": "0x0025D723",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x002594FD"
+  ]
+ },
+ {
+  "start": "0x0025D72D",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025953E"
+  ]
+ },
+ {
+  "start": "0x0025D737",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00259554"
+  ]
+ },
+ {
+  "start": "0x0025D741",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025956A"
+  ]
+ },
+ {
+  "start": "0x0025D74B",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x00259580"
+  ]
+ },
+ {
+  "start": "0x0025D97D",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025CFCD"
+  ]
+ },
+ {
+  "start": "0x0025D988",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025D121"
+  ]
+ },
+ {
+  "start": "0x0025D9AF",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025D18F"
+  ]
+ },
+ {
+  "start": "0x0025D9B9",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025D1A5"
+  ]
+ },
+ {
+  "start": "0x0025D9C3",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025D1D1"
+  ]
+ },
+ {
+  "start": "0x0025D9CD",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025D1FB"
+  ]
+ },
+ {
+  "start": "0x0025D9D7",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025D211"
+  ]
+ },
+ {
+  "start": "0x0025D9E1",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025D231"
+  ]
+ },
+ {
+  "start": "0x0025D9EB",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025D1BB"
+  ]
+ },
+ {
+  "start": "0x0025D9F5",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025D249"
+  ]
+ },
+ {
+  "start": "0x0025D9FF",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025D25F"
+  ]
+ },
+ {
+  "start": "0x0025DA20",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025D2BD"
+  ]
+ },
+ {
+  "start": "0x0025DA2A",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0025D2D5"
+  ]
+ },
+ {
+  "start": "0x00270DE5",
+  "observed": false,
+  "note": "Original address-taken entry; caller, complete body and tail target checked with the existing disassembler.",
+  "registration_sites": [
+   "0x0027193A"
+  ]
+ },
+ {
+  "start": "0x0002252E",
+  "observed": false,
+  "note": "Original tail target or shared branch entry recovered by the full detector from the expanded callback seeds."
+ },
+ {
+  "start": "0x00147A43",
+  "observed": false,
+  "note": "Original tail target or shared branch entry recovered by the full detector from the expanded callback seeds."
+ },
+ {
+  "start": "0x001501AC",
+  "observed": false,
+  "note": "Original tail target or shared branch entry recovered by the full detector from the expanded callback seeds."
+ },
+ {
+  "start": "0x001510FB",
+  "observed": false,
+  "note": "Original tail target or shared branch entry recovered by the full detector from the expanded callback seeds."
+ },
+ {
+  "start": "0x0016AF43",
+  "observed": false,
+  "note": "Original tail target or shared branch entry recovered by the full detector from the expanded callback seeds."
+ },
+ {
+  "start": "0x0016AFC7",
+  "observed": false,
+  "note": "Original tail target or shared branch entry recovered by the full detector from the expanded callback seeds."
+ },
+ {
+  "start": "0x0016B02B",
+  "observed": false,
+  "note": "Original tail target or shared branch entry recovered by the full detector from the expanded callback seeds."
+ },
+ {
+  "start": "0x0016B65E",
+  "observed": false,
+  "note": "Original tail target or shared branch entry recovered by the full detector from the expanded callback seeds."
+ },
+ {
+  "start": "0x001B4DF6",
+  "observed": false,
+  "note": "Original tail target or shared branch entry recovered by the full detector from the expanded callback seeds."
+ },
+ {
+  "start": "0x0008726B",
+  "observed": false,
+  "note": "Original callback selected by neg/sbb/and at 0x89651, passed to 0x828FE and invoked through the stored pointer at 0x84F67; observed in the supplied battle state."
  }
 ]

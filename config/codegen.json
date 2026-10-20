@@ -18,6 +18,1278 @@
   ],
   "functions": [
     {
+      "address": 553579,
+      "name": "sub_0008726B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 140590,
+      "name": "sub_0002252E",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 1342019,
+      "name": "sub_00147A43",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 1376684,
+      "name": "sub_001501AC",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 1380603,
+      "name": "sub_001510FB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 1486659,
+      "name": "sub_0016AF43",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 1486791,
+      "name": "sub_0016AFC7",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 1486891,
+      "name": "sub_0016B02B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 1488478,
+      "name": "sub_0016B65E",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 1789430,
+      "name": "sub_001B4DF6",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 219752,
+      "name": "sub_00035A68",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 344153,
+      "name": "sub_00054059",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 356300,
+      "name": "sub_00056FCC",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 560827,
+      "name": "sub_00088EBB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 563370,
+      "name": "sub_000898AA",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 564773,
+      "name": "sub_00089E25",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 566038,
+      "name": "sub_0008A316",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 566643,
+      "name": "sub_0008A573",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 567279,
+      "name": "sub_0008A7EF",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 631282,
+      "name": "sub_0009A1F2",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 780731,
+      "name": "sub_000BE9BB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 1972287,
+      "name": "sub_001E183F",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 1972916,
+      "name": "sub_001E1AB4",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2090553,
+      "name": "sub_001FE639",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 119022,
+      "name": "sub_0001D0EE",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 128869,
+      "name": "sub_0001F765",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 315729,
+      "name": "sub_0004D151",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 325544,
+      "name": "sub_0004F7A8",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 356336,
+      "name": "sub_00056FF0",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 396170,
+      "name": "sub_00060B8A",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 396211,
+      "name": "sub_00060BB3",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 407441,
+      "name": "sub_00063791",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 424756,
+      "name": "sub_00067B34",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 439870,
+      "name": "sub_0006B63E",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 452024,
+      "name": "sub_0006E5B8",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 470678,
+      "name": "sub_00072E96",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 583632,
+      "name": "sub_0008E7D0",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 673787,
+      "name": "sub_000A47FB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 692655,
+      "name": "sub_000A91AF",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 754471,
+      "name": "sub_000B8327",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 802027,
+      "name": "sub_000C3CEB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 931769,
+      "name": "sub_000E37B9",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 1486875,
+      "name": "sub_0016B01B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2381643,
+      "name": "sub_0024574B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2381675,
+      "name": "sub_0024576B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2381707,
+      "name": "sub_0024578B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2381742,
+      "name": "sub_002457AE",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2420722,
+      "name": "sub_0024EFF2",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2420747,
+      "name": "sub_0024F00B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2420786,
+      "name": "sub_0024F032",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2420808,
+      "name": "sub_0024F048",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2420840,
+      "name": "sub_0024F068",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2420920,
+      "name": "sub_0024F0B8",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2421099,
+      "name": "sub_0024F16B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2421128,
+      "name": "sub_0024F188",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2421272,
+      "name": "sub_0024F218",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2421304,
+      "name": "sub_0024F238",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2421336,
+      "name": "sub_0024F258",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2423195,
+      "name": "sub_0024F99B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2423227,
+      "name": "sub_0024F9BB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2423259,
+      "name": "sub_0024F9DB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2423480,
+      "name": "sub_0024FAB8",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2423512,
+      "name": "sub_0024FAD8",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2423544,
+      "name": "sub_0024FAF8",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2423730,
+      "name": "sub_0024FBB2",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2424539,
+      "name": "sub_0024FEDB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2424571,
+      "name": "sub_0024FEFB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2424603,
+      "name": "sub_0024FF1B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2424635,
+      "name": "sub_0024FF3B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2424667,
+      "name": "sub_0024FF5B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2424699,
+      "name": "sub_0024FF7B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2424776,
+      "name": "sub_0024FFC8",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2425131,
+      "name": "sub_0025012B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2425224,
+      "name": "sub_00250188",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2425256,
+      "name": "sub_002501A8",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2425339,
+      "name": "sub_002501FB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2425371,
+      "name": "sub_0025021B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2425403,
+      "name": "sub_0025023B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2426210,
+      "name": "sub_00250562",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2426235,
+      "name": "sub_0025057B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2426264,
+      "name": "sub_00250598",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2426328,
+      "name": "sub_002505D8",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2426408,
+      "name": "sub_00250628",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2426763,
+      "name": "sub_0025078B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2426802,
+      "name": "sub_002507B2",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2426824,
+      "name": "sub_002507C8",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2434779,
+      "name": "sub_002526DB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2441592,
+      "name": "sub_00254178",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2441624,
+      "name": "sub_00254198",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2441656,
+      "name": "sub_002541B8",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2441688,
+      "name": "sub_002541D8",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2441784,
+      "name": "sub_00254238",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2441816,
+      "name": "sub_00254258",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2478896,
+      "name": "sub_0025D330",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2478906,
+      "name": "sub_0025D33A",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2478916,
+      "name": "sub_0025D344",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2478937,
+      "name": "sub_0025D359",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2478947,
+      "name": "sub_0025D363",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2478957,
+      "name": "sub_0025D36D",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2478967,
+      "name": "sub_0025D377",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2478977,
+      "name": "sub_0025D381",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2478987,
+      "name": "sub_0025D38B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2478997,
+      "name": "sub_0025D395",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479007,
+      "name": "sub_0025D39F",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479017,
+      "name": "sub_0025D3A9",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479027,
+      "name": "sub_0025D3B3",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479037,
+      "name": "sub_0025D3BD",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479047,
+      "name": "sub_0025D3C7",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479057,
+      "name": "sub_0025D3D1",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479067,
+      "name": "sub_0025D3DB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479077,
+      "name": "sub_0025D3E5",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479087,
+      "name": "sub_0025D3EF",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479097,
+      "name": "sub_0025D3F9",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479107,
+      "name": "sub_0025D403",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479117,
+      "name": "sub_0025D40D",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479127,
+      "name": "sub_0025D417",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479137,
+      "name": "sub_0025D421",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479147,
+      "name": "sub_0025D42B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479157,
+      "name": "sub_0025D435",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479167,
+      "name": "sub_0025D43F",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479177,
+      "name": "sub_0025D449",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479187,
+      "name": "sub_0025D453",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479197,
+      "name": "sub_0025D45D",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479207,
+      "name": "sub_0025D467",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479217,
+      "name": "sub_0025D471",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479227,
+      "name": "sub_0025D47B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479237,
+      "name": "sub_0025D485",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479247,
+      "name": "sub_0025D48F",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479257,
+      "name": "sub_0025D499",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479267,
+      "name": "sub_0025D4A3",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479277,
+      "name": "sub_0025D4AD",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479287,
+      "name": "sub_0025D4B7",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479297,
+      "name": "sub_0025D4C1",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479307,
+      "name": "sub_0025D4CB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479317,
+      "name": "sub_0025D4D5",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479327,
+      "name": "sub_0025D4DF",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479337,
+      "name": "sub_0025D4E9",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479347,
+      "name": "sub_0025D4F3",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479357,
+      "name": "sub_0025D4FD",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479367,
+      "name": "sub_0025D507",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479377,
+      "name": "sub_0025D511",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479387,
+      "name": "sub_0025D51B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479397,
+      "name": "sub_0025D525",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479407,
+      "name": "sub_0025D52F",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479417,
+      "name": "sub_0025D539",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479427,
+      "name": "sub_0025D543",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479437,
+      "name": "sub_0025D54D",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479447,
+      "name": "sub_0025D557",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479457,
+      "name": "sub_0025D561",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479467,
+      "name": "sub_0025D56B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479477,
+      "name": "sub_0025D575",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479487,
+      "name": "sub_0025D57F",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479497,
+      "name": "sub_0025D589",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479507,
+      "name": "sub_0025D593",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479517,
+      "name": "sub_0025D59D",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479527,
+      "name": "sub_0025D5A7",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479537,
+      "name": "sub_0025D5B1",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479547,
+      "name": "sub_0025D5BB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479557,
+      "name": "sub_0025D5C5",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479567,
+      "name": "sub_0025D5CF",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479577,
+      "name": "sub_0025D5D9",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479587,
+      "name": "sub_0025D5E3",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479597,
+      "name": "sub_0025D5ED",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479607,
+      "name": "sub_0025D5F7",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479617,
+      "name": "sub_0025D601",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479627,
+      "name": "sub_0025D60B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479637,
+      "name": "sub_0025D615",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479647,
+      "name": "sub_0025D61F",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479657,
+      "name": "sub_0025D629",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479667,
+      "name": "sub_0025D633",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479677,
+      "name": "sub_0025D63D",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479687,
+      "name": "sub_0025D647",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479697,
+      "name": "sub_0025D651",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479707,
+      "name": "sub_0025D65B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479717,
+      "name": "sub_0025D665",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479727,
+      "name": "sub_0025D66F",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479737,
+      "name": "sub_0025D679",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479747,
+      "name": "sub_0025D683",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479757,
+      "name": "sub_0025D68D",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479767,
+      "name": "sub_0025D697",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479777,
+      "name": "sub_0025D6A1",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479787,
+      "name": "sub_0025D6AB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479797,
+      "name": "sub_0025D6B5",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479807,
+      "name": "sub_0025D6BF",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479817,
+      "name": "sub_0025D6C9",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479827,
+      "name": "sub_0025D6D3",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479837,
+      "name": "sub_0025D6DD",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479847,
+      "name": "sub_0025D6E7",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479857,
+      "name": "sub_0025D6F1",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479867,
+      "name": "sub_0025D6FB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479877,
+      "name": "sub_0025D705",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479887,
+      "name": "sub_0025D70F",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479897,
+      "name": "sub_0025D719",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479907,
+      "name": "sub_0025D723",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479917,
+      "name": "sub_0025D72D",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479927,
+      "name": "sub_0025D737",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479937,
+      "name": "sub_0025D741",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2479947,
+      "name": "sub_0025D74B",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2480509,
+      "name": "sub_0025D97D",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2480520,
+      "name": "sub_0025D988",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2480559,
+      "name": "sub_0025D9AF",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2480569,
+      "name": "sub_0025D9B9",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2480579,
+      "name": "sub_0025D9C3",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2480589,
+      "name": "sub_0025D9CD",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2480599,
+      "name": "sub_0025D9D7",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2480609,
+      "name": "sub_0025D9E1",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2480619,
+      "name": "sub_0025D9EB",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2480629,
+      "name": "sub_0025D9F5",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2480639,
+      "name": "sub_0025D9FF",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2480672,
+      "name": "sub_0025DA20",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2480682,
+      "name": "sub_0025DA2A",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
+      "address": 2559461,
+      "name": "sub_00270DE5",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
       "address": 69632,
       "name": "sub_00011000",
       "file": "recomp_0000.c",
@@ -21485,6 +22757,12 @@
           "\nloc_000484C8: ;\n    POP"
         ]
       ]
+    },
+    {
+      "address": 296142,
+      "name": "sub_000484CE",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
     },
     {
       "address": 296444,
@@ -50370,6 +51648,12 @@
       "edits": []
     },
     {
+      "address": 575265,
+      "name": "sub_0008C721",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
       "address": 575507,
       "name": "sub_0008C813",
       "file": "recomp_0021.c",
@@ -50531,18 +51815,32 @@
       "file": "recomp_0021.c",
       "edits": [
         [
-          28085,
-          "    int _block_0008D4ED_g_fp_top = g_fp_top;\n    #define g_fp_top _block_0008D4ED_g_fp_top\n",
+          28783,
+          "int _block_0008D4ED_g_fp_top = g_fp_top;\n    #define g_fp_top _block_0008D4ED_g_fp_top\n    ",
           "",
-          "ero */\n\nloc_0008D4ED: ;\n",
-          "    fp_push(MEMF(0x31B6D"
+          "*/\n\nloc_0008D4ED: ;\n    ",
+          "fp_push(MEMF(0x31B6DC));"
         ],
         [
-          28478,
-          "    g_fp_top = _block_0008D4ED_g_fp_top;\n",
+          29171,
+          "\n    g_fp_top = _block_0008D4ED_g_fp_top;",
           "",
-          "); fp_pop(); /* fstp */\n",
-          "\nloc_0008D50B: ;\n    esi"
+          "(); fp_pop(); /* fstp */",
+          "\n\nloc_0008D50B: ;\n    es"
+        ],
+        [
+          36722,
+          "int _block_0008D690_g_fp_top = g_fp_top;\n    #define g_fp_top _block_0008D690_g_fp_top\n    ",
+          "",
+          "*/\n\nloc_0008D690: ;\n    ",
+          "fp_push(MEMF(0x31B6DC));"
+        ],
+        [
+          37115,
+          "g_fp_top = _block_0008D690_g_fp_top;",
+          "",
+          "p_pop(); /* fstp */\n    ",
+          "\n\nloc_0008D6AE: ;\n    PU"
         ]
       ]
     },
@@ -56035,6 +57333,12 @@
       "edits": []
     },
     {
+      "address": 634087,
+      "name": "sub_0009ACE7",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
       "address": 634481,
       "name": "sub_0009AE71",
       "file": "recomp_0023.c",
@@ -60181,7 +61485,120 @@
       "address": 668508,
       "name": "sub_000A335C",
       "file": "recomp_0024.c",
-      "edits": []
+      "edits": [
+        [
+          2631,
+          "uint32_t _block_000A3393_eax = eax;\n    int _block_000A3393_g_fp_top = g_fp_top;\n    #define g_fp_top _block_000A3393_g_fp_top\n    ",
+          "",
+          "8;\n\nloc_000A3393: ;\n    ",
+          "fp_push(MEMF(esp + 0x10)"
+        ],
+        [
+          2932,
+          "_block_000A3393_",
+          "",
+          " dword ptr [ebx] */\n    ",
+          "eax = (_block_000A3393_e"
+        ],
+        [
+          2955,
+          "_block_000A3393_",
+          "",
+          " _block_000A3393_eax = (",
+          "eax & 0xFFFF0000u) | (ui"
+        ],
+        [
+          3015,
+          "_block_000A3393_",
+          "",
+          " (uint32_t)(uint16_t)(((",
+          "g_fp_top & 7u) << 11) | "
+        ],
+        [
+          3120,
+          "_block_000A3393_",
+          "",
+          "   _fa = (uint32_t)(HI8(",
+          "eax)) & 0xFFu; _fb = (ui"
+        ],
+        [
+          3261,
+          "_block_000A3393_",
+          "",
+          "t8_t)(_fb); /* test HI8(",
+          "eax), 0x41 (8-bit) */\n  "
+        ],
+        [
+          3303,
+          "eax",
+          "",
+          "x), 0x41 (8-bit) */\n    ",
+          " = _block_000A3393_eax; "
+        ],
+        [
+          3307,
+          "= _block_000A3393_eax; g_fp_top = _block_000A3393_g_fp_top;",
+          "",
+          "0x41 (8-bit) */\n    eax ",
+          "\n    if ((!RECOMP_PARITY"
+        ],
+        [
+          6343,
+          "uint32_t _block_000A341B_eax = eax;\n    int _block_000A341B_g_fp_top = g_fp_top;\n    #define g_fp_top _block_000A341B_g_fp_top\n    ",
+          "",
+          ");\n\nloc_000A341B: ;\n    ",
+          "fp_push(MEMF(esp + 0x10)"
+        ],
+        [
+          6660,
+          "_block_000A341B_",
+          "",
+          "tr [esi + 0x240] */\n    ",
+          "eax = (_block_000A341B_e"
+        ],
+        [
+          6683,
+          "_block_000A341B_",
+          "",
+          " _block_000A341B_eax = (",
+          "eax & 0xFFFF0000u) | (ui"
+        ],
+        [
+          6743,
+          "_block_000A341B_",
+          "",
+          " (uint32_t)(uint16_t)(((",
+          "g_fp_top & 7u) << 11) | "
+        ],
+        [
+          6848,
+          "_block_000A341B_",
+          "",
+          "   _fa = (uint32_t)(HI8(",
+          "eax)) & 0xFFu; _fb = (ui"
+        ],
+        [
+          6986,
+          "_block_000A341B_",
+          "",
+          "t8_t)(_fb); /* test HI8(",
+          "eax), 1 (8-bit) */\n    e"
+        ],
+        [
+          7025,
+          "eax",
+          "",
+          "_eax), 1 (8-bit) */\n    ",
+          " = _block_000A341B_eax; "
+        ],
+        [
+          7029,
+          "= _block_000A341B_eax; g_fp_top = _block_000A341B_g_fp_top;",
+          "",
+          "), 1 (8-bit) */\n    eax ",
+          "\n    if (TEST_NZ(_fa, _f"
+        ]
+      ]
     },
     {
       "address": 668523,
@@ -75234,6 +76651,12 @@
       "edits": []
     },
     {
+      "address": 825639,
+      "name": "sub_000C9927",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
       "address": 825870,
       "name": "sub_000C9A0E",
       "file": "recomp_0029.c",
@@ -77614,6 +79037,12 @@
       "address": 850878,
       "name": "sub_000CFBBE",
       "file": "recomp_0030.c",
+      "edits": []
+    },
+    {
+      "address": 850884,
+      "name": "sub_000CFBC4",
+      "file": "recomp_battle_callbacks.c",
       "edits": []
     },
     {
@@ -81132,6 +82561,12 @@
       ]
     },
     {
+      "address": 894081,
+      "name": "sub_000DA481",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
+    },
+    {
       "address": 894362,
       "name": "sub_000DA59A",
       "file": "recomp_0032.c",
@@ -82178,6 +83613,12 @@
       "address": 907363,
       "name": "sub_000DD863",
       "file": "recomp_0032.c",
+      "edits": []
+    },
+    {
+      "address": 907369,
+      "name": "sub_000DD869",
+      "file": "recomp_battle_callbacks.c",
       "edits": []
     },
     {
@@ -85264,6 +86705,12 @@
           "    if (CMP_L(_fas, _fbs"
         ]
       ]
+    },
+    {
+      "address": 934705,
+      "name": "sub_000E4331",
+      "file": "recomp_battle_callbacks.c",
+      "edits": []
     },
     {
       "address": 934824,
@@ -115151,32 +116598,144 @@
       "file": "recomp_0043.c",
       "edits": [
         [
-          19948,
-          "    uint32_t _block_0016022C_eax = eax;\n    uint32_t _block_0016022C_ecx = ecx;\n    int _block_0016022C_g_fp_top = g_fp_top;\n    #define g_fp_top _block_0016022C_g_fp_top\n",
+          18754,
+          "uint32_t _block_0016022C_eax = eax;\n    uint32_t _block_0016022C_ecx = ecx;\n    int _block_0016022C_g_fp_top = g_fp_top;\n    #define g_fp_top _block_0016022C_g_fp_top\n    ",
           "",
-          "ero */\n\nloc_0016022C: ;\n",
-          "    fp_push(MEMF(ebp + 0"
+          "*/\n\nloc_0016022C: ;\n    ",
+          "fp_push(MEMF(ebp + 0xC))"
         ],
         [
-          20165,
-          "    _block_0016022C_ecx = MEM32(ebx + 0x20);\n",
-          "    ecx = MEM32(ebx + 0x20);\n",
-          " 0xC)); /* fld float */\n",
-          "    fp_top() = RECOMP_FP"
+          18971,
+          "_block_0016022C_",
+          "",
+          ")); /* fld float */\n    ",
+          "ecx = MEM32(ebx + 0x20);"
         ],
         [
-          20603,
-          "    fp_top() = RECOMP_FP_PC(fp_top() * MEMF(_block_0016022C_ecx + 0x68)); /* fmul dword ptr [_block_0016022C_ecx + 0x68] */\n",
-          "    fp_top() = RECOMP_FP_PC(fp_top() * MEMF(ecx + 0x68)); /* fmul dword ptr [ecx + 0x68] */\n",
-          "dword ptr [0x31b6dc] */\n",
-          "    MEMF(ebp + -20) = (f"
+          19449,
+          "_block_0016022C_",
+          "",
+          "P_FP_PC(fp_top() * MEMF(",
+          "ecx + 0x68)); /* fmul dw"
         ],
         [
-          20833,
-          "    g_fp_cmp = RECOMP_FCMP(fp_top(), MEMF(_block_0016022C_ecx + 0x68)); g_fp_cc = RECOMP_FCMP_CC(g_fp_cmp); fp_pop(); /* fcomp dword ptr [_block_0016022C_ecx + 0x68] */\n    _block_0016022C_eax = (_block_0016022C_eax & 0xFFFF0000u) | (uint32_t)(uint16_t)(((_block_0016022C_g_fp_top & 7u) << 11) | g_fp_cc); /* fnstsw ax <- fpu status */\n    _fa = (uint32_t)(HI8(_block_0016022C_eax)) & 0xFFu; _fb = (uint32_t)(0x41) & 0xFFu;\n    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* test HI8(_block_0016022C_eax), 0x41 (8-bit) */\n    eax = _block_0016022C_eax; ecx = _block_0016022C_ecx; g_fp_top = _block_0016022C_g_fp_top;\n",
-          "    g_fp_cmp = RECOMP_FCMP(fp_top(), MEMF(ecx + 0x68)); g_fp_cc = RECOMP_FCMP_CC(g_fp_cmp); fp_pop(); /* fcomp dword ptr [ecx + 0x68] */\n    eax = (eax & 0xFFFF0000u) | (uint32_t)(uint16_t)(((g_fp_top & 7u) << 11) | g_fp_cc); /* fnstsw ax <- fpu status */\n    _fa = (uint32_t)(HI8(eax)) & 0xFFu; _fb = (uint32_t)(0x41) & 0xFFu;\n    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* test HI8(eax), 0x41 (8-bit) */\n",
-          " -20)); /* fld float */\n",
-          "    if (TEST_NZ(_fa, _fb"
+          19498,
+          "_block_0016022C_",
+          "",
+          "8)); /* fmul dword ptr [",
+          "ecx + 0x68] */\n    MEMF("
+        ],
+        [
+          19677,
+          "_block_0016022C_",
+          "",
+          "OMP_FCMP(fp_top(), MEMF(",
+          "ecx + 0x68)); g_fp_cc = "
+        ],
+        [
+          19773,
+          "_block_0016022C_",
+          "",
+          "(); /* fcomp dword ptr [",
+          "ecx + 0x68] */\n    _bloc"
+        ],
+        [
+          19808,
+          "_block_0016022C_",
+          "",
+          "022C_ecx + 0x68] */\n    ",
+          "eax = (_block_0016022C_e"
+        ],
+        [
+          19831,
+          "_block_0016022C_",
+          "",
+          " _block_0016022C_eax = (",
+          "eax & 0xFFFF0000u) | (ui"
+        ],
+        [
+          19891,
+          "_block_0016022C_",
+          "",
+          " (uint32_t)(uint16_t)(((",
+          "g_fp_top & 7u) << 11) | "
+        ],
+        [
+          19996,
+          "_block_0016022C_",
+          "",
+          "   _fa = (uint32_t)(HI8(",
+          "eax)) & 0xFFu; _fb = (ui"
+        ],
+        [
+          20137,
+          "_block_0016022C_",
+          "",
+          "t8_t)(_fb); /* test HI8(",
+          "eax), 0x41 (8-bit) */\n  "
+        ],
+        [
+          20174,
+          "\n    eax = _block_0016022C_eax; ecx = _block_0016022C_ecx; g_fp_top = _block_0016022C_g_fp_top;",
+          "",
+          "2C_eax), 0x41 (8-bit) */",
+          "\n    if (TEST_NZ(_fa, _f"
+        ],
+        [
+          30321,
+          "uint32_t _block_001603F6_eax = eax;\n    int _block_001603F6_g_fp_top = g_fp_top;\n    #define g_fp_top _block_001603F6_g_fp_top\n    ",
+          "",
+          "*/\n\nloc_001603F6: ;\n    ",
+          "fp_push(MEMF(ebp + 8)); "
+        ],
+        [
+          30631,
+          "_block_001603F6_",
+          "",
+          " ptr [ebp + 0xc] */\n    ",
+          "eax = (_block_001603F6_e"
+        ],
+        [
+          30654,
+          "_block_001603F6_",
+          "",
+          " _block_001603F6_eax = (",
+          "eax & 0xFFFF0000u) | (ui"
+        ],
+        [
+          30714,
+          "_block_001603F6_",
+          "",
+          " (uint32_t)(uint16_t)(((",
+          "g_fp_top & 7u) << 11) | "
+        ],
+        [
+          30819,
+          "_block_001603F6_",
+          "",
+          "   _fa = (uint32_t)(HI8(",
+          "eax)) & 0xFFu; _fb = (ui"
+        ],
+        [
+          30957,
+          "_block_001603F6_",
+          "",
+          "t8_t)(_fb); /* test HI8(",
+          "eax), 5 (8-bit) */\n    e"
+        ],
+        [
+          30996,
+          "eax",
+          "",
+          "_eax), 5 (8-bit) */\n    ",
+          " = _block_001603F6_eax; "
+        ],
+        [
+          31000,
+          "= _block_001603F6_eax; g_fp_top = _block_001603F6_g_fp_top;",
+          "",
+          "), 5 (8-bit) */\n    eax ",
+          "\n    if (RECOMP_PARITY8("
         ]
       ]
     },
@@ -214880,6 +216439,10 @@
       "sub_0001D0E9"
     ],
     [
+      "0001D0EE",
+      "sub_0001D0EE"
+    ],
+    [
       "0001D0F9",
       "sub_0001D0F9"
     ],
@@ -215446,6 +217009,10 @@
     [
       "0001F741",
       "sub_0001F741"
+    ],
+    [
+      "0001F765",
+      "sub_0001F765"
     ],
     [
       "0001F770",
@@ -216218,6 +217785,10 @@
     [
       "00022504",
       "sub_00022504"
+    ],
+    [
+      "0002252E",
+      "sub_0002252E"
     ],
     [
       "0002253D",
@@ -219382,6 +220953,10 @@
     [
       "00035A3F",
       "sub_00035A3F"
+    ],
+    [
+      "00035A68",
+      "sub_00035A68"
     ],
     [
       "00035B79",
@@ -222736,6 +224311,10 @@
       "sub_000483B6"
     ],
     [
+      "0x000484CE",
+      "sub_000484CE"
+    ],
+    [
       "000485FC",
       "sub_000485FC"
     ],
@@ -223596,6 +225175,10 @@
       "sub_0004D142"
     ],
     [
+      "0004D151",
+      "sub_0004D151"
+    ],
+    [
       "0004D160",
       "sub_0004D160"
     ],
@@ -223902,6 +225485,10 @@
     [
       "0004F72A",
       "sub_0004F72A"
+    ],
+    [
+      "0004F7A8",
+      "sub_0004F7A8"
     ],
     [
       "0004F7B6",
@@ -224356,6 +225943,10 @@
       "sub_00053EF1"
     ],
     [
+      "00054059",
+      "sub_00054059"
+    ],
+    [
       "000540A5",
       "sub_000540A5"
     ],
@@ -224550,6 +226141,14 @@
     [
       "00056E9E",
       "sub_00056E9E"
+    ],
+    [
+      "00056FCC",
+      "sub_00056FCC"
+    ],
+    [
+      "00056FF0",
+      "sub_00056FF0"
     ],
     [
       "00056FFB",
@@ -225920,12 +227519,20 @@
       "sub_00060B7E"
     ],
     [
+      "00060B8A",
+      "sub_00060B8A"
+    ],
+    [
       "00060B9B",
       "sub_00060B9B"
     ],
     [
       "00060BA7",
       "sub_00060BA7"
+    ],
+    [
+      "00060BB3",
+      "sub_00060BB3"
     ],
     [
       "00060BC4",
@@ -226422,6 +228029,10 @@
     [
       "0006377D",
       "sub_0006377D"
+    ],
+    [
+      "00063791",
+      "sub_00063791"
     ],
     [
       "00063799",
@@ -227238,6 +228849,10 @@
     [
       "00067B2F",
       "sub_00067B2F"
+    ],
+    [
+      "00067B34",
+      "sub_00067B34"
     ],
     [
       "00067B49",
@@ -228080,6 +229695,10 @@
       "sub_0006B61C"
     ],
     [
+      "0006B63E",
+      "sub_0006B63E"
+    ],
+    [
       "0006B649",
       "sub_0006B649"
     ],
@@ -228724,6 +230343,10 @@
       "sub_0006E57A"
     ],
     [
+      "0006E5B8",
+      "sub_0006E5B8"
+    ],
+    [
       "0006E5BD",
       "sub_0006E5BD"
     ],
@@ -229366,6 +230989,10 @@
     [
       "00072E5B",
       "sub_00072E5B"
+    ],
+    [
+      "00072E96",
+      "sub_00072E96"
     ],
     [
       "00072EA4",
@@ -232904,6 +234531,10 @@
       "sub_00086D7C"
     ],
     [
+      "0008726B",
+      "sub_0008726B"
+    ],
+    [
       "0008728D",
       "sub_0008728D"
     ],
@@ -233056,6 +234687,10 @@
       "sub_00088DE2"
     ],
     [
+      "00088EBB",
+      "sub_00088EBB"
+    ],
+    [
       "00088F6A",
       "sub_00088F6A"
     ],
@@ -233200,6 +234835,10 @@
       "sub_00089869"
     ],
     [
+      "000898AA",
+      "sub_000898AA"
+    ],
+    [
       "00089951",
       "sub_00089951"
     ],
@@ -233252,6 +234891,10 @@
       "sub_00089DA5"
     ],
     [
+      "00089E25",
+      "sub_00089E25"
+    ],
+    [
       "00089F08",
       "sub_00089F08"
     ],
@@ -233278,6 +234921,10 @@
     [
       "0008A248",
       "sub_0008A248"
+    ],
+    [
+      "0008A316",
+      "sub_0008A316"
     ],
     [
       "0008A3F2",
@@ -233310,6 +234957,10 @@
     [
       "0008A529",
       "sub_0008A529"
+    ],
+    [
+      "0008A573",
+      "sub_0008A573"
     ],
     [
       "0008A624",
@@ -233354,6 +235005,10 @@
     [
       "0008A7CC",
       "sub_0008A7CC"
+    ],
+    [
+      "0008A7EF",
+      "sub_0008A7EF"
     ],
     [
       "0008A897",
@@ -233704,6 +235359,10 @@
       "sub_0008C71A"
     ],
     [
+      "0x0008C721",
+      "sub_0008C721"
+    ],
+    [
       "0008C813",
       "sub_0008C813"
     ],
@@ -233986,6 +235645,10 @@
     [
       "0008E7BA",
       "sub_0008E7BA"
+    ],
+    [
+      "0008E7D0",
+      "sub_0008E7D0"
     ],
     [
       "0008E7D5",
@@ -235708,6 +237371,10 @@
       "sub_0009A1D7"
     ],
     [
+      "0009A1F2",
+      "sub_0009A1F2"
+    ],
+    [
       "0009A300",
       "sub_0009A300"
     ],
@@ -235934,6 +237601,10 @@
     [
       "0009ACBC",
       "sub_0009ACBC"
+    ],
+    [
+      "0x0009ACE7",
+      "sub_0009ACE7"
     ],
     [
       "0009AE71",
@@ -237364,6 +239035,10 @@
       "sub_000A47EF"
     ],
     [
+      "000A47FB",
+      "sub_000A47FB"
+    ],
+    [
       "000A4806",
       "sub_000A4806"
     ],
@@ -237950,6 +239625,10 @@
     [
       "000A9132",
       "sub_000A9132"
+    ],
+    [
+      "000A91AF",
+      "sub_000A91AF"
     ],
     [
       "000A91B7",
@@ -239744,6 +241423,10 @@
       "sub_000B831B"
     ],
     [
+      "000B8327",
+      "sub_000B8327"
+    ],
+    [
       "000B8335",
       "sub_000B8335"
     ],
@@ -240680,6 +242363,10 @@
       "sub_000BE6AF"
     ],
     [
+      "000BE9BB",
+      "sub_000BE9BB"
+    ],
+    [
       "000BEA9A",
       "sub_000BEA9A"
     ],
@@ -241432,6 +243119,10 @@
       "sub_000C3CDF"
     ],
     [
+      "000C3CEB",
+      "sub_000C3CEB"
+    ],
+    [
       "000C3CFC",
       "sub_000C3CFC"
     ],
@@ -242182,6 +243873,10 @@
     [
       "000C990F",
       "sub_000C990F"
+    ],
+    [
+      "0x000C9927",
+      "sub_000C9927"
     ],
     [
       "000C9A0E",
@@ -242950,6 +244645,10 @@
     [
       "000CFBBE",
       "sub_000CFBBE"
+    ],
+    [
+      "0x000CFBC4",
+      "sub_000CFBC4"
     ],
     [
       "000CFC53",
@@ -244372,6 +246071,10 @@
       "sub_000DA3E3"
     ],
     [
+      "0x000DA481",
+      "sub_000DA481"
+    ],
+    [
       "000DA59A",
       "sub_000DA59A"
     ],
@@ -244866,6 +246569,10 @@
     [
       "000DD863",
       "sub_000DD863"
+    ],
+    [
+      "0x000DD869",
+      "sub_000DD869"
     ],
     [
       "000DD9B7",
@@ -245704,6 +247411,10 @@
       "sub_000E378F"
     ],
     [
+      "000E37B9",
+      "sub_000E37B9"
+    ],
+    [
       "000E37CE",
       "sub_000E37CE"
     ],
@@ -245754,6 +247465,10 @@
     [
       "000E3FBC",
       "sub_000E3FBC"
+    ],
+    [
+      "0x000E4331",
+      "sub_000E4331"
     ],
     [
       "000E43A8",
@@ -254220,6 +255935,10 @@
       "sub_00147A23"
     ],
     [
+      "00147A43",
+      "sub_00147A43"
+    ],
+    [
       "00147A8D",
       "sub_00147A8D"
     ],
@@ -254928,6 +256647,10 @@
       "sub_0015016F"
     ],
     [
+      "001501AC",
+      "sub_001501AC"
+    ],
+    [
       "001501B4",
       "sub_001501B4"
     ],
@@ -254998,6 +256721,10 @@
     [
       "00151091",
       "sub_00151091"
+    ],
+    [
+      "001510FB",
+      "sub_001510FB"
     ],
     [
       "0015118B",
@@ -256644,12 +258371,32 @@
       "sub_0016AF34"
     ],
     [
+      "0016AF43",
+      "sub_0016AF43"
+    ],
+    [
       "0016AFBB",
       "sub_0016AFBB"
     ],
     [
+      "0016AFC7",
+      "sub_0016AFC7"
+    ],
+    [
+      "0016B01B",
+      "sub_0016B01B"
+    ],
+    [
       "0016B025",
       "sub_0016B025"
+    ],
+    [
+      "0016B02B",
+      "sub_0016B02B"
+    ],
+    [
+      "0016B65E",
+      "sub_0016B65E"
     ],
     [
       "0016B6EF",
@@ -262024,6 +263771,10 @@
       "sub_001B4DC5"
     ],
     [
+      "001B4DF6",
+      "sub_001B4DF6"
+    ],
+    [
       "001B4E3C",
       "sub_001B4E3C"
     ],
@@ -265464,8 +267215,16 @@
       "sub_001E163F"
     ],
     [
+      "001E183F",
+      "sub_001E183F"
+    ],
+    [
       "001E19B6",
       "sub_001E19B6"
+    ],
+    [
+      "001E1AB4",
+      "sub_001E1AB4"
     ],
     [
       "001E1C2B",
@@ -266594,6 +268353,10 @@
     [
       "001FE59D",
       "sub_001FE59D"
+    ],
+    [
+      "001FE639",
+      "sub_001FE639"
     ],
     [
       "001FE7EA",
@@ -273104,16 +274867,32 @@
       "sub_00245740"
     ],
     [
+      "0024574B",
+      "sub_0024574B"
+    ],
+    [
       "00245760",
       "sub_00245760"
+    ],
+    [
+      "0024576B",
+      "sub_0024576B"
     ],
     [
       "00245780",
       "sub_00245780"
     ],
     [
+      "0024578B",
+      "sub_0024578B"
+    ],
+    [
       "002457A0",
       "sub_002457A0"
+    ],
+    [
+      "002457AE",
+      "sub_002457AE"
     ],
     [
       "002457B8",
@@ -283292,20 +285071,40 @@
       "sub_0024EFE0"
     ],
     [
+      "0024EFF2",
+      "sub_0024EFF2"
+    ],
+    [
       "0024F000",
       "sub_0024F000"
+    ],
+    [
+      "0024F00B",
+      "sub_0024F00B"
     ],
     [
       "0024F020",
       "sub_0024F020"
     ],
     [
+      "0024F032",
+      "sub_0024F032"
+    ],
+    [
       "0024F040",
       "sub_0024F040"
     ],
     [
+      "0024F048",
+      "sub_0024F048"
+    ],
+    [
       "0024F060",
       "sub_0024F060"
+    ],
+    [
+      "0024F068",
+      "sub_0024F068"
     ],
     [
       "0024F080",
@@ -283322,6 +285121,10 @@
     [
       "0024F0B0",
       "sub_0024F0B0"
+    ],
+    [
+      "0024F0B8",
+      "sub_0024F0B8"
     ],
     [
       "0024F0D0",
@@ -283356,8 +285159,16 @@
       "sub_0024F160"
     ],
     [
+      "0024F16B",
+      "sub_0024F16B"
+    ],
+    [
       "0024F180",
       "sub_0024F180"
+    ],
+    [
+      "0024F188",
+      "sub_0024F188"
     ],
     [
       "0024F1A0",
@@ -283388,12 +285199,24 @@
       "sub_0024F210"
     ],
     [
+      "0024F218",
+      "sub_0024F218"
+    ],
+    [
       "0024F230",
       "sub_0024F230"
     ],
     [
+      "0024F238",
+      "sub_0024F238"
+    ],
+    [
       "0024F250",
       "sub_0024F250"
+    ],
+    [
+      "0024F258",
+      "sub_0024F258"
     ],
     [
       "0024F270",
@@ -284076,12 +285899,24 @@
       "sub_0024F990"
     ],
     [
+      "0024F99B",
+      "sub_0024F99B"
+    ],
+    [
       "0024F9B0",
       "sub_0024F9B0"
     ],
     [
+      "0024F9BB",
+      "sub_0024F9BB"
+    ],
+    [
       "0024F9D0",
       "sub_0024F9D0"
+    ],
+    [
+      "0024F9DB",
+      "sub_0024F9DB"
     ],
     [
       "0024F9F0",
@@ -284128,12 +285963,24 @@
       "sub_0024FAB0"
     ],
     [
+      "0024FAB8",
+      "sub_0024FAB8"
+    ],
+    [
       "0024FAD0",
       "sub_0024FAD0"
     ],
     [
+      "0024FAD8",
+      "sub_0024FAD8"
+    ],
+    [
       "0024FAF0",
       "sub_0024FAF0"
+    ],
+    [
+      "0024FAF8",
+      "sub_0024FAF8"
     ],
     [
       "0024FB10",
@@ -284174,6 +286021,10 @@
     [
       "0024FBA0",
       "sub_0024FBA0"
+    ],
+    [
+      "0024FBB2",
+      "sub_0024FBB2"
     ],
     [
       "0024FBC0",
@@ -284348,24 +286199,48 @@
       "sub_0024FED0"
     ],
     [
+      "0024FEDB",
+      "sub_0024FEDB"
+    ],
+    [
       "0024FEF0",
       "sub_0024FEF0"
+    ],
+    [
+      "0024FEFB",
+      "sub_0024FEFB"
     ],
     [
       "0024FF10",
       "sub_0024FF10"
     ],
     [
+      "0024FF1B",
+      "sub_0024FF1B"
+    ],
+    [
       "0024FF30",
       "sub_0024FF30"
+    ],
+    [
+      "0024FF3B",
+      "sub_0024FF3B"
     ],
     [
       "0024FF50",
       "sub_0024FF50"
     ],
     [
+      "0024FF5B",
+      "sub_0024FF5B"
+    ],
+    [
       "0024FF70",
       "sub_0024FF70"
+    ],
+    [
+      "0024FF7B",
+      "sub_0024FF7B"
     ],
     [
       "0024FF90",
@@ -284378,6 +286253,10 @@
     [
       "0024FFC0",
       "sub_0024FFC0"
+    ],
+    [
+      "0024FFC8",
+      "sub_0024FFC8"
     ],
     [
       "0024FFD2",
@@ -284496,6 +286375,10 @@
       "sub_00250120"
     ],
     [
+      "0025012B",
+      "sub_0025012B"
+    ],
+    [
       "00250140",
       "sub_00250140"
     ],
@@ -284512,8 +286395,16 @@
       "sub_00250180"
     ],
     [
+      "00250188",
+      "sub_00250188"
+    ],
+    [
       "002501A0",
       "sub_002501A0"
+    ],
+    [
+      "002501A8",
+      "sub_002501A8"
     ],
     [
       "002501C0",
@@ -284532,12 +286423,24 @@
       "sub_002501F0"
     ],
     [
+      "002501FB",
+      "sub_002501FB"
+    ],
+    [
       "00250210",
       "sub_00250210"
     ],
     [
+      "0025021B",
+      "sub_0025021B"
+    ],
+    [
       "00250230",
       "sub_00250230"
+    ],
+    [
+      "0025023B",
+      "sub_0025023B"
     ],
     [
       "00250250",
@@ -284840,12 +286743,24 @@
       "sub_00250550"
     ],
     [
+      "00250562",
+      "sub_00250562"
+    ],
+    [
       "00250570",
       "sub_00250570"
     ],
     [
+      "0025057B",
+      "sub_0025057B"
+    ],
+    [
       "00250590",
       "sub_00250590"
+    ],
+    [
+      "00250598",
+      "sub_00250598"
     ],
     [
       "002505B0",
@@ -284860,6 +286775,10 @@
       "sub_002505D0"
     ],
     [
+      "002505D8",
+      "sub_002505D8"
+    ],
+    [
       "002505F0",
       "sub_002505F0"
     ],
@@ -284870,6 +286789,10 @@
     [
       "00250620",
       "sub_00250620"
+    ],
+    [
+      "00250628",
+      "sub_00250628"
     ],
     [
       "00250640",
@@ -284948,12 +286871,24 @@
       "sub_00250780"
     ],
     [
+      "0025078B",
+      "sub_0025078B"
+    ],
+    [
       "002507A0",
       "sub_002507A0"
     ],
     [
+      "002507B2",
+      "sub_002507B2"
+    ],
+    [
       "002507C0",
       "sub_002507C0"
+    ],
+    [
+      "002507C8",
+      "sub_002507C8"
     ],
     [
       "002507E0",
@@ -287016,6 +288951,10 @@
       "sub_002526D0"
     ],
     [
+      "002526DB",
+      "sub_002526DB"
+    ],
+    [
       "002526E5",
       "sub_002526E5"
     ],
@@ -288904,16 +290843,32 @@
       "sub_00254170"
     ],
     [
+      "00254178",
+      "sub_00254178"
+    ],
+    [
       "00254190",
       "sub_00254190"
+    ],
+    [
+      "00254198",
+      "sub_00254198"
     ],
     [
       "002541B0",
       "sub_002541B0"
     ],
     [
+      "002541B8",
+      "sub_002541B8"
+    ],
+    [
       "002541D0",
       "sub_002541D0"
+    ],
+    [
+      "002541D8",
+      "sub_002541D8"
     ],
     [
       "002541F0",
@@ -288936,8 +290891,16 @@
       "sub_00254230"
     ],
     [
+      "00254238",
+      "sub_00254238"
+    ],
+    [
       "00254250",
       "sub_00254250"
+    ],
+    [
+      "00254258",
+      "sub_00254258"
     ],
     [
       "00254270",
@@ -290640,8 +292603,428 @@
       "sub_0025D310"
     ],
     [
+      "0025D330",
+      "sub_0025D330"
+    ],
+    [
+      "0025D33A",
+      "sub_0025D33A"
+    ],
+    [
+      "0025D344",
+      "sub_0025D344"
+    ],
+    [
       "0025D34E",
       "sub_0025D34E"
+    ],
+    [
+      "0025D359",
+      "sub_0025D359"
+    ],
+    [
+      "0025D363",
+      "sub_0025D363"
+    ],
+    [
+      "0025D36D",
+      "sub_0025D36D"
+    ],
+    [
+      "0025D377",
+      "sub_0025D377"
+    ],
+    [
+      "0025D381",
+      "sub_0025D381"
+    ],
+    [
+      "0025D38B",
+      "sub_0025D38B"
+    ],
+    [
+      "0025D395",
+      "sub_0025D395"
+    ],
+    [
+      "0025D39F",
+      "sub_0025D39F"
+    ],
+    [
+      "0025D3A9",
+      "sub_0025D3A9"
+    ],
+    [
+      "0025D3B3",
+      "sub_0025D3B3"
+    ],
+    [
+      "0025D3BD",
+      "sub_0025D3BD"
+    ],
+    [
+      "0025D3C7",
+      "sub_0025D3C7"
+    ],
+    [
+      "0025D3D1",
+      "sub_0025D3D1"
+    ],
+    [
+      "0025D3DB",
+      "sub_0025D3DB"
+    ],
+    [
+      "0025D3E5",
+      "sub_0025D3E5"
+    ],
+    [
+      "0025D3EF",
+      "sub_0025D3EF"
+    ],
+    [
+      "0025D3F9",
+      "sub_0025D3F9"
+    ],
+    [
+      "0025D403",
+      "sub_0025D403"
+    ],
+    [
+      "0025D40D",
+      "sub_0025D40D"
+    ],
+    [
+      "0025D417",
+      "sub_0025D417"
+    ],
+    [
+      "0025D421",
+      "sub_0025D421"
+    ],
+    [
+      "0025D42B",
+      "sub_0025D42B"
+    ],
+    [
+      "0025D435",
+      "sub_0025D435"
+    ],
+    [
+      "0025D43F",
+      "sub_0025D43F"
+    ],
+    [
+      "0025D449",
+      "sub_0025D449"
+    ],
+    [
+      "0025D453",
+      "sub_0025D453"
+    ],
+    [
+      "0025D45D",
+      "sub_0025D45D"
+    ],
+    [
+      "0025D467",
+      "sub_0025D467"
+    ],
+    [
+      "0025D471",
+      "sub_0025D471"
+    ],
+    [
+      "0025D47B",
+      "sub_0025D47B"
+    ],
+    [
+      "0025D485",
+      "sub_0025D485"
+    ],
+    [
+      "0025D48F",
+      "sub_0025D48F"
+    ],
+    [
+      "0025D499",
+      "sub_0025D499"
+    ],
+    [
+      "0025D4A3",
+      "sub_0025D4A3"
+    ],
+    [
+      "0025D4AD",
+      "sub_0025D4AD"
+    ],
+    [
+      "0025D4B7",
+      "sub_0025D4B7"
+    ],
+    [
+      "0025D4C1",
+      "sub_0025D4C1"
+    ],
+    [
+      "0025D4CB",
+      "sub_0025D4CB"
+    ],
+    [
+      "0025D4D5",
+      "sub_0025D4D5"
+    ],
+    [
+      "0025D4DF",
+      "sub_0025D4DF"
+    ],
+    [
+      "0025D4E9",
+      "sub_0025D4E9"
+    ],
+    [
+      "0025D4F3",
+      "sub_0025D4F3"
+    ],
+    [
+      "0025D4FD",
+      "sub_0025D4FD"
+    ],
+    [
+      "0025D507",
+      "sub_0025D507"
+    ],
+    [
+      "0025D511",
+      "sub_0025D511"
+    ],
+    [
+      "0025D51B",
+      "sub_0025D51B"
+    ],
+    [
+      "0025D525",
+      "sub_0025D525"
+    ],
+    [
+      "0025D52F",
+      "sub_0025D52F"
+    ],
+    [
+      "0025D539",
+      "sub_0025D539"
+    ],
+    [
+      "0025D543",
+      "sub_0025D543"
+    ],
+    [
+      "0025D54D",
+      "sub_0025D54D"
+    ],
+    [
+      "0025D557",
+      "sub_0025D557"
+    ],
+    [
+      "0025D561",
+      "sub_0025D561"
+    ],
+    [
+      "0025D56B",
+      "sub_0025D56B"
+    ],
+    [
+      "0025D575",
+      "sub_0025D575"
+    ],
+    [
+      "0025D57F",
+      "sub_0025D57F"
+    ],
+    [
+      "0025D589",
+      "sub_0025D589"
+    ],
+    [
+      "0025D593",
+      "sub_0025D593"
+    ],
+    [
+      "0025D59D",
+      "sub_0025D59D"
+    ],
+    [
+      "0025D5A7",
+      "sub_0025D5A7"
+    ],
+    [
+      "0025D5B1",
+      "sub_0025D5B1"
+    ],
+    [
+      "0025D5BB",
+      "sub_0025D5BB"
+    ],
+    [
+      "0025D5C5",
+      "sub_0025D5C5"
+    ],
+    [
+      "0025D5CF",
+      "sub_0025D5CF"
+    ],
+    [
+      "0025D5D9",
+      "sub_0025D5D9"
+    ],
+    [
+      "0025D5E3",
+      "sub_0025D5E3"
+    ],
+    [
+      "0025D5ED",
+      "sub_0025D5ED"
+    ],
+    [
+      "0025D5F7",
+      "sub_0025D5F7"
+    ],
+    [
+      "0025D601",
+      "sub_0025D601"
+    ],
+    [
+      "0025D60B",
+      "sub_0025D60B"
+    ],
+    [
+      "0025D615",
+      "sub_0025D615"
+    ],
+    [
+      "0025D61F",
+      "sub_0025D61F"
+    ],
+    [
+      "0025D629",
+      "sub_0025D629"
+    ],
+    [
+      "0025D633",
+      "sub_0025D633"
+    ],
+    [
+      "0025D63D",
+      "sub_0025D63D"
+    ],
+    [
+      "0025D647",
+      "sub_0025D647"
+    ],
+    [
+      "0025D651",
+      "sub_0025D651"
+    ],
+    [
+      "0025D65B",
+      "sub_0025D65B"
+    ],
+    [
+      "0025D665",
+      "sub_0025D665"
+    ],
+    [
+      "0025D66F",
+      "sub_0025D66F"
+    ],
+    [
+      "0025D679",
+      "sub_0025D679"
+    ],
+    [
+      "0025D683",
+      "sub_0025D683"
+    ],
+    [
+      "0025D68D",
+      "sub_0025D68D"
+    ],
+    [
+      "0025D697",
+      "sub_0025D697"
+    ],
+    [
+      "0025D6A1",
+      "sub_0025D6A1"
+    ],
+    [
+      "0025D6AB",
+      "sub_0025D6AB"
+    ],
+    [
+      "0025D6B5",
+      "sub_0025D6B5"
+    ],
+    [
+      "0025D6BF",
+      "sub_0025D6BF"
+    ],
+    [
+      "0025D6C9",
+      "sub_0025D6C9"
+    ],
+    [
+      "0025D6D3",
+      "sub_0025D6D3"
+    ],
+    [
+      "0025D6DD",
+      "sub_0025D6DD"
+    ],
+    [
+      "0025D6E7",
+      "sub_0025D6E7"
+    ],
+    [
+      "0025D6F1",
+      "sub_0025D6F1"
+    ],
+    [
+      "0025D6FB",
+      "sub_0025D6FB"
+    ],
+    [
+      "0025D705",
+      "sub_0025D705"
+    ],
+    [
+      "0025D70F",
+      "sub_0025D70F"
+    ],
+    [
+      "0025D719",
+      "sub_0025D719"
+    ],
+    [
+      "0025D723",
+      "sub_0025D723"
+    ],
+    [
+      "0025D72D",
+      "sub_0025D72D"
+    ],
+    [
+      "0025D737",
+      "sub_0025D737"
+    ],
+    [
+      "0025D741",
+      "sub_0025D741"
+    ],
+    [
+      "0025D74B",
+      "sub_0025D74B"
     ],
     [
       "0025D760",
@@ -290716,8 +293099,16 @@
       "sub_0025D97C"
     ],
     [
+      "0025D97D",
+      "sub_0025D97D"
+    ],
+    [
       "0025D987",
       "sub_0025D987"
+    ],
+    [
+      "0025D988",
+      "sub_0025D988"
     ],
     [
       "0025D992",
@@ -290728,8 +293119,52 @@
       "sub_0025D9A0"
     ],
     [
+      "0025D9AF",
+      "sub_0025D9AF"
+    ],
+    [
+      "0025D9B9",
+      "sub_0025D9B9"
+    ],
+    [
+      "0025D9C3",
+      "sub_0025D9C3"
+    ],
+    [
+      "0025D9CD",
+      "sub_0025D9CD"
+    ],
+    [
+      "0025D9D7",
+      "sub_0025D9D7"
+    ],
+    [
+      "0025D9E1",
+      "sub_0025D9E1"
+    ],
+    [
+      "0025D9EB",
+      "sub_0025D9EB"
+    ],
+    [
+      "0025D9F5",
+      "sub_0025D9F5"
+    ],
+    [
+      "0025D9FF",
+      "sub_0025D9FF"
+    ],
+    [
       "0025DA09",
       "sub_0025DA09"
+    ],
+    [
+      "0025DA20",
+      "sub_0025DA20"
+    ],
+    [
+      "0025DA2A",
+      "sub_0025DA2A"
     ],
     [
       "0025DA5D",
@@ -292426,6 +294861,10 @@
     [
       "00270DA6",
       "sub_00270DA6"
+    ],
+    [
+      "00270DE5",
+      "sub_00270DE5"
     ],
     [
       "00270DF5",
