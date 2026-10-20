@@ -6376,8 +6376,8 @@
   },
   {
     "start": "0x0001BFF0",
-    "end": "0x0001C000",
-    "size": 16,
+    "end": "0x0001C017",
+    "size": 39,
     "name": "sub_0001BFF0",
     "section": ".text",
     "category": "game_vtable",
