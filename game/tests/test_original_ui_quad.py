@@ -146,6 +146,29 @@ static void check_preview(uint32_t caller,int active) {
     }
     assert(MEM32(0x4004)==88 && !memcmp(ram+0x400c,original+3,12));
 }
+static void check_status_preview(void) {
+    const uint32_t original[6]={60,84,168,184,0,0x3f800000};
+    float factor=(4.0f/3.0f)/aspect;
+    for(unsigned frame=0;frame<120;frame++) {
+        memset(ram,0,sizeof ram);MEM32(g_esp)=0x001427E9;MEM32(g_esp+4)=0x4000;
+        memcpy(ram+0x4000,original,sizeof original);
+        prepare_original_preview_viewport();
+        float effect_center=MEM32(0x4000)+MEM32(0x4008)*0.5f;
+        /* Body c36 and fixed-function animated effects share this preview. */
+        MEM32(g_esp)=0x001427AE;MEM32(g_esp+4)=0x5000;
+        MEMF(0x5000)=144;MEMF(0x5004)=176;
+        MEMF(g_esp+8)=184.0f/168;MEMF(g_esp+12)=84;
+        prepare_original_preview_projection();
+        assert(fabsf(effect_center-MEMF(0x5000))<0.001f);
+        assert(fabsf(MEM32(0x4008)-168*factor)<0.001f);
+        assert(MEM32(0x4004)==84 && !memcmp(ram+0x400c,original+3,12));
+        if(aspect==4.0f/3.0f)assert(!memcmp(ram+0x4000,original,sizeof original));
+        MEM32(g_esp)=0x00142A5A;MEM32(g_esp+4)=0x4000;
+        uint32_t scene[6]={0,0,640,480,0,0x3f800000};
+        memcpy(ram+0x4000,scene,sizeof scene);prepare_original_preview_viewport();
+        assert(!memcmp(ram+0x4000,scene,sizeof scene));
+    }
+}
 static void check_projection(uint32_t caller,int active,float x,float y,float ratio,float scale) {
     memset(ram,0,sizeof ram);MEM32(g_esp)=caller;MEM32(g_esp+4)=0x4000;
     MEMF(g_esp+8)=ratio;MEMF(g_esp+12)=scale;
@@ -237,7 +260,7 @@ int main(int argc,char **argv) {
     check_portrait_strip(352,164,272);check_portrait_strip(171,217,216);check_portrait_strip(202,163,80);
     check_dialogue_connector();check_speech_anchor();
     check_item_icons();
-    check_window_transition();check_sword_preview();
+    check_window_transition();check_sword_preview();check_status_preview();
     memset(ram,0,sizeof ram);g_ecx=0x2000;MEM32(g_ecx+0x50)=640;MEM32(g_ecx+0x54)=480;
     smt9_prepare_window_transition(g_ecx);assert(MEMF(g_ecx+0x3c)==0 && MEM32(g_ecx+0x50)==640);
     const float guide_x[]={426,426,381,384,381,384},guide_y[]={262,265,280,282,319,319};
@@ -283,3 +306,54 @@ int main(int argc,char **argv) {
 @pytest.mark.parametrize('aspect', ['4', '16'])
 def test_actual_shared_color_quad_preserves_fade_extent_and_payload(quad_probe, aspect):
     subprocess.run([str(quad_probe), aspect], check=True, timeout=10)
+
+
+def test_fusion_disc_anchor(tmp_path):
+    """Authored disc positions survive widescreen while model geometry stays proportional."""
+    import json
+    root = Path(__file__).resolve().parents[2]
+    recipe = json.loads((root / 'config/codegen.json').read_text())
+    row = next(item for item in recipe['functions'] if item['address'] == 0x368F3)
+    edit = next(item for item in row['edits'] if 'disc anchors' in item[2])
+    production = edit[2][:edit[2].index('    g_ebp = ebp;')]
+    source = r'''
+#include <stdint.h>
+#include <string.h>
+#include <math.h>
+#include <assert.h>
+static unsigned char ram[4096];
+#define MEM32(a) (*(uint32_t *)(ram+(a)))
+#define MEMF(a) (*(float *)(ram+(a)))
+static float aspect;
+float smt9_game_aspect(void){return aspect;}
+static void place(void){uint32_t ecx=512,ebp=256;
+'''+production+r'''
+}
+int main(void){
+    const float anchors[]={0,-268.16500854f,268.16500854f,0};
+    const float aspects[]={4.0f/3.0f,16.0f/9.0f,21.0f/9.0f,4.0f/3.0f};
+    for(unsigned a=0;a<4;a++)for(unsigned slot=0;slot<4;slot++)for(unsigned frame=0;frame<120;frame++){
+        aspect=aspects[a];
+        const float authored[3]={anchors[slot],2.5f,-154.825f};
+        memcpy(ram+512+0xB0,authored,12);
+        place();
+        unsigned consumer=MEM32(256-44);
+        assert(consumer==512+0xB0);
+        assert(!memcmp(ram+consumer+4,authored+1,8));
+        float factor=(4.0f/3.0f)/aspect;
+        float projected=320+MEMF(consumer)*factor*1361.107666f/2857.327881f;
+        float original=320+authored[0]*1361.107666f/2857.327881f;
+        assert(fabsf(projected-original)<0.0001f);
+        /* Two vertices retain their normal projected separation; only the anchor moves. */
+        float left=320+(MEMF(consumer)-20)*factor;
+        float right=320+(MEMF(consumer)+20)*factor;
+        assert(fabsf((right-left)*aspect-40*(4.0f/3.0f))<0.0001f);
+        if(a==0 || a==3)assert(!memcmp(ram+consumer,authored,12));
+    }
+    return 0;
+}
+'''
+    c=tmp_path / 'anchor.c';exe=tmp_path / 'anchor.exe';c.write_text(source)
+    result=subprocess.run([shutil.which('cl'),'/nologo','/O2',str(c),'/Fe:'+str(exe)],cwd=tmp_path,capture_output=True,text=True)
+    assert result.returncode==0,result.stdout+result.stderr
+    subprocess.run([str(exe)],check=True,cwd=tmp_path)

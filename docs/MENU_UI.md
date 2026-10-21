@@ -18,15 +18,15 @@ The small speech-window connector is rebuilt by `1059A0` and submitted by `105C6
 
 ## Appearance and Status previews
 
-The appearance producers preserve the original ratio-times-scale on both physical shader axes, then apply the shared widescreen factor to X. Their viewport and screen origin use the existing UI mapping. The Status producer keeps its separate accepted projection handling. Production-helper checks exercise 4:3 and 16:9; complete appearance-route visual coverage remains pending.
+The appearance producers preserve the original ratio-times-scale on both physical shader axes, then apply the shared widescreen factor to X. Their viewport and screen origin use the existing UI mapping. The Status producer maps both its body projection at `1427AE` and the fixed-function effect viewport at `1427E9`. The latter is recreated at 60,84,168,184 before each draw; its X and width share the body mapping while Y, height and depth remain original. This keeps animated effects, such as Tsukuyomi's rotating galaxy, attached to the model. The subsequent full-screen viewport restore is unchanged. Tsukuyomi was compared at 4:3 and 16:9, with corrected widescreen output checked on native Vulkan and OpenGL. Production-helper checks exercise both aspects; complete appearance-route visual coverage remains pending.
 
-## Sword fusion preview and scene
+## Fusion preview and scene
 
 The sword preview at `10DFBD` uses the same centered horizontal mapping for its projection and its original 112×112 viewport. The static viewport table is mapped from its original dimensions on every draw, preventing repeated scaling. Its full-screen entry and depth range remain unchanged.
 
-The original scene camera `31389` supplies the shader's screen scale. With independent native shader axes, its scale is 240 times the original zoom instead of 320, preserving the original scalar used by both axes. Model positions then agree with the fixed-function platform and depth geometry; the original solid/wireframe animation and depth tests remain intact.
+The original scene camera `31389` supplies the shader's screen scale. With independent native shader axes, its scale is 240 times the original zoom instead of 320, preserving the original scalar used by both axes. The original solid/wireframe animation and depth tests remain intact. The screen-space backdrop stretches horizontally, so `368F3` maps each authored disc anchor's X to match that backdrop before the original model and effect consumers read the shared object root. Only the root position moves; local model dimensions retain their normal proportions. The original anchor table and 4:3 coordinates remain unchanged.
 
-The supplied sword-fusion route was captured through confirmation, the full animation and result at 4:3 and 16:9 on native Vulkan, and at 16:9 on OpenGL. These are 20-second displayed sequences sampled at 12 Hz. The preview remains square inside its menu; the demon's feet stand on the platform before its intended wireframe dissolution. This does not establish coverage of every fusion combination.
+The supplied sword-fusion route was captured through confirmation, the full animation and result at 4:3 and 16:9 on native Vulkan, and at 16:9 on OpenGL. These are 20-second displayed sequences sampled at 12 Hz. The preview remains square inside its menu; the demon's feet stand on the platform before its intended wireframe dissolution. Ordinary two-body fusion (Amaterasu + Fire Elemental → Tsukuyomi) and three-body fusion (Vishnu + Freya + Dominion → Amaterasu) were also captured through their complete animations and results on native Vulkan at 16:9. All three material roots and the result root align with their corresponding discs. This does not establish coverage of every fusion combination.
 
 ## Random encounter gauge
 

@@ -253,6 +253,19 @@ static void prepare_original_preview_viewport(void)
         MEM32(viewport+8)=(uint32_t)floorf(112*factor+0.5f);
         return;
     }
+    if(caller==0x001427E9u){
+        /* 14276E recreates the status viewport. Its animated effects must
+         * share the body's mapped c36 origin and horizontal scale. */
+        uint32_t viewport=MEM32(g_esp+4);
+        if(MEM32(viewport)!=60 || MEM32(viewport+4)!=84 ||
+           MEM32(viewport+8)!=168 || MEM32(viewport+12)!=184){
+            fprintf(stderr,"[STOP] original status preview viewport contract\n");exit(5);
+        }
+        float factor=(4.0f/3.0f)/smt9_game_aspect();
+        MEM32(viewport)=(uint32_t)floorf(320+(60-320)*factor+0.5f);
+        MEM32(viewport+8)=(uint32_t)floorf(168*factor+0.5f);
+        return;
+    }
     if(caller!=0x000F826Fu && caller!=0x000F8709u)return;
     if(smt9_game_aspect()==4.0f/3.0f)return;
     /* F8070/F84E0 recreate the male/female preview viewport each draw.

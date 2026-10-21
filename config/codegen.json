@@ -15895,7 +15895,15 @@
       "address": 223475,
       "name": "sub_000368F3",
       "file": "recomp_0007.c",
-      "edits": []
+      "edits": [
+        [
+          6042,
+          "    g_ebp = ebp; /* frame stays current across calls */\n    g_seh_ebp = ebp;\n    PUSH32(esp, 0x00036955u);",
+          "    /* Keep the authored disc anchors on the stretched backdrop; model scale stays proportional. */\n    { extern float smt9_game_aspect(void);\n      MEMF(ecx + 0xB0) *= smt9_game_aspect() * 0.75f;\n      MEM32(ebp + -44) = ecx + 0xB0; }\n    g_ebp = ebp; /* frame stays current across calls */\n    g_seh_ebp = ebp;\n    PUSH32(esp, 0x00036955u);",
+          "DF_STEP(4); /* movsd */\n",
+          "\n    recomp_cont_site(&_"
+        ]
+      ]
     },
     {
       "address": 224352,
