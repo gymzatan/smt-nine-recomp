@@ -20,6 +20,10 @@ The small speech-window connector is rebuilt by `1059A0` and submitted by `105C6
 
 The appearance producers preserve the original ratio-times-scale on both physical shader axes, then apply the shared widescreen factor to X. Their viewport and screen origin use the existing UI mapping. The Status producer keeps its separate accepted projection handling. Production-helper checks exercise 4:3 and 16:9; complete appearance-route visual coverage remains pending.
 
+## Random encounter gauge
+
+The selection countdown's textured frame and its plain branch are rebuilt by `110106` and submitted through `1102DC` and `110305`. Both use the same centered horizontal mapping as the existing `110102` green fill and the adjacent command panels. The original stack quad is rebuilt each draw, so the adjustment does not accumulate. The four-vertex payload retains Y, depth, RHW, color and UV values, and 4:3 retains every original byte. This screen-space frame is separate from the projected HP/MP bars above battle actors.
+
 ## Portrait transitions
 
 The original sprite renderer `145A39` switches to `1450CF` during the strip animation used to show and hide portraits. Its draw return `1452C5` submits 22 vertices rather than the settled four-vertex quad at `14617A`. Every animated vertex uses the same centered horizontal mapping as the settled portrait. Y, depth, RHW, colors and UVs retain the original animation values. This keeps the portrait's proportions consistent through entry, exit and speaker changes.

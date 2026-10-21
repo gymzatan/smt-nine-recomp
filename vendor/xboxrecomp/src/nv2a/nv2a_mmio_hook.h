@@ -31,6 +31,10 @@ bool xbox_mmio_decode(PCONTEXT ctx, uint32_t offset, int is_write,
  */
 void nv2a_hook_init(ptrdiff_t xbox_mem_offset);
 
+/* Direct lifted word accesses use the same NV2A aperture and handlers. */
+uint32_t nv2a_guest_read32(uint32_t address);
+void nv2a_guest_write32(uint32_t address, uint32_t value);
+
 /*
  * Handle an NV2A MMIO access fault.
  *

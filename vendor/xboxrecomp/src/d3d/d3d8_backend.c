@@ -1,5 +1,5 @@
-/* The existing D3D11 command and shader contract is implemented by DXVK for
- * Vulkan, WineD3D for OpenGL, or the system D3D11 driver. */
+/* Vulkan owns a native device and queue. The other selections keep their
+ * existing D3D11, D3D11On12 or WineD3D implementation. */
 #include "d3d8_internal.h"
 #include <dxgi1_4.h>
 #include <d3d12.h>
@@ -13,8 +13,13 @@ typedef HRESULT (WINAPI *CreateFactory)(REFIID,void **);
 typedef HRESULT (WINAPI *CreateDevice)(IDXGIAdapter *,D3D_DRIVER_TYPE,HMODULE,UINT,
     const D3D_FEATURE_LEVEL *,UINT,UINT,ID3D11Device **,D3D_FEATURE_LEVEL *,ID3D11DeviceContext **);
 static unsigned render_scale=1;
+static int display_vsync;
+void d3d8_DisplayVSyncConfigure(int enabled){display_vsync=enabled!=0;}
+int d3d8_DisplayVSync(void){return display_vsync;}
 static float game_aspect=4.0f/3.0f;
 static const char *active_backend="D3D11";
+static int native_vulkan;
+int d3d8_IsNativeVulkan(void){return native_vulkan;}
 void d3d8_DisplayConfigure(unsigned scale,float aspect)
 {
     render_scale=scale;game_aspect=aspect;
@@ -75,7 +80,7 @@ static HRESULT load_backend(const wchar_t *name,HMODULE *dxgi,HMODULE *d3d)
     if(!length || length>=32768)return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
     end=wcsrchr(path,L'\\');if(!end)return E_INVALIDARG;
     size_t remaining=32768-(size_t)(end+1-path);
-    const wchar_t *dxgi_name=!wcscmp(name,L"vulkan")?L"nvgi.dll":L"nogi.dll";
+    const wchar_t *dxgi_name=L"nogi.dll";
     if(swprintf_s(end+1,remaining,L"backends\\%s\\%s",name,dxgi_name)<0)return E_INVALIDARG;
     if(!*dxgi)*dxgi=LoadLibraryExW(path,NULL,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if(!*dxgi)return HRESULT_FROM_WIN32(GetLastError());
@@ -145,31 +150,45 @@ HRESULT d3d8_backend_create_device(ID3D11Device **device,ID3D11DeviceContext **c
     if(!requested)requested="D3D11";
     int automatic=!strcmp(requested,"Auto");
     const char *names[]={"Vulkan","OpenGL","D3D12","D3D11"};
-    const wchar_t *folders[]={L"vulkan",L"opengl"};
     HRESULT last=E_INVALIDARG;
     /* Driver dependencies have process lifetime: unloading a failed runtime
      * can invalidate shared native-driver state during subsequent draws.
      * Cache each load once; partial device/context objects are still released. */
-    static HMODULE modules[2][2];
+    static HMODULE modules[2];
     for(unsigned index=0;index<4;index++) {
         if(!automatic && strcmp(requested,names[index]))continue;
         active_backend=names[index];HRESULT hr=S_OK;
         CreateFactory factory_fn=CreateDXGIFactory1;CreateDevice device_fn=D3D11CreateDevice;
         if(index==2)device_fn=create_d3d12;
         fprintf(stderr,"[GPU] trying %s\n",active_backend);
-        if(index<2) {
-            if(index==1 && (!SetEnvironmentVariableA("WINE_D3D_CONFIG","renderer=gl") || _putenv_s("WINE_D3D_CONFIG","renderer=gl")))hr=E_FAIL;
-            if(SUCCEEDED(hr))hr=load_backend(folders[index],&modules[index][0],&modules[index][1]);
+        if(index==0) {
+            wchar_t compiler[MAX_PATH];DWORD length=GetModuleFileNameW(NULL,compiler,MAX_PATH);
+            if(!length || length>=MAX_PATH)hr=E_FAIL;
+            else {
+                wchar_t *slash=wcsrchr(compiler,L'\\');
+                if(!slash)hr=E_FAIL;
+                else {
+                    slash[1]=0;
+                    if(wcscat_s(compiler,MAX_PATH,L"backends\\vulkan\\dxcompiler.dll"))hr=E_FAIL;
+                    else if(!nvk_initialize(compiler)) {
+                        fprintf(stderr,"[GPU Vulkan] %s\n",nvk_error());nvk_shutdown();hr=E_FAIL;
+                    } else native_vulkan=1;
+                }
+            }
+        }
+        if(index==1) {
+            if(!SetEnvironmentVariableA("WINE_D3D_CONFIG","renderer=gl") || _putenv_s("WINE_D3D_CONFIG","renderer=gl"))hr=E_FAIL;
+            if(SUCCEEDED(hr))hr=load_backend(L"opengl",&modules[0],&modules[1]);
             if(SUCCEEDED(hr)) {
-                factory_fn=(CreateFactory)GetProcAddress(modules[index][0],"CreateDXGIFactory1");
-                device_fn=(CreateDevice)GetProcAddress(modules[index][1],"D3D11CreateDevice");
+                factory_fn=(CreateFactory)GetProcAddress(modules[0],"CreateDXGIFactory1");
+                device_fn=(CreateDevice)GetProcAddress(modules[1],"D3D11CreateDevice");
                 if(!factory_fn || !device_fn)hr=HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
             }
         }
         /* Let the selected implementation check its own driver requirements.
-         * DXVK/WineD3D may return E_FAIL or another HRESULT for an unusable
+         * WineD3D may return E_FAIL or another HRESULT for an unusable
          * driver, not just DXGI_ERROR_UNSUPPORTED. */
-        if(SUCCEEDED(hr))hr=create_hardware(factory_fn,device_fn,device,context);
+        if(SUCCEEDED(hr) && index!=0)hr=create_hardware(factory_fn,device_fn,device,context);
         /* WineD3D polls EVENT queries on its command thread. Its short waits
          * otherwise round to the default Windows timer interval, stalling
          * NINE's per-glyph completion fences. Pair this process request at exit. */

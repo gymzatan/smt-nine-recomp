@@ -67,6 +67,13 @@ int xbox_FramebufferKeyDown(int vk);
 void xbox_FramebufferSetCheckpointHandler(int (*handler)(int load,unsigned slot));
 
 void xbox_FramebufferWindowSetControls(const wchar_t *screenshot_directory,unsigned interface_language);
+typedef struct FramebufferNativeRenderer {
+    void (*display)(void *window,unsigned width,unsigned height,const int32_t bounds[4]);
+    int (*capture)(void);
+    int (*restore)(const uint32_t *pixels,unsigned width,unsigned height);
+    void (*close)(void);
+} FramebufferNativeRenderer;
+void xbox_FramebufferWindowSetRenderer(const FramebufferNativeRenderer *renderer);
 void xbox_FramebufferWindowStart(void);
 void xbox_FramebufferWindowSet(uint32_t fb_va, uint32_t pitch);
 int  xbox_FramebufferDumpBmp(const char *path);

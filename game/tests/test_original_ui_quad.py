@@ -227,6 +227,12 @@ int main(int argc,char **argv) {
     check_menu_color(0x00146153,7,4,28,bar_x,bar_y,1);
     check_menu_color(0x00146153,7,4,28,target_x,target_y,1);
     check_menu_color(0x00146152,7,4,28,bar_x,bar_y,0);
+    /* Random encounter gauge frame from the original 110106 stack quad.
+     * Both texture branches share the green fill and menu X coordinates. */
+    const float gauge_x[]={336,588,588,336},gauge_y[]={248,248,264,264};
+    check_menu_color(0x001102DC,7,4,28,gauge_x,gauge_y,1);
+    check_menu_color(0x00110305,7,4,28,gauge_x,gauge_y,1);
+    check_menu_color(0x001102DB,7,4,28,gauge_x,gauge_y,0);
     const float fade_x[]={0,640,640,0},fade_y[]={0,0,480,480};
     check_menu_color(0x00146153,7,4,28,fade_x,fade_y,0);
     const float navi_x[]={542,542,551,551},navi_y[]={408,120,408,120};

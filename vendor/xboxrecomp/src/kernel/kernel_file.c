@@ -16,6 +16,7 @@
 
 #define _GNU_SOURCE   /* FNM_CASEFOLD */
 #include "kernel.h"
+#include "xbox_memory_layout.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -247,6 +248,7 @@ NTSTATUS __stdcall xbox_NtReadFile(
     if (!IoStatusBlock)
         return STATUS_INVALID_PARAMETER;
 
+    int gpu_write = nv2a_pb_host_write_begin(Buffer, Length);
     if (ByteOffset && ByteOffset->QuadPart >= 0) {
         memset(&ov, 0, sizeof(ov));
         ov.Offset = ByteOffset->LowPart;
@@ -255,8 +257,10 @@ NTSTATUS __stdcall xbox_NtReadFile(
     } else {
         result = ReadFile(FileHandle, Buffer, Length, &bytes_read, NULL);
     }
+    DWORD read_error = result ? ERROR_SUCCESS : GetLastError();
+    nv2a_pb_host_write_end(gpu_write);
 
-    if (result || GetLastError() == ERROR_HANDLE_EOF) {
+    if (result || read_error == ERROR_HANDLE_EOF) {
         IoStatusBlock->Information = bytes_read;
         if (bytes_read == 0 && Length > 0) {
             IoStatusBlock->Status = STATUS_END_OF_FILE;
@@ -268,7 +272,7 @@ NTSTATUS __stdcall xbox_NtReadFile(
     }
 
     XBOX_TRACE(XBOX_LOG_FILE, "NtReadFile(handle=%p, len=%u) failed err=%u",
-               FileHandle, Length, GetLastError());
+               FileHandle, Length, read_error);
     IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
     IoStatusBlock->Information = 0;
     return STATUS_UNSUCCESSFUL;

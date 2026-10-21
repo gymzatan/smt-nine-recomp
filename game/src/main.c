@@ -411,11 +411,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
     if(!WideCharToMultiByte(CP_UTF8,0,s_display.backend,-1,backend,16,NULL,NULL))return 1;
     extern void d3d8_DisplayConfigure(unsigned scale,float aspect);
+    extern void d3d8_DisplayVSyncConfigure(int enabled);
     extern void xbox_FramebufferWindowConfigure(unsigned width,unsigned height,float aspect,int fixed_aspect);
     d3d8_DisplayConfigure(s_display.render_scale,smt9_game_aspect());
+    d3d8_DisplayVSyncConfigure(s_display.vsync);
     xbox_FramebufferWindowConfigure(s_display.window_width,s_display.window_height,smt9_game_aspect(),s_display.fixed_aspect);
     if(_putenv_s("RECOMP_GPU_BACKEND",backend)!=0)return 1;
-    fprintf(stderr,"[DISPLAY] backend=%s render_scale=%u window=%ux%u aspect=%u:%u refresh_hz=%u\n",backend,s_display.render_scale,s_display.window_width,s_display.window_height,s_display.aspect_width,s_display.aspect_height,s_display.refresh_hz);
+    fprintf(stderr,"[DISPLAY] backend=%s render_scale=%u window=%ux%u aspect=%u:%u refresh_hz=%u vsync=%u\n",backend,s_display.render_scale,s_display.window_width,s_display.window_height,s_display.aspect_width,s_display.aspect_height,s_display.refresh_hz,s_display.vsync);
     fprintf(stderr,"[LANGUAGE] %ls\n",s_display.language);
     if(!nine_title_assets_init(smt9_game_aspect()))return 1;
     if(smt9_is_chinese() && !nine_font_assets_init(s_display.render_scale))return 1;
@@ -473,6 +475,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         return 5;
     }
     nv2a_get_state()->pfifo.method_consumer = nv2a_pb_exec_method;
+    extern const FramebufferNativeRenderer *nv2a_pb_native_renderer(void);
+    xbox_FramebufferWindowSetRenderer(nv2a_pb_native_renderer());
 
     if (!xbox_ConnectApu()) {
         fprintf(stderr, "[STOP] failed to connect APU/AC97 to guest memory\n");

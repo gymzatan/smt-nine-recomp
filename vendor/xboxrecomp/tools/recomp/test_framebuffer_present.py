@@ -128,7 +128,7 @@ int main(int argc,char **argv) {
         assert(!memcmp(s_rgb,s_present[1],48));
         FILE *again=tmpfile();assert(again && xbox_FramebufferSaveCheckpoint(again) && ftell(again)==bytes);
         rewind(again);assert(fread(restored,bytes,1,again)==1 && !memcmp(original,restored,bytes));
-        FILE *shot=tmpfile();assert(shot && fb_write_screenshot(shot)==0);rewind(shot);
+        FILE *shot=tmpfile();assert(shot && fb_write_display(shot,0,0)==0);rewind(shot);
         BITMAPFILEHEADER header;BITMAPINFOHEADER info;assert(fread(&header,sizeof header,1,shot)==1 && fread(&info,sizeof info,1,shot)==1);
         assert(header.bfType==0x4d42 && info.biWidth==32 && info.biHeight==24);
         fclose(shot);fclose(again);fclose(saved);free(original);free(restored);

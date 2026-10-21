@@ -14,6 +14,8 @@ The original callback catalog includes long exception-handled callbacks, forward
 
 The resource callback used after the Sophia dialogue retains its complete initialization call and both return paths. Replaying the supplied corridor state reaches the following room, dialogue and battle without the reported black screen. Battle item and reward icons use the same horizontal UI mapping as their surrounding panels and text, preserving their original placement at 4:3.
 
+The random-encounter gauge frame uses the same horizontal mapping as its fill and nearby command panels. Native Vulkan readback buffers prefer compatible host-cached memory. Battle effect initialization checks completed callback outputs instead of uninitialized object fields; focused regressions and a ten-minute diagnostic replay cover the reproduced failure. Heavy battle scenes and wider long-session coverage still need performance work.
+
 Known coverage limits:
 
 - Horizontal character gaps and incorrect occlusion have been reported on some player configurations. Local four-backend street samples and an AMD-integrated D3D11 sample did not reproduce them; the exact female-player and restaurant scenes, affected builds and drivers remain unverified. A graphics-memory cause has not been established, and 512 MiB support is not certified. See the README for hardware requirements and memory-report fields.

@@ -149,6 +149,9 @@ static void prepare_original_ui_quad(void)
         if(smt9_game_aspect()==4.0f/3.0f)return;
         buffer=MEM32(MEM32(g_esi+0x48)+4)|0x80000000u;
         break;
+    case 0x001102DCu:case 0x00110305u:
+        /* 110106 rebuilds the random encounter gauge frame on its stack.
+         * Its textured and plain branches share the fill's UI X mapping. */
     case 0x00146153u:
         /* 145A39 also submits untextured 28-byte quads for menu scroll thumbs. */
         buffer=MEM32(g_esp+12);direct=1;

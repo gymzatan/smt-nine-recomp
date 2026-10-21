@@ -74,6 +74,7 @@ typedef struct CombinerCacheEntry {
     uint32_t            hash;
     NV2ACombinerState   state;
     ID3D11PixelShader  *shader;
+    NvkShader         *vulkan;
     uint32_t            last_used_frame;
 } CombinerCacheEntry;
 
@@ -582,7 +583,7 @@ int d3d8_combiners_generate_hlsl(const NV2ACombinerState *state,
  * Shader Compilation & Cache
  * ================================================================ */
 
-static ID3D11PixelShader *compile_combiner_shader(const NV2ACombinerState *state)
+static int compile_combiner_shader(const NV2ACombinerState *state,CombinerCacheEntry *output)
 {
     /* 16KB should be more than enough for any combiner shader */
     char hlsl[16384];
@@ -595,9 +596,13 @@ static ID3D11PixelShader *compile_combiner_shader(const NV2ACombinerState *state
     len = d3d8_combiners_generate_hlsl(state, hlsl, sizeof(hlsl));
     if (len < 0) {
         fprintf(stderr, "NV2A combiners: HLSL generation failed (buffer overflow)\n");
-        return NULL;
+        return 0;
     }
 
+    if(d3d8_IsNativeVulkan()) {
+        output->vulkan=nvk_shader_create(hlsl,"main",VK_SHADER_STAGE_FRAGMENT_BIT);
+        return output->vulkan!=NULL;
+    }
     hr = D3DCompile(hlsl, (SIZE_T)len, "ps_combiner",
                     NULL, NULL, "main", "ps_5_0",
                     D3DCOMPILE_OPTIMIZATION_LEVEL3, 0,
@@ -609,7 +614,7 @@ static ID3D11PixelShader *compile_combiner_shader(const NV2ACombinerState *state
         /* Dump the generated source for debugging */
         fprintf(stderr, "--- Generated HLSL ---\n%s\n--- End HLSL ---\n", hlsl);
         if (errors) ID3D10Blob_Release(errors);
-        return NULL;
+        return 0;
     }
     if (errors) ID3D10Blob_Release(errors);
 
@@ -622,13 +627,13 @@ static ID3D11PixelShader *compile_combiner_shader(const NV2ACombinerState *state
 
     if (FAILED(hr)) {
         fprintf(stderr, "NV2A combiners: CreatePixelShader failed: 0x%08lX\n", hr);
-        return NULL;
+        return 0;
     }
 
-    return ps;
+    output->shader=ps;return 1;
 }
 
-ID3D11PixelShader *d3d8_combiners_get_shader(const NV2ACombinerState *state)
+static CombinerCacheEntry *get_combiner_shader(const NV2ACombinerState *state)
 {
     NV2ACombinerState key = *state;
     memset(key.c0, 0, sizeof key.c0);
@@ -641,7 +646,7 @@ ID3D11PixelShader *d3d8_combiners_get_shader(const NV2ACombinerState *state)
         CombinerCacheEntry *entry=&g_cache[g_last_lookup_slot];
         if(entry->in_use && combiner_state_equal(&entry->state,state)){
             entry->last_used_frame=g_frame_counter;
-            return entry->shader;
+            return entry;
         }
     }
     uint32_t hash = combiner_state_hash(state);
@@ -655,23 +660,24 @@ ID3D11PixelShader *d3d8_combiners_get_shader(const NV2ACombinerState *state)
 
         if (!entry->in_use) {
             /* Cache miss - compile and insert */
-            ID3D11PixelShader *ps = compile_combiner_shader(state);
-            if (!ps) return NULL;
+            CombinerCacheEntry compiled={0};
+            int compiled_ok=compile_combiner_shader(state,&compiled);
+            if (!compiled_ok) return NULL;
 
             entry->in_use = TRUE;
             entry->hash = hash;
             memcpy(&entry->state, state, sizeof(NV2ACombinerState));
-            entry->shader = ps;
+            entry->shader=compiled.shader;entry->vulkan=compiled.vulkan;
             entry->last_used_frame = g_frame_counter;
             g_last_lookup_slot=(int)slot;
-            return ps;
+            return entry;
         }
 
         if (entry->hash == hash && combiner_state_equal(&entry->state, state)) {
             /* Cache hit */
             entry->last_used_frame = g_frame_counter;
             g_last_lookup_slot=(int)slot;
-            return entry->shader;
+            return entry;
         }
     }
 
@@ -682,7 +688,7 @@ ID3D11PixelShader *d3d8_combiners_get_shader(const NV2ACombinerState *state)
     {
         uint32_t lru_slot = idx;
         uint32_t lru_frame = UINT32_MAX;
-        ID3D11PixelShader *ps;
+        CombinerCacheEntry compiled={0};
         CombinerCacheEntry *entry;
 
         for (probe = 0; probe < COMBINER_CACHE_SIZE; probe++) {
@@ -693,21 +699,28 @@ ID3D11PixelShader *d3d8_combiners_get_shader(const NV2ACombinerState *state)
         }
 
         entry = &g_cache[lru_slot];
+        if(entry->vulkan)nvk_shader_destroy(entry->vulkan);
         if (entry->shader) {
             ID3D11PixelShader_Release(entry->shader);
         }
 
-        ps = compile_combiner_shader(state);
-        if (!ps) return NULL;
+        int compiled_ok=compile_combiner_shader(state,&compiled);
+        if (!compiled_ok) return NULL;
 
         entry->hash = hash;
         memcpy(&entry->state, state, sizeof(NV2ACombinerState));
-        entry->shader = ps;
+        entry->shader=compiled.shader;entry->vulkan=compiled.vulkan;
         entry->last_used_frame = g_frame_counter;
         g_last_lookup_slot=(int)lru_slot;
-        return ps;
+        return entry;
     }
 }
+
+
+ID3D11PixelShader *d3d8_combiners_get_shader(const NV2ACombinerState *state)
+{ CombinerCacheEntry *entry=get_combiner_shader(state);return entry?entry->shader:NULL; }
+NvkShader *d3d8_combiners_vulkan_shader(const NV2ACombinerState *state)
+{ CombinerCacheEntry *entry=get_combiner_shader(state);return entry?entry->vulkan:NULL; }
 
 /* ================================================================
  * Initialization / Shutdown
@@ -758,6 +771,7 @@ void d3d8_combiners_shutdown(void)
             ID3D11PixelShader_Release(g_cache[i].shader);
         }
     }
+    for(unsigned i=0;i<COMBINER_CACHE_SIZE;i++)if(g_cache[i].vulkan)nvk_shader_destroy(g_cache[i].vulkan);
     memset(g_cache, 0, sizeof(g_cache));
     g_last_lookup_slot=-1;
 
