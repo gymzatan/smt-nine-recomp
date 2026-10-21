@@ -55,7 +55,6 @@ typedef struct {
     uint32_t            hash;
     int                 in_use;
     ID3D11VertexShader *vs;
-    NvkShader         *vulkan;
     ID3D11InputLayout *native_layout;
     ID3DBlob           *vs_blob;      /* Bytecode for input layout creation */
     ID3D11InputLayout  *layouts[16];  /* Cached layouts per input mask subset */
@@ -775,7 +774,6 @@ static VshCacheEntry *cache_insert(uint32_t hash)
         VshCacheEntry *evict = &g_vsh_cache[idx];
         int j;
 
-        if(evict->vulkan)nvk_shader_destroy(evict->vulkan);
         if (evict->vs)
             ID3D11VertexShader_Release(evict->vs);
         if (evict->native_layout) ID3D11InputLayout_Release(evict->native_layout);
@@ -820,12 +818,6 @@ static VshCacheEntry *compile_shader(const DWORD *microcode, int num_insns,
     const char *source_dump=getenv("RECOMP_VSH_SOURCE_DUMP");
     if(source_dump){char path[512];snprintf(path,sizeof path,"%s%08X.hlsl",source_dump,hash);FILE *file=fopen(path,"wb");if(file){fwrite(hlsl_buf,1,(size_t)hlsl_len,file);fclose(file);}snprintf(path,sizeof path,"%s%08X.bin",source_dump,hash);file=fopen(path,"wb");if(file){fwrite(microcode,16,(size_t)num_insns,file);fclose(file);}}
 
-    if(d3d8_IsNativeVulkan()) {
-        NvkShader *shader=nvk_shader_create(hlsl_buf,"main",VK_SHADER_STAGE_VERTEX_BIT);
-        if(!shader)return NULL;
-        entry=cache_insert(hash);if(!entry){nvk_shader_destroy(shader);return NULL;}
-        entry->vulkan=shader;entry->inputs_read=program.inputs_read;return entry;
-    }
     /* Compile HLSL to bytecode */
     hr = D3DCompile(hlsl_buf, (SIZE_T)hlsl_len, "nv2a_vsh",
                     NULL, NULL, "main", "vs_5_0",
@@ -942,7 +934,6 @@ void d3d8_vsh_shutdown(void)
     for (i = 0; i < NV2A_VS_CACHE_SIZE; i++) {
         VshCacheEntry *e = &g_vsh_cache[i];
         if (!e->in_use) continue;
-        if(e->vulkan)nvk_shader_destroy(e->vulkan);
         if (e->vs)      ID3D11VertexShader_Release(e->vs);
         if (e->vs_blob) ID3D10Blob_Release(e->vs_blob);
         if (e->native_layout) ID3D11InputLayout_Release(e->native_layout);
@@ -1069,20 +1060,6 @@ static HRESULT vsh_upload_constants(ID3D11DeviceContext *ctx)
 }
 
 #include "d3d8_nv2a_geometry.inc"
-
-const char *d3d8_vsh_geometry_source(void) { return nv2a_geometry_source; }
-NvkShader *d3d8_vsh_vulkan_program(const DWORD *microcode,int length,uint32_t *inputs)
-{
-    VshCacheEntry *entry=native_program(microcode,length);
-    if(!entry)return NULL;
-    *inputs=entry->inputs_read;return entry->vulkan;
-}
-char *d3d8_vsh_fixed_source(void) {
-    size_t first=sizeof nv2a_geometry_source-1,second=sizeof nv2a_fixed_vertex_source;
-    char *source=(char *)malloc(first+second);
-    if(source) { memcpy(source,nv2a_geometry_source,first);memcpy(source+first,nv2a_fixed_vertex_source,second); }
-    return source;
-}
 
 BOOL d3d8_vsh_prepare_draw(DWORD handle)
 {

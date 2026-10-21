@@ -20,15 +20,6 @@ def test_directory_storage_and_save_roundtrip(tmp_path):
 void xbox_log(int level, const char *category, const char *format, ...) {}
 void xbox_path_set_language_media(const char *, const char *);
 const char *xbox_LookupSymbolicLink(const char *name) { return NULL; }
-/* This isolated filesystem fixture observes the renderer write boundary;
- * real GPU ownership and invalidation are checked by the renderer suite. */
-static void *expected_write;static size_t expected_bytes;static unsigned write_open,write_calls;
-int nv2a_pb_host_write_begin(void *address,size_t bytes) {
-    assert(address==expected_write && bytes==expected_bytes && !write_open);
-    write_open=1;++write_calls;return 0;
-}
-void nv2a_pb_host_write_end(int held) { assert(!held && write_open);write_open=0; }
-
 int main(void) {
     _set_error_mode(_OUT_TO_STDERR);_set_abort_behavior(0,_WRITE_ABORT_MSG|_CALL_REPORTFAULT);
     char root[MAX_PATH],game[MAX_PATH],save[MAX_PATH],user[MAX_PATH];
@@ -63,9 +54,7 @@ int main(void) {
     assert(NT_SUCCESS(xbox_NtWriteFile(handle,NULL,NULL,NULL,&ios,(PVOID)payload,sizeof(payload),&offset)));
     xbox_FileHandleClosed(handle);CloseHandle(handle);
     assert(NT_SUCCESS(xbox_NtCreateFile(&handle,XBOX_GENERIC_READ,&oa,&ios,NULL,0,3,XBOX_FILE_OPEN,0)));
-    expected_write=actual;expected_bytes=sizeof(actual);
     assert(NT_SUCCESS(xbox_NtReadFile(handle,NULL,NULL,NULL,&ios,actual,sizeof(actual),&offset)));
-    assert(write_calls==1 && !write_open);
     assert(ios.Information==sizeof(payload)&&!memcmp(actual,payload,sizeof(payload)));
     xbox_FileHandleClosed(handle);CloseHandle(handle);
     assert(xbox_translate_path("U:\\user.sav",target,MAX_PATH));

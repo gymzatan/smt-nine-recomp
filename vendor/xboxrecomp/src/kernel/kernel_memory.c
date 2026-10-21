@@ -288,13 +288,7 @@ ULONG __stdcall xbox_MmQueryAddressProtect(PVOID VirtualAddress)
 VOID __stdcall xbox_MmSetAddressProtect(PVOID BaseAddress, ULONG NumberOfBytes, ULONG NewProtect)
 {
     DWORD old_protect;
-#if defined(_WIN32)
-    int gpu_write=nv2a_pb_host_write_begin(BaseAddress,NumberOfBytes);
-#endif
     VirtualProtect(BaseAddress, NumberOfBytes, xbox_protect_to_win32(NewProtect), &old_protect);
-#if defined(_WIN32)
-    nv2a_pb_host_write_end(gpu_write);
-#endif
     XBOX_TRACE(XBOX_LOG_MEM, "MmSetAddressProtect(%p, %u, 0x%X)", BaseAddress, NumberOfBytes, NewProtect);
 }
 

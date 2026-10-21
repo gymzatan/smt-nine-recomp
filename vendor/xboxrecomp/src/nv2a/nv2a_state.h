@@ -261,13 +261,6 @@ int nv2a_save_checkpoint(FILE *);
 void *nv2a_prepare_checkpoint(FILE *);
 void nv2a_apply_checkpoint(const void *);
 /* Runs the device DMA state machine under pfifo.lock. */
-/* Native constant range: tag, starting row, word count (4 or 16), raw words.
- * It occupies the same storage as the replaced producer's two GPU packets. */
-#define NV2A_NATIVE_CONSTANT_RANGE 0x60000003u
-/* Packed index range in the same ordered storage: count in bits 18..28,
- * followed by that many pairs of 16-bit indices. */
-#define NV2A_NATIVE_INDEX_RANGE 0x60000007u
-#define NV2A_NATIVE_INDEX_COUNT_MASK 0x1FFC0000u
 void nv2a_fifo_run(NV2AState *d);
 /* Kick requires pfifo.lock; start/stop/idle must be called without it. */
 void nv2a_fifo_kick(NV2AState *d);

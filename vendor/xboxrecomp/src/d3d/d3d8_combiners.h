@@ -41,7 +41,6 @@
 #define XBOXRECOMP_D3D8_COMBINERS_H
 
 #include <d3d11.h>
-#include "nv2a_vulkan.h"
 #include <stdint.h>
 #include <windows.h>
 
@@ -272,7 +271,6 @@ typedef struct NV2APSConstants {
  */
 HRESULT d3d8_combiners_init(void);
 HRESULT d3d8_combiners_bind(const NV2ACombinerState *state, const NV2APSConstants *constants);
-NvkShader *d3d8_combiners_vulkan_shader(const NV2ACombinerState *state);
 
 /**
  * Shut down the combiner system.

@@ -24,7 +24,6 @@ def backend_probe(tmp_path_factory):
 #include <string.h>
 #include <assert.h>
 #include <mmsystem.h>
-#include <wchar.h>
 static unsigned timer_begins,timer_ends;
 static int timer_failure,exit_failure;
 static void (*timer_cleanup)(void);
@@ -37,15 +36,8 @@ static int test_exit(void (*callback)(void)){if(exit_failure)return 1;timer_clea
 typedef void *CreateFactory;
 typedef void *CreateDevice;
 static const char *active_backend="D3D11";
-static unsigned attempts,loads,releases,native_shutdowns;
-static int native_vulkan;
+static unsigned attempts,loads,releases;
 static HRESULT results[4],load_result=S_OK;
-static int nvk_initialize(const wchar_t *compiler) {
-    assert(wcsstr(compiler,L"backends\\vulkan\\dxcompiler.dll"));
-    ++attempts;return SUCCEEDED(results[0]);
-}
-static const char *nvk_error(void){return "native device unavailable";}
-static void nvk_shutdown(void){++native_shutdowns;}
 static HRESULT load_backend(const wchar_t *folder,HMODULE *dxgi,HMODULE *d3d) {
     ++loads;*dxgi=(HMODULE)1;if(FAILED(load_result))return load_result;
     *d3d=(HMODULE)2;return S_OK;
@@ -71,25 +63,14 @@ int main(int argc,char **argv) {
     if(!strcmp(argv[1],"d3d12") || !strcmp(argv[1],"auto-d3d12"))results[2]=S_OK;
     if(!strncmp(argv[1],"gl",2))results[1]=S_OK;
     timer_failure=!strcmp(argv[1],"gl-timer-fail");exit_failure=!strcmp(argv[1],"gl-exit-fail");
-    if(!strcmp(argv[1],"vulkan") || !strcmp(argv[1],"explicit-vulkan")) {
-        results[0]=S_OK;
-        if(!strcmp(argv[1],"explicit-vulkan"))_putenv_s("RECOMP_GPU_BACKEND","Vulkan");
-    }
     HRESULT hr=d3d8_backend_create_device(&device,&context);
-    if(!strcmp(argv[1],"vulkan") || !strcmp(argv[1],"explicit-vulkan")) {
-        assert(SUCCEEDED(hr) && native_vulkan && attempts==1 && !loads && !releases && !native_shutdowns && !device && !context);
-        assert(!strcmp(active_backend,"Vulkan"));
-    }
-    else {
-        assert(!native_vulkan && native_shutdowns==(!strcmp(argv[1],"d3d12")?0u:1u));
-        if(!strcmp(argv[1],"explicit")){assert(hr==E_FAIL && attempts==1 && releases==0 && !device && !context);}
-        else if(!strcmp(argv[1],"load")){assert(SUCCEEDED(hr) && attempts==3 && loads==1 && !strcmp(active_backend,"D3D11"));}
-        else if(!strcmp(argv[1],"all")){assert(FAILED(hr) && attempts==4 && releases==6 && !device && !context);}
-        else if(!strcmp(argv[1],"d3d12")){assert(SUCCEEDED(hr) && attempts==1 && !releases && !strcmp(active_backend,"D3D12"));}
-        else if(!strcmp(argv[1],"auto-d3d12")){assert(SUCCEEDED(hr) && attempts==3 && releases==2 && !strcmp(active_backend,"D3D12"));}
-        else if(!strcmp(argv[1],"gl")){assert(SUCCEEDED(hr) && attempts==2 && releases==0 && !strcmp(active_backend,"OpenGL"));}
-        else {assert(SUCCEEDED(hr) && attempts==4 && releases==4 && !strcmp(active_backend,"D3D11"));}
-    }
+    if(!strcmp(argv[1],"explicit")){assert(hr==E_FAIL && attempts==1 && releases==2 && !device && !context);}
+    else if(!strcmp(argv[1],"load")){assert(SUCCEEDED(hr) && attempts==2 && loads==2 && !strcmp(active_backend,"D3D11"));}
+    else if(!strcmp(argv[1],"all")){assert(FAILED(hr) && attempts==4 && releases==8 && !device && !context);}
+    else if(!strcmp(argv[1],"d3d12")){assert(SUCCEEDED(hr) && attempts==1 && !releases && !strcmp(active_backend,"D3D12"));}
+    else if(!strcmp(argv[1],"auto-d3d12")){assert(SUCCEEDED(hr) && attempts==3 && releases==4 && !strcmp(active_backend,"D3D12"));}
+    else if(!strcmp(argv[1],"gl")){assert(SUCCEEDED(hr) && attempts==2 && releases==2 && !strcmp(active_backend,"OpenGL"));}
+    else {assert(SUCCEEDED(hr) && attempts==4 && releases==6 && !strcmp(active_backend,"D3D11"));}
     if(!strcmp(argv[1],"gl")){assert(timer_begins==1 && timer_ends==0 && timer_cleanup);timer_cleanup();assert(timer_ends==1);}
     else if(timer_failure){assert(timer_begins==1 && timer_ends==0 && !timer_cleanup);}
     else if(exit_failure){assert(timer_begins==1 && timer_ends==1 && !timer_cleanup);}
@@ -102,7 +83,7 @@ int main(int argc,char **argv) {
     return work/'probe.exe'
 
 
-@pytest.mark.parametrize('mode',['auto','explicit','load','all','gl','gl-timer-fail','gl-exit-fail','d3d12','auto-d3d12','vulkan','explicit-vulkan'])
+@pytest.mark.parametrize('mode',['auto','explicit','load','all','gl','gl-timer-fail','gl-exit-fail','d3d12','auto-d3d12'])
 def test_startup_failure_selection_and_cleanup(backend_probe,mode):
     result=subprocess.run([str(backend_probe),mode],capture_output=True,text=True,timeout=10)
     assert result.returncode==0,result.stdout+result.stderr

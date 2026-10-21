@@ -16,35 +16,10 @@ def native_gpu(tmp_path_factory):
 #include "kernel/kernel_bridge.c"
 #include <assert.h>
 #include "d3d8_internal.h"
-#include "nv2a_vulkan.h"
-static uint64_t native_vertex_generation;
-static uint32_t native_vertex_offset;
-static unsigned native_vertex_bytes,native_stream_bytes,native_vertex_stride;
-/* Observe the production caller's exact binding and payload, before the native
- * backend consumes it. Native upload immutability has a separate pixel test. */
-static unsigned char native_uniform_bytes[32][4096];
-static unsigned native_uniform_sizes[32];
-static int native_draw_for_test(NvkDraw *draw) {
-    uint64_t generation=0;uint32_t offset=0;
-    uint64_t *original_generation=draw->upload_generation;uint32_t *original_offset=draw->upload_offset;
-    if(!original_generation){draw->upload_generation=&generation;draw->upload_offset=&offset;}
-    memset(native_uniform_sizes,0,sizeof native_uniform_sizes);
-    for(unsigned i=0;i<draw->uniform_count;i++) {
-        const NvkUniform *u=&draw->uniforms[i];
-        assert(u->binding<32 && u->bytes<=4096);
-        memcpy(native_uniform_bytes[u->binding],u->data,u->bytes);native_uniform_sizes[u->binding]=u->bytes;
-    }
-    int result=nvk_draw(draw);
-    native_vertex_generation=*draw->upload_generation;native_vertex_offset=*draw->upload_offset;
-    native_vertex_bytes=(unsigned)draw->vertex_bytes;native_stream_bytes=native_vertex_bytes+(draw->indices?draw->count*4:0);native_vertex_stride=draw->stride;
-    draw->upload_generation=original_generation;draw->upload_offset=original_offset;
-    return result;
-}
-#define nvk_draw native_draw_for_test
 typedef struct { char operation; ID3D11Resource *resource; } ReadbackTrace;
 extern ReadbackTrace readback_trace[128];
 extern unsigned readback_trace_count;
-static unsigned char readback_present_pixels[640*480*4*16];
+static unsigned char readback_present_pixels[4096];
 static unsigned readback_present_bytes;
 extern void xbox_FramebufferWindowPresentHost(const void *,unsigned,unsigned,unsigned);
 static void readback_present_for_test(const void *pixels,unsigned pitch,unsigned width,unsigned height) {
@@ -63,12 +38,6 @@ static BOOL protection_for_test(void *address,SIZE_T bytes,DWORD protection,DWOR
 }
 #define VirtualProtect protection_for_test
 static unsigned attribute_offset_calls;
-static const void *texture_compare_left;
-static unsigned texture_compare_calls;
-static int texture_compare_for_test(const void *a,const void *b,size_t bytes) {
-    if(a==texture_compare_left) ++texture_compare_calls;
-    return memcmp(a,b,bytes);
-}
 static __declspec(noinline) ptrdiff_t attribute_offset_for_test(void) {
     ++attribute_offset_calls;
     return xbox_GetMemoryOffset();
@@ -76,19 +45,11 @@ static __declspec(noinline) ptrdiff_t attribute_offset_for_test(void) {
 #define xbox_GetMemoryOffset attribute_offset_for_test
 static unsigned query_status_calls,query_event_payload_calls;
 static unsigned query_context_getter_calls;
-static UINT vertex_stream_test_bytes;
+static UINT vertex_upload_test_bytes;
 static UINT vertex_upload_for_test(const void *data,UINT bytes,ID3D11Buffer **buffer) {
-    vertex_stream_test_bytes=bytes;
+    vertex_upload_test_bytes=bytes;
     return d3d8_upload_vertices(data,bytes,buffer);
 }
-
-static BOOL vertex_reuse_for_test(uint64_t generation,UINT offset,UINT bytes,ID3D11Buffer **buffer) {
-    BOOL result=d3d8_reuse_vertex_upload(generation,offset,bytes,buffer);
-    if(result) vertex_stream_test_bytes=bytes;
-    return result;
-}
-#define d3d8_reuse_vertex_upload vertex_reuse_for_test
-
 #define d3d8_upload_vertices vertex_upload_for_test
 static ID3D11DeviceContext *query_context_for_test(void) {
     ++query_context_getter_calls;return d3d8_GetD3D11Context();
@@ -117,11 +78,8 @@ static HRESULT pixel_state_map_for_test(ID3D11DeviceContext *,ID3D11Resource *,U
 #undef ID3D11DeviceContext_Map
 #define ID3D11DeviceContext_Map pixel_state_map_for_test
 #define d3d8_GetD3D11Context query_context_for_test
-#define memcmp texture_compare_for_test
 #include "kernel/nv2a_pb_exec.c"
-#undef memcmp
 #undef d3d8_upload_vertices
-#undef d3d8_reuse_vertex_upload
 #undef d3d8_GetD3D11Context
 #pragma pop_macro("ID3D11DeviceContext_Map")
 #pragma pop_macro("ID3D11Device_CreateQuery")
@@ -219,31 +177,20 @@ static void verify_consumers(void) {
     VshCheckpoint *loaded=nv2a_vsh_prepare_checkpoint(vsh);assert(loaded && loaded->program[4][0]==0x11223344 && loaded->program[4][1]==0x55667788);
     assert(loaded->load_slot==5 && loaded->load_word==0);free(loaded);fclose(vsh);
     if(hw_enabled() && d3d8_RenderScale()>1) {
-        HwColor *color=s_hw_colors;assert(color && (color->host_surface || color->native_host));
-        unsigned width=color->width*d3d8_RenderScale(),height=color->height*d3d8_RenderScale();
-        size_t row=(size_t)width*4,bytes=row*height;unsigned char *expected=malloc(bytes),*actual=malloc(bytes);assert(expected && actual);
-        D3DLOCKED_RECT pixels;
-        if(color->native_host)assert(nvk_image_read(color->native_host,expected,row));
-        else {
-            D3D8Surface *surface=(D3D8Surface *)color->host_surface;
-            assert(surface->width==width && surface->height==height);
-            assert(SUCCEEDED(color->host_surface->lpVtbl->LockRect(color->host_surface,&pixels,NULL,D3DLOCK_READONLY)));
-            for(unsigned y=0;y<height;y++)memcpy(expected+row*y,(unsigned char *)pixels.pBits+(size_t)y*pixels.Pitch,row);
-            assert(SUCCEEDED(color->host_surface->lpVtbl->UnlockRect(color->host_surface)));
-        }
+        HwColor *color=s_hw_colors;assert(color && color->host_surface);
+        D3D8Surface *surface=(D3D8Surface *)color->host_surface;
+        assert(surface->width==color->width*d3d8_RenderScale() && surface->height==color->height*d3d8_RenderScale());
+        size_t row=(size_t)surface->width*4,bytes=row*surface->height;unsigned char *expected=malloc(bytes);assert(expected);
+        D3DLOCKED_RECT pixels;assert(SUCCEEDED(color->host_surface->lpVtbl->LockRect(color->host_surface,&pixels,NULL,D3DLOCK_READONLY)));
+        for(unsigned y=0;y<surface->height;y++)memcpy(expected+row*y,(unsigned char *)pixels.pBits+(size_t)y*pixels.Pitch,row);
+        assert(SUCCEEDED(color->host_surface->lpVtbl->UnlockRect(color->host_surface)));
         FILE *snapshot=tmpfile();assert(snapshot && nv2a_gpu_save_checkpoint(snapshot));
-        const float changed[4]={0,1,0,1};
-        if(color->native_host)assert(nvk_image_clear(color->native_host,changed));
-        else ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),((D3D8Surface *)color->host_surface)->rtv,changed);
+        const float changed[4]={0,1,0,1};ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),surface->rtv,changed);
         rewind(snapshot);assert(nv2a_gpu_load_checkpoint(snapshot));fclose(snapshot);
-        color=s_hw_colors;
-        if(color->native_host)assert(nvk_image_read(color->native_host,actual,row));
-        else {
-            assert(SUCCEEDED(color->host_surface->lpVtbl->LockRect(color->host_surface,&pixels,NULL,D3DLOCK_READONLY)));
-            for(unsigned y=0;y<height;y++)memcpy(actual+row*y,(unsigned char *)pixels.pBits+(size_t)y*pixels.Pitch,row);
-            assert(SUCCEEDED(color->host_surface->lpVtbl->UnlockRect(color->host_surface)));
-        }
-        assert(!memcmp(expected,actual,bytes));free(expected);free(actual);
+        color=s_hw_colors;surface=(D3D8Surface *)color->host_surface;
+        assert(SUCCEEDED(color->host_surface->lpVtbl->LockRect(color->host_surface,&pixels,NULL,D3DLOCK_READONLY)));
+        for(unsigned y=0;y<surface->height;y++)assert(!memcmp(expected+row*y,(unsigned char *)pixels.pBits+(size_t)y*pixels.Pitch,row));
+        assert(SUCCEEDED(color->host_surface->lpVtbl->UnlockRect(color->host_surface)));free(expected);
     }
 }
 static void verify_swizzled_regions(void) {
@@ -258,25 +205,18 @@ static void verify_swizzled_regions(void) {
     xbox_swizzle_rect(swizzled,linear,128,256,4);
     uint8_t *memory=color->memory->host_view+color->memory_offset;
     memcpy(memory,swizzled,bytes);hw_upload_native_color(color);
-    D3DLOCKED_RECT locked;
-    if(color->native_surface){locked.pBits=malloc(bytes);locked.Pitch=128*4;assert(locked.pBits && nvk_image_read(color->native_surface,locked.pBits,locked.Pitch));}
-    else hw_check(color->surface->lpVtbl->LockRect(color->surface,&locked,NULL,D3DLOCK_READONLY),"test native upload pixels");
+    D3DLOCKED_RECT locked;hw_check(color->surface->lpVtbl->LockRect(color->surface,&locked,NULL,D3DLOCK_READONLY),"test native upload pixels");
     for(unsigned y=0;y<256;y++)assert(!memcmp((uint8_t *)locked.pBits+(size_t)y*locked.Pitch,linear+y*128,128u*4));
-    if(color->native_surface)free(locked.pBits);
-    else hw_check(color->surface->lpVtbl->UnlockRect(color->surface),"test native upload unlock");
+    hw_check(color->surface->lpVtbl->UnlockRect(color->surface),"test native upload unlock");
     const float rgba[4]={102.0f/255,85.0f/255,68.0f/255,1};
-    if(color->native_surface)assert(nvk_image_clear(color->native_host?color->native_host:color->native_surface,rgba));
-    else {
-        D3D8Surface *surface=(D3D8Surface *)hw_render_surface(color);
-        ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),surface->rtv,rgba);
-    }
+    D3D8Surface *surface=(D3D8Surface *)hw_render_surface(color);
+    ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),surface->rtv,rgba);
     color->dirty=1;color->dirty_bounds=(RECT){17,129,119,233};hw_copy_color_to_memory(color);
     for(unsigned y=0;y<256;y++)for(unsigned x=0;x<128;x++) {
         uint32_t at=swizzle_offset(x,y,128,256),expected=x>=17&&x<119&&y>=129&&y<233?0xFF665544u:linear[y*128+x];
         assert(((const uint32_t *)memory)[at]==expected);
     }
     memcpy(memory,swizzled,bytes);hw_upload_native_color(color);
-    if(color->native_host)assert(nvk_image_copy(color->native_surface,color->native_host,NULL,0));
     if(color->host_surface)assert(SUCCEEDED(d3d8_surface_resample(color->surface,color->host_surface)));
     const RECT regions[]={{0,0,128,256},{17,129,119,233},{1,3,2,4},{0,3,1,4},{1,3,3,5},{2,3,4,5},{0,255,127,256},{127,0,128,256}};
     for(unsigned region=0;region<sizeof regions/sizeof regions[0];++region) {
@@ -290,12 +230,10 @@ static void verify_swizzled_regions(void) {
     method(NV097_SET_SURFACE_CLIP_VERTICAL,128u<<16);
     method(NV097_SET_SURFACE_FORMAT,0x07070224);
     color=hw_color(0);assert(color->height==256);
-    if(color->native_surface){locked.pBits=malloc(bytes);locked.Pitch=128*4;assert(locked.pBits && nvk_image_read(color->native_surface,locked.pBits,locked.Pitch));}
-    else hw_check(color->surface->lpVtbl->LockRect(color->surface,&locked,NULL,D3DLOCK_READONLY),"test retained native extent");
+    hw_check(color->surface->lpVtbl->LockRect(color->surface,&locked,NULL,D3DLOCK_READONLY),"test retained native extent");
     for(unsigned y=0;y<256;y++)for(unsigned x=0;x<128;x++)
         assert(((const uint32_t *)((const uint8_t *)locked.pBits+(size_t)y*locked.Pitch))[x]==((const uint32_t *)memory)[swizzle_offset(x,y,128,128)]);
-    if(color->native_surface)free(locked.pBits);
-    else hw_check(color->surface->lpVtbl->UnlockRect(color->surface),"test retained native extent unlock");
+    hw_check(color->surface->lpVtbl->UnlockRect(color->surface),"test retained native extent unlock");
     free(linear);free(swizzled);
     fprintf(stderr,"[SWIZZLE REGION] actual native128x256 upload, pitched readback, highY dirty origin and all outside bytes passed\n");
 }
@@ -316,8 +254,7 @@ static void verify_clean_texture_overlap(void) {
     method(NV097_SET_SURFACE_FORMAT,8|(2<<4));
     HwColor *unrelated=hw_color(0);
     const float rgba[4]={1,0,0,1};
-    if(unrelated->native_surface)assert(nvk_image_clear(unrelated->native_host?unrelated->native_host:unrelated->native_surface,rgba));
-    else ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),((D3D8Surface *)hw_render_surface(unrelated))->rtv,rgba);
+    ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),((D3D8Surface *)hw_render_surface(unrelated))->rtv,rgba);
     unrelated->dirty=1;unrelated->dirty_bounds=(RECT){0,0,8,8};
     s_gpu.texs[0]=(Texture){.offset=source_color->address,.width=128,.height=256,.pitch=512,.color=6,.levels=1,.valid=1};
     s_gpu.rc.stage_program=1;
@@ -332,8 +269,7 @@ static void verify_clean_texture_overlap(void) {
     assert(!memcmp(s_hw_textures->raw,memory,128u*256u*4u));
     readbacks=s_gpu.hardware_color_readbacks;
     unrelated->dirty=1;
-    if(source_color->native_surface)assert(nvk_image_clear(source_color->native_host?source_color->native_host:source_color->native_surface,rgba));
-    else ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),((D3D8Surface *)hw_render_surface(source_color))->rtv,rgba);
+    ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),((D3D8Surface *)hw_render_surface(source_color))->rtv,rgba);
     source_color->dirty=1;source_color->dirty_bounds=(RECT){0,0,128,256};
     hw_texture_bind(0);
     assert(!source_color->dirty && !unrelated->dirty && s_gpu.hardware_color_readbacks==readbacks+2);
@@ -348,103 +284,13 @@ static LONG CALLBACK observe_output_fault(PEXCEPTION_POINTERS e) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 static DWORD WINAPI write_output(LPVOID address) {*(volatile uint32_t *)address=0x33445566;return *(volatile uint32_t *)address;}
-static uint32_t texture_first_pixel(HwTexture *entry) {
-    if(entry->native) {
-        size_t bytes=(size_t)entry->host_width*entry->host_height*4*(entry->identity.cube?6:1);
-        uint32_t *pixels=malloc(bytes);assert(pixels && nvk_image_read(entry->native,pixels,entry->host_width*4));
-        uint32_t pixel=pixels[0];free(pixels);return pixel;
-    }
-    IDirect3DTexture8 *texture=(IDirect3DTexture8 *)entry->texture;
-    D3DLOCKED_RECT pixels;hw_check(texture->lpVtbl->LockRect(texture,0,&pixels,NULL,D3DLOCK_READONLY),"texture test read");
-    uint32_t pixel=*(const uint32_t *)pixels.pBits;
-    hw_check(texture->lpVtbl->UnlockRect(texture,0),"texture test unlock");return pixel;
-}
-static void verify_texture_content_reuse(const char *snapshot,const char *memory_path) {
-    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
-    fault_observed=CreateEventA(NULL,TRUE,FALSE,NULL);assert(fault_observed);
-    void *handler=AddVectoredExceptionHandler(1,observe_output_fault);assert(handler);
-    uint32_t *raw=(uint32_t *)(xbox_GetMemoryOffset()+0x80080000u);
-    for(unsigned i=0;i<4096;i++) raw[i]=0xff335577;
-    Texture source={.offset=0x80080000u,.width=64,.height=64,.pitch=256,.color=6,.levels=1,.valid=1};
-    s_gpu.texs[0]=source;s_gpu.rc.stage_program=1;hw_texture_bind(0);
-    HwTexture *entry=s_hw_textures;assert(entry && entry->raw_size==16384 && entry->content_valid);
-    texture_compare_left=entry->raw;texture_compare_calls=0;
-    uint64_t uploads=s_gpu.hardware_texture_uploads;
-    for(unsigned i=0;i<100;i++) hw_texture_bind(0);
-    assert(!texture_compare_calls && s_gpu.hardware_texture_uploads==uploads);
-    assert(texture_first_pixel(entry)==0xff335577);
-    for(unsigned view=0;view<entry->memory->views.view_count;view++) {
-        volatile uint32_t *alias=(volatile uint32_t *)((uint8_t *)entry->memory->views.cpu_views[view]+entry->memory_offset);
-        uint32_t expected=0xff446600+view;
-        alias[0]=expected;alias[1024]=expected+1;
-        assert(!entry->content_valid);hw_texture_bind(0);
-        assert(entry->content_valid && !memcmp(entry->raw,raw,entry->raw_size));
-        assert(texture_first_pixel(entry)==expected);
-    }
-    assert(texture_compare_calls>=entry->memory->views.view_count);
-    source.width=32;source.pitch=128;s_gpu.texs[0]=source;hw_texture_bind(0);
-    HwTexture *overlap=s_hw_textures;assert(overlap!=entry && overlap->content_valid);
-    raw[0]=0xffaabbcc;assert(!entry->content_valid && !overlap->content_valid);
-    hw_texture_bind(0);assert(texture_first_pixel(overlap)==0xffaabbcc);
-    source.width=64;source.pitch=256;s_gpu.texs[0]=source;hw_texture_bind(0);
-    assert(texture_first_pixel(entry)==0xffaabbcc);
-
-    HANDLE file=CreateFileA(memory_path,GENERIC_READ|GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
-    assert(file!=INVALID_HANDLE_VALUE);
-    uint32_t file_pixel=0xff123456;DWORD written=0;
-    assert(WriteFile(file,&file_pixel,4,&written,NULL) && written==4);
-    LARGE_INTEGER offset={0};XBOX_IO_STATUS_BLOCK ios={0};
-    uint32_t *alias=(uint32_t *)((uint8_t *)entry->memory->views.cpu_views[1]+entry->memory_offset);
-    assert(xbox_NtReadFile(file,NULL,NULL,NULL,&ios,alias,4,&offset)==STATUS_SUCCESS);
-    assert(ios.Information==4 && !entry->content_valid);hw_texture_bind(0);
-    assert(texture_first_pixel(entry)==file_pixel);
-    xbox_MmSetAddressProtect(alias,4096,PAGE_READONLY);hw_texture_bind(0);
-    assert(!nv2a_pb_handle_memory_fault((uintptr_t)alias,1));
-    assert(xbox_NtReadFile(file,NULL,NULL,NULL,&ios,alias,4,&offset)!=STATUS_SUCCESS);
-    MEMORY_BASIC_INFORMATION page;assert(VirtualQuery(alias,&page,sizeof page) && page.Protect==PAGE_READONLY);
-    xbox_MmSetAddressProtect(alias,4096,PAGE_READWRITE);CloseHandle(file);
-    hw_texture_bind(0);
-    hw_defer_output((uint8_t *)raw,0xffabcdef);hw_texture_bind(0);
-    assert(!s_hw_query_count && texture_first_pixel(entry)==0xffabcdef);
-
-    uint32_t *palette=(uint32_t *)(xbox_GetMemoryOffset()+0x80090000u);
-    uint32_t *palette2=(uint32_t *)(xbox_GetMemoryOffset()+0x80091000u);
-    for(unsigned i=0;i<256;i++){palette[i]=0xff56789a;palette2[i]=0xff987654;}
-    memset(raw,0,4096);
-    source.color=0x0b;source.pitch=64;source.palette=0x80090000u;s_gpu.texs[0]=source;
-    hw_texture_bind(0);HwTexture *paletted=s_hw_textures;
-    assert(texture_first_pixel(paletted)==palette[0]);
-    source.palette=0x80091000u;s_gpu.texs[0]=source;hw_texture_bind(0);
-    assert(texture_first_pixel(paletted)==palette2[0]);
-    palette2[0]=0xff112233;assert(!paletted->content_valid);hw_texture_bind(0);
-    assert(texture_first_pixel(paletted)==palette2[0]);
-    assert(VirtualQuery(palette,&page,sizeof page) && page.Protect==PAGE_READWRITE);
-    FILE *saved=fopen(snapshot,"wb");assert(saved && nv2a_gpu_save_checkpoint(saved));fclose(saved);
-    saved=fopen(memory_path,"wb");assert(saved && xbox_SavePhysicalMemory(saved));fclose(saved);
-    palette2[0]=0xff778899;hw_texture_bind(0);
-    saved=fopen(memory_path,"rb");assert(saved && xbox_LoadPhysicalMemory(saved));fclose(saved);
-    saved=fopen(snapshot,"rb");assert(saved && nv2a_gpu_load_checkpoint(saved));fclose(saved);
-    assert(!s_hw_textures);hw_texture_bind(0);
-    assert(texture_first_pixel(s_hw_textures)==0xff112233);
-    nv2a_pb_release_memory_views();
-    assert(VirtualQuery(raw,&page,sizeof page) && page.Protect==PAGE_READWRITE);
-    assert(VirtualQuery(palette2,&page,sizeof page) && page.Protect==PAGE_READWRITE);
-    RemoveVectoredExceptionHandler(handler);CloseHandle(fault_observed);
-    fprintf(stderr,"[TEXTURE REUSE] unchanged binds skip comparison; CPU aliases, shared pages, native reads, guest read-only views, GPU output, palette moves and checkpoint restoration preserve pixels\n");
-}
 static void verify_vertex_bytes(const unsigned char *expected,UINT bytes,UINT vertex_bytes,UINT expected_stride) {
-    if(d3d8_IsNativeVulkan()) {
-        assert(bytes==native_stream_bytes && vertex_bytes==native_vertex_bytes && expected_stride==native_vertex_stride);
-        unsigned char *actual=malloc(bytes?bytes:1);assert(actual);
-        assert(nvk_read_upload(native_vertex_generation,native_vertex_offset,actual,bytes));
-        assert(!memcmp(actual,expected,bytes));free(actual);return;
-    }
     ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
     ID3D11Buffer *vb=NULL,*ib=NULL;UINT stride,offset,index_offset;DXGI_FORMAT format;
     ID3D11DeviceContext_IAGetVertexBuffers(ctx,0,1,&vb,&stride,&offset);
     ID3D11DeviceContext_IAGetIndexBuffer(ctx,&ib,&format,&index_offset);
-    fprintf(stderr,"[VERTEX PAYLOAD] stride=%u bytes=%u index_offset=%u\n",stride,vertex_stream_test_bytes,index_offset-offset);
-    assert(stride==expected_stride && vertex_stream_test_bytes==bytes);
+    fprintf(stderr,"[VERTEX PAYLOAD] stride=%u bytes=%u index_offset=%u\n",stride,vertex_upload_test_bytes,index_offset-offset);
+    assert(stride==expected_stride && vertex_upload_test_bytes==bytes);
     assert(vb==ib && format==DXGI_FORMAT_R32_UINT && index_offset==offset+vertex_bytes);
     D3D11_BUFFER_DESC desc={0};desc.ByteWidth=bytes;desc.Usage=D3D11_USAGE_STAGING;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
     ID3D11Buffer *staging=NULL;assert(SUCCEEDED(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&desc,NULL,&staging)));
@@ -489,87 +335,6 @@ static void verify_vertex_payloads(void) {
     }
     nv2a_pb_checkpoint_publish();
 }
-
-static void draw_reused_vertex_payload(void) {
-    method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,5u<<24);method(NV097_SET_BEGIN_END,0);
-    unsigned char expected[240];unsigned bytes=0;
-    for(unsigned row=0;row<6;row++) for(unsigned attr=0;attr<16;attr++) if(nv2a_vsh_inputs_used()&(1u<<attr)) {
-        float value[4];fetch_attr(&s_gpu.attr[attr],row,value);memcpy(expected+bytes,value,16);bytes+=16;
-    }
-    assert(bytes==192);memcpy(expected+bytes,s_hw_program_upload.indices,48);
-    verify_vertex_bytes(expected,240,192,32);
-}
-static void verify_vertex_conversion_reuse(const char *snapshot,const char *memory_path) {
-    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
-    uint32_t *raw=(uint32_t *)(xbox_GetMemoryOffset()+0x80040000u);
-    memcpy(raw+15,raw,60);
-    uint64_t small_hits=s_hw_vertex_cache_hits,small_misses=s_hw_vertex_cache_misses;
-    for(unsigned i=0;i<4;i++) {
-        method(NV097_SET_BEGIN_END,6);method(NV097_DRAW_ARRAYS,3u<<24);method(NV097_SET_BEGIN_END,0);
-        unsigned char expected[176];unsigned bytes=0;
-        for(unsigned row=0;row<4;row++) for(unsigned attr=0;attr<16;attr++) if(nv2a_vsh_inputs_used()&(1u<<attr)) {
-            float value[4];fetch_attr(&s_gpu.attr[attr],row,value);memcpy(expected+bytes,value,16);bytes+=16;
-        }
-        assert(bytes==128);memcpy(expected+bytes,s_hw_program_upload.indices,48);
-        verify_vertex_bytes(expected,176,128,32);
-        MEMORY_BASIC_INFORMATION info;assert(VirtualQuery(raw,&info,sizeof info) && info.Protect==PAGE_READWRITE);
-        raw[4]^=0x00332211;
-    }
-    assert(s_hw_vertex_cache_hits==small_hits && s_hw_vertex_cache_misses==small_misses);
-    draw_reused_vertex_payload();
-    uint64_t hits=s_hw_vertex_cache_hits;
-    for(unsigned i=0;i<4;i++)draw_reused_vertex_payload();
-    assert(s_hw_vertex_cache_hits==hits+4);
-    uint64_t uploads=s_gpu.hardware_vertex_stream_uploads;
-    draw_reused_vertex_payload();assert(s_gpu.hardware_vertex_stream_uploads==uploads);
-    if(d3d8_IsNativeVulkan()) {
-        for(unsigned i=0;i<5;i++) {
-            const float black[4]={0,0,0,1};assert(nvk_image_clear(s_hw_colors->native_surface,black));assert(nvk_submit());
-        }
-        draw_reused_vertex_payload();assert(s_gpu.hardware_vertex_stream_uploads==uploads);
-    } else {
-    uint64_t generation=d3d8_vertex_upload_generation();
-    void *overwrite=malloc(4*1024*1024);assert(overwrite);memset(overwrite,0xC7,4*1024*1024);
-    ID3D11Buffer *ring=NULL;
-    assert(d3d8_upload_vertices(overwrite,4*1024*1024,&ring)!=(UINT)-1);free(overwrite);
-    assert(d3d8_vertex_upload_generation()!=generation);
-    draw_reused_vertex_payload();assert(s_gpu.hardware_vertex_stream_uploads==uploads+1);
-    }
-    uploads=s_gpu.hardware_vertex_stream_uploads;
-    method(NV097_SET_PROVOKING_VERTEX,1);draw_reused_vertex_payload();
-    assert(s_gpu.hardware_vertex_stream_uploads==uploads+1);
-    method(NV097_SET_PROVOKING_VERTEX,0);
-
-    XboxSharedMemoryViews views;assert(xbox_GetSharedMemoryViews(raw,60,&views));
-    for(unsigned view=0;view<views.view_count;view++) {
-        uint32_t *alias=(uint32_t *)((uint8_t *)views.cpu_views[view]+views.offset);
-        hits=s_hw_vertex_cache_hits;alias[4]=0xff335500+view;
-        draw_reused_vertex_payload();assert(s_hw_vertex_cache_hits==hits);
-        draw_reused_vertex_payload();assert(s_hw_vertex_cache_hits==hits+1);
-    }
-    HANDLE file=CreateFileA(memory_path,GENERIC_READ|GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
-    assert(file!=INVALID_HANDLE_VALUE);uint32_t colour=0xff123456;DWORD written;
-    assert(WriteFile(file,&colour,4,&written,NULL) && written==4);
-    LARGE_INTEGER offset={0};XBOX_IO_STATUS_BLOCK ios={0};
-    hits=s_hw_vertex_cache_hits;
-    assert(xbox_NtReadFile(file,NULL,NULL,NULL,&ios,raw+4,4,&offset)==STATUS_SUCCESS);CloseHandle(file);
-    draw_reused_vertex_payload();assert(s_hw_vertex_cache_hits==hits);
-    draw_reused_vertex_payload();assert(s_hw_vertex_cache_hits==hits+1);
-    hits=s_hw_vertex_cache_hits;hw_defer_output((uint8_t *)(raw+4),0xffabcdef);
-    hw_collect_queries(1);draw_reused_vertex_payload();assert(s_hw_vertex_cache_hits==hits);
-    FILE *saved=fopen(snapshot,"wb");assert(saved && nv2a_gpu_save_checkpoint(saved));fclose(saved);
-    saved=fopen(memory_path,"wb");assert(saved && xbox_SavePhysicalMemory(saved));fclose(saved);
-    raw[4]=0xff556677;draw_reused_vertex_payload();
-    saved=fopen(memory_path,"rb");assert(saved && xbox_LoadPhysicalMemory(saved));fclose(saved);
-    saved=fopen(snapshot,"rb");assert(saved && nv2a_gpu_load_checkpoint(saved));fclose(saved);
-    assert(raw[4]==0xffabcdef);hits=s_hw_vertex_cache_hits;
-    draw_reused_vertex_payload();assert(s_hw_vertex_cache_hits==hits);
-    draw_reused_vertex_payload();assert(s_hw_vertex_cache_hits==hits+1);
-    nv2a_pb_release_memory_views();MEMORY_BASIC_INFORMATION page;
-    assert(VirtualQuery(raw,&page,sizeof page) && page.Protect==PAGE_READWRITE);
-    fprintf(stderr,"[VERTEX REUSE] actual GPU bytes after unchanged draws, both CPU views, native IO, GPU writes and checkpoint restoration\n");
-}
-
 static void verify_semaphore_outputs(void) {
     seed();NV2AState *gpu=nv2a_get_state();
     if(hw_enabled()) {
@@ -753,8 +518,7 @@ static void verify_colour_protection_work(void) {
     protection_pages_for_test(color->memory,color->memory_offset,(unsigned)((hw_color_bytes(color)+4095)/4096),PAGE_READWRITE);
     hw_upload_native_color(color);assert(!color->upload_needed);
     const float rgba[4]={0.25f,0.5f,0.75f,1};
-    if(d3d8_IsNativeVulkan())assert(nvk_image_clear(hw_vk_render(color),rgba));
-    else ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),((D3D8Surface *)hw_render_surface(color))->rtv,rgba);
+    ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),((D3D8Surface *)hw_render_surface(color))->rtv,rgba);
     color->dirty=1;color->dirty_bounds=(RECT){0,0,640,480};
     uint64_t readbacks=s_gpu.hardware_color_readbacks;previous_calls=protection_test_calls;
     hw_publish_all();assert(!color->dirty && s_gpu.hardware_color_readbacks==readbacks+1 && protection_test_calls>previous_calls);
@@ -820,7 +584,6 @@ static void verify_readback_publication(void) {
     fprintf(stderr,"[READBACK] original C-M-C-M becomes C-C-M-M; both pixel outputs identical,queued snapshot and ordinary writable region preserved\n");
 }
 static void pixel_state_bytes(uint32_t bytes[28]) {
-    if(d3d8_IsNativeVulkan()) {assert(native_uniform_sizes[17]==112);memcpy(bytes,native_uniform_bytes[17],112);return;}
     D3D11_BUFFER_DESC desc;ID3D11Buffer_GetDesc(s_hw_ps_cb,&desc);assert(desc.ByteWidth==112);
     desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;desc.MiscFlags=0;
     ID3D11Buffer *staging=NULL;assert(SUCCEEDED(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&desc,NULL,&staging)));
@@ -881,7 +644,7 @@ static void verify_combiner_uploads(void) {
 }
 static void verify_pixel_state_uploads(void) {
     pixel_state_maps=0;seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
-    uint32_t first[28],current[28],initial_value[28];pixel_state_bytes(first);memcpy(initial_value,first,sizeof first);unsigned initial=pixel_state_maps;assert(initial==(d3d8_IsNativeVulkan()?0:1));
+    uint32_t first[28],current[28],initial_value[28];pixel_state_bytes(first);memcpy(initial_value,first,sizeof first);unsigned initial=pixel_state_maps;assert(initial==1);
     for(unsigned i=0;i<64;++i)pixel_state_draw();
     pixel_state_bytes(current);assert(!memcmp(first,current,sizeof first));unsigned repeated=pixel_state_maps-initial;assert(repeated==0);
     FILE *checkpoint=tmpfile();assert(checkpoint && nv2a_gpu_save_checkpoint(checkpoint));
@@ -894,17 +657,15 @@ static void verify_pixel_state_uploads(void) {
         assert(current[16]==nv2a_get_state()->pgraph.regs[NV_PGRAPH_ZCLIPMIN] && current[16]==depth_bits[i]);
         unsigned committed=pixel_state_maps;pixel_state_draw();pixel_state_bytes(first);assert(!memcmp(first,current,sizeof first));assert(pixel_state_maps==committed);
     }
-    if(!d3d8_IsNativeVulkan()) {
     D3D11_BUFFER_DESC desc={0};desc.ByteWidth=112;desc.Usage=D3D11_USAGE_DEFAULT;desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
     ID3D11Buffer *other=NULL,*bound=NULL;assert(SUCCEEDED(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&desc,NULL,&other)));
     unsigned before_rebind=pixel_state_maps;
     ID3D11DeviceContext_PSSetConstantBuffers(d3d8_GetD3D11Context(),1,1,&other);pixel_state_draw();assert(pixel_state_maps==before_rebind);
     ID3D11DeviceContext_PSGetConstantBuffers(d3d8_GetD3D11Context(),1,1,&bound);assert(bound==s_hw_ps_cb);ID3D11Buffer_Release(bound);ID3D11Buffer_Release(other);
-    }
     pixel_state_bytes(first);assert(!memcmp(first,current,sizeof first));
     rewind(checkpoint);assert(nv2a_gpu_load_checkpoint(checkpoint));fclose(checkpoint);
     unsigned before_restore_draw=pixel_state_maps;
-    pixel_state_draw();pixel_state_bytes(current);assert(!memcmp(current,initial_value,sizeof current));assert(pixel_state_maps==before_restore_draw+(d3d8_IsNativeVulkan()?0:1));
+    pixel_state_draw();pixel_state_bytes(current);assert(!memcmp(current,initial_value,sizeof current));assert(pixel_state_maps==before_restore_draw+1);
     fprintf(stderr,"[PIXEL STATE] initial_maps=%u equal64_maps=%u bytes112_equal;changed_clip,raw_depth_bits,rebind,hot_restore passed\n",initial,repeated);
 }
 static void verify_method_dispatch_work(void) {
@@ -963,19 +724,8 @@ static void clear_transfer_pixels(HwColor *color,uint32_t expected) {
     const uint8_t *memory=color->memory->host_view+color->memory_offset;
     for(unsigned y=0;y<8;y++)for(unsigned x=0;x<8;x++) {
         size_t offset=color_pixel_offset(color->format,color->pitch,4,x,y);
-        /* Read the actual CPU view first: its original guard publishes GPU pixels. */
-        assert(*(const uint32_t *)(xbox_GetMemoryOffset()+color->address+offset)==expected);
         assert(*(const uint32_t *)(memory+offset)==expected);
-    }
-    if(d3d8_IsNativeVulkan()) {
-        NvkImage *surfaces[2]={color->native_surface,color->native_host};
-        for(unsigned i=0;i<2;i++)if(surfaces[i]) {
-            unsigned width=color->width*(i?d3d8_RenderScale():1),height=color->height*(i?d3d8_RenderScale():1);
-            uint32_t *pixels=malloc((size_t)width*height*4);assert(pixels);
-            assert(nvk_image_read(surfaces[i],pixels,width*4));
-            for(unsigned j=0;j<width*height;j++)assert(pixels[j]==expected);
-            free(pixels);
-        }
+        assert(*(const uint32_t *)(xbox_GetMemoryOffset()+color->address+offset)==expected);
     }
     IDirect3DSurface8 *surfaces[2]={color->surface,color->host_surface};
     for(unsigned i=0;i<2;i++)if(surfaces[i]) {
@@ -998,15 +748,10 @@ static void verify_clear_transfer(void) {
         method(NV097_SET_SURFACE_COLOR_OFFSET,0x200000+0x10000*(layout*2+opaque));
         method(NV097_SET_SURFACE_FORMAT,format|0x20|(layout?0x03030200:0x100));
         uint64_t uploads=s_gpu.hardware_color_uploads;
-        HwColor *previous=NULL;uint32_t old_cpu_pixel=0;
         for(unsigned i=0;i<256;i++) {
-            if(previous)old_cpu_pixel=*(const uint32_t *)(previous->memory->host_view+previous->memory_offset);
             uint32_t value=(i<<24)|((255-i)<<16)|(((i*73)&255)<<8)|((i*151)&255);
             method(NV097_SET_COLOR_CLEAR_VALUE,value);method(NV097_CLEAR_SURFACE,0xf0);
-            HwColor *color=hw_color(0);
-            assert(color->dirty && !color->upload_needed);
-            if(previous)assert(*(const uint32_t *)(color->memory->host_view+color->memory_offset)==old_cpu_pixel);
-            clear_transfer_pixels(color,opaque?value|0xff000000:value);previous=color;
+            HwColor *color=hw_color(0);clear_transfer_pixels(color,opaque?value|0xff000000:value);
         }
         unsigned actual=(unsigned)(s_gpu.hardware_color_uploads-uploads);assert(actual==expected);
         uint32_t before=s_gpu.clear_color;if(opaque)before|=0xff000000;
@@ -1016,34 +761,15 @@ static void verify_clear_transfer(void) {
         pg->regs[NV_PGRAPH_CLEARRECTX]=(5u<<16)|2;pg->regs[NV_PGRAPH_CLEARRECTY]=(5u<<16)|2;
         uploads=s_gpu.hardware_color_uploads;method(NV097_CLEAR_SURFACE,0xf0);assert(s_gpu.hardware_color_uploads==uploads+1);
         HwColor *color=hw_color(0);const uint8_t *memory=color->memory->host_view+color->memory_offset;
-        D3DLOCKED_RECT pixels;uint32_t native_pixels[64];
-        if(d3d8_IsNativeVulkan()){assert(nvk_image_read(color->native_surface,native_pixels,8*4));pixels.pBits=native_pixels;pixels.Pitch=8*4;}
-        else assert(SUCCEEDED(color->surface->lpVtbl->LockRect(color->surface,&pixels,NULL,D3DLOCK_READONLY)));
+        D3DLOCKED_RECT pixels;assert(SUCCEEDED(color->surface->lpVtbl->LockRect(color->surface,&pixels,NULL,D3DLOCK_READONLY)));
         for(unsigned y=0;y<8;y++)for(unsigned x=0;x<8;x++) {
             uint32_t value=x>=2&&x<=5&&y>=2&&y<=5?(opaque?0xff654321:0x87654321):((before&~0x00ff0000)|0x00650000);
             assert(*(const uint32_t *)(memory+color_pixel_offset(color->format,color->pitch,4,x,y))==value);
             assert(((const uint32_t *)((const uint8_t *)pixels.pBits+(size_t)y*pixels.Pitch))[x]==value);
         }
-        if(!d3d8_IsNativeVulkan())assert(SUCCEEDED(color->surface->lpVtbl->UnlockRect(color->surface)));
+        assert(SUCCEEDED(color->surface->lpVtbl->UnlockRect(color->surface)));
         pg->regs[NV_PGRAPH_CLEARRECTX]=7u<<16;pg->regs[NV_PGRAPH_CLEARRECTY]=7u<<16;
-        if(!layout) {
-            method(NV097_SET_COLOR_CLEAR_VALUE,0xff123456);method(NV097_CLEAR_SURFACE,0xf0);
-            method(NV097_SET_SURFACE_CLIP_VERTICAL,4u<<16);
-            pg->regs[NV_PGRAPH_CLEARRECTY]=3u<<16;
-            method(NV097_SET_COLOR_CLEAR_VALUE,0xff654321);method(NV097_CLEAR_SURFACE,0xf0);
-            color=hw_color(0);assert(color->height==8);
-            uint32_t retained_pixels[64];D3DLOCKED_RECT retained;
-            if(color->native_surface){assert(nvk_image_read(color->native_surface,retained_pixels,32));retained.pBits=retained_pixels;retained.Pitch=32;}
-            else assert(SUCCEEDED(color->surface->lpVtbl->LockRect(color->surface,&retained,NULL,D3DLOCK_READONLY)));
-            for(unsigned y=0;y<8;y++)for(unsigned x=0;x<8;x++) {
-                uint32_t expected=y<4?0xff654321:0xff123456;
-                assert(BRIDGE_MEM32(color->address+y*color->pitch+x*4)==expected);
-                assert(((const uint32_t *)((const uint8_t *)retained.pBits+y*retained.Pitch))[x]==expected);
-            }
-            if(!color->native_surface)assert(SUCCEEDED(color->surface->lpVtbl->UnlockRect(color->surface)));
-            method(NV097_SET_SURFACE_CLIP_VERTICAL,8u<<16);pg->regs[NV_PGRAPH_CLEARRECTY]=7u<<16;
-        }
-        fprintf(stderr,"[CLEAR TRANSFER] layout=%u opaque=%u full256_uploads=%u; deferred CPU pixels, aliases, native/scaled GPU bytes, protection, retained rows, partial channels and rectangle passed\n",layout,opaque,actual);
+        fprintf(stderr,"[CLEAR TRANSFER] layout=%u opaque=%u full256_uploads=%u; CPU aliases, native/scaled GPU bytes, protection, partial channels and rectangle passed\n",layout,opaque,actual);
     }
 }
 
@@ -1103,7 +829,7 @@ static void verify_completed_output_work(void) {
     HwMemory *memory=hw_memory(&views);
     unsigned calls=0;LARGE_INTEGER frequency,start,end;
     assert(QueryPerformanceFrequency(&frequency));
-    hw_complete_commands();assert(d3d8_IsNativeVulkan()?nvk_completed(nvk_fence())==1:s_hw_completion!=NULL);
+    hw_complete_commands();assert(s_hw_completion);
     event_query_creates=0;
     query_context_getter_calls=0;
     query_status_calls=query_event_payload_calls=0;
@@ -1125,13 +851,8 @@ static void verify_completed_output_work(void) {
         (double)(end.QuadPart-start.QuadPart)/frequency.QuadPart);
     fprintf(stderr,"[QUERY PAYLOAD] status_calls=%u event_payload_calls=%u\n",query_status_calls,query_event_payload_calls);
     fprintf(stderr,"[QUERY CONTEXT] getter_calls=%u poll_calls=%u\n",query_context_getter_calls,query_status_calls);
-    if(d3d8_IsNativeVulkan()) {
-        assert(!query_context_getter_calls && !query_status_calls && !query_event_payload_calls);
-        assert(nvk_completed(nvk_fence())==1);
-    } else {
-        assert(query_context_getter_calls==query_status_calls+200);
-        assert(query_status_calls>=100 && query_event_payload_calls==0);
-    }
+    assert(query_context_getter_calls==query_status_calls+200);
+    assert(query_status_calls>=100 && query_event_payload_calls==0);
     /* Completion must directly establish the same final protection once. */
     assert(calls==100*views.view_count);
     fprintf(stderr,"[EVENT RESOURCE] completed100 creates=%u\n",event_query_creates);
@@ -1142,13 +863,9 @@ static void verify_completed_output_work(void) {
     hw_defer_output(output,101);hw_defer_output(output+4,102);
     assert(protection_test_calls==views.view_count);
     protection_pages_for_test(memory,views.offset&~(size_t)4095,1,PAGE_READONLY);
-    assert(s_hw_query_count==2 && s_hw_queries[0].pending && s_hw_queries[1].pending);
-    if(d3d8_IsNativeVulkan()) assert(s_hw_queries[0].native_serial==s_hw_queries[1].native_serial);
-    else assert(s_hw_queries[0].query!=s_hw_queries[1].query);
+    assert(s_hw_query_count==2 && s_hw_queries[0].query!=s_hw_queries[1].query);
     ID3D11Query *first=s_hw_queries[0].query,*second=s_hw_queries[1].query;
-    hw_complete_commands();
-    if(d3d8_IsNativeVulkan()) assert(nvk_completed(s_hw_queries[1].native_serial)==1);
-    else assert(s_hw_completion!=first && s_hw_completion!=second);
+    hw_complete_commands();assert(s_hw_completion!=first && s_hw_completion!=second);
     protection_test_calls=0;
     hw_collect_queries(1);assert(!s_hw_query_count && ldl_le_p(output)==101 && ldl_le_p(output+4)==102);
     assert(protection_test_calls==views.view_count);
@@ -1163,7 +880,7 @@ static void verify_completed_output_work(void) {
     hw_collect_queries(1);
     assert(ldl_le_p(output)==103 && ldl_le_p(edge)==104);
     protection_pages_for_test(memory,views.offset&~(size_t)4095,3,PAGE_READWRITE);
-    assert(d3d8_IsNativeVulkan()?nvk_completed(nvk_fence())==1:s_hw_completion!=NULL);
+    assert(s_hw_completion);
     protection_test_inspect=1;
 }
 static void verify_attribute_offset_work(void) {
@@ -1240,114 +957,14 @@ static void verify_fixed_texgen_route(void) {
             for(unsigned row=0;row<4;row++){float value[4]={0};value[row]=1;nv2a_vsh_set_constant(64+stage*8+row,value);nv2a_vsh_set_constant(68+stage*8+row,value);}
         }
         vertices(0.25f);method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
-        assert(BRIDGE_MEM32(s_gpu.color_base)==0xffff0000);
-        NV2ANativeFixed actual;
-        if(d3d8_IsNativeVulkan()) {assert(native_uniform_sizes[3]==sizeof actual);memcpy(&actual,native_uniform_bytes[3],sizeof actual);}
-        else {
-        assert(g_vsh_fixed_cb);ID3D11Buffer *copy=NULL;D3D11_BUFFER_DESC desc={sizeof actual,D3D11_USAGE_STAGING,0,D3D11_CPU_ACCESS_READ,0,0};
+        assert(g_vsh_fixed_cb && BRIDGE_MEM32(s_gpu.color_base)==0xffff0000);
+        NV2ANativeFixed actual;ID3D11Buffer *copy=NULL;D3D11_BUFFER_DESC desc={sizeof actual,D3D11_USAGE_STAGING,0,D3D11_CPU_ACCESS_READ,0,0};
         assert(SUCCEEDED(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&desc,NULL,&copy)));ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
         ID3D11DeviceContext_CopyResource(ctx,(ID3D11Resource *)copy,(ID3D11Resource *)g_vsh_fixed_cb);D3D11_MAPPED_SUBRESOURCE mapped;assert(SUCCEEDED(ID3D11DeviceContext_Map(ctx,(ID3D11Resource *)copy,0,D3D11_MAP_READ,0,&mapped)));memcpy(&actual,mapped.pData,sizeof actual);ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource *)copy,0);ID3D11Buffer_Release(copy);
-        }
         for(unsigned stage=0;stage<4;stage++){assert(actual.texture_matrix[stage]==(test==2));for(unsigned j=0;j<4;j++)assert(actual.texgen[stage][j]==(test==2?0:test?2:1));}
     }
     fprintf(stderr,"[FIXED TEXGEN] original methods route XYZRHW through fixed vertex consumer; all stage/component and matrix bindings exact; pixels preserved\n");
 }
-
-static uint32_t *index_fifo_for_test(void) {
-    NV2AState *gpu=nv2a_get_state();uint32_t *r=gpu->pfifo.regs;
-    gpu->vram_ptr=(uint8_t *)(xbox_GetMemoryOffset()+0x80000000u);
-    uint32_t *object=(uint32_t *)(gpu->ramin_ptr+0x400);
-    object[0]=2;object[1]=65535;object[2]=0x80000;
-    r[NV_PFIFO_MODE]=1;r[NV_PFIFO_CACHE1_PUSH1]=0x100;r[NV_PFIFO_CACHE1_PUSH0]=1;
-    r[NV_PFIFO_CACHE1_DMA_PUSH]=1;r[NV_PFIFO_CACHE1_PULL0]=1;r[NV_PFIFO_CACHE1_DMA_INSTANCE]=0x40;
-    r[NV_PFIFO_CACHE1_DMA_GET]=r[NV_PFIFO_CACHE1_DMA_STATE]=0;
-    gpu->pgraph.waiting_for_nop=false;gpu->pgraph.regs[NV_PGRAPH_FIFO]=1;
-    return (uint32_t *)(gpu->vram_ptr+0x80000);
-}
-static void index_sequence_for_test(unsigned first,unsigned count) {
-    NV2AState *gpu=nv2a_get_state();uint32_t *words=index_fifo_for_test();
-    assert(!(count&1) && count<=4094);
-    words[0]=NV2A_NATIVE_INDEX_RANGE|((count/2)<<18);
-    for(unsigned i=0;i<count;i+=2)words[1+i/2]=((first+i)&0xffff)|(((first+i+1)&0xffff)<<16);
-    gpu->pfifo.regs[NV_PFIFO_CACHE1_DMA_PUT]=(1+count/2)*4;
-    nv2a_fifo_run(gpu);
-    assert(gpu->pfifo.regs[NV_PFIFO_CACHE1_DMA_GET]==(1+count/2)*4);
-}
-typedef struct IndexStateForTest {
-    uint32_t regs[sizeof(((NV2AState *)0)->pfifo.regs)/4];
-    struct PGRAPHState pgraph;
-    PbState renderer;
-} IndexStateForTest;
-static void capture_indices_for_test(IndexStateForTest *out) {
-    NV2AState *gpu=nv2a_get_state();
-    memcpy(out->regs,gpu->pfifo.regs,sizeof out->regs);
-    memcpy(&out->pgraph,&gpu->pgraph,sizeof out->pgraph);
-    memcpy(&out->renderer,&s_gpu,sizeof s_gpu);
-}
-static void restore_indices_for_test(const IndexStateForTest *in) {
-    NV2AState *gpu=nv2a_get_state();
-    memcpy(gpu->pfifo.regs,in->regs,sizeof in->regs);
-    memcpy(&gpu->pgraph,&in->pgraph,sizeof in->pgraph);
-    memcpy(&s_gpu,&in->renderer,sizeof s_gpu);
-}
-static void verify_native_indices(const char *mode) {
-    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
-    NV2AState *gpu=nv2a_get_state();uint32_t *r=gpu->pfifo.regs,*words=index_fifo_for_test();
-    if(strcmp(mode,"native-indices")) {
-        words[0]=NV2A_NATIVE_INDEX_RANGE|(1u<<18);words[1]=0x10000;
-        r[NV_PFIFO_CACHE1_DMA_PUT]=8;
-        if(!strcmp(mode,"reject-native-index-extent"))((uint32_t *)(gpu->ramin_ptr+0x400))[1]=3;
-        else if(!strcmp(mode,"reject-native-index-put"))r[NV_PFIFO_CACHE1_DMA_PUT]=7;
-        else if(!strcmp(mode,"reject-native-index-consumer"))gpu->pfifo.method_consumer=NULL;
-        else if(!strcmp(mode,"reject-native-index-class"))gpu->pgraph.regs[NV_PGRAPH_CTX_CACHE1]=NV_IMAGE_BLIT;
-        else assert(0);
-        nv2a_fifo_run(gpu);assert(!"invalid native index operation accepted");return;
-    }
-    IndexStateForTest *initial=calloc(1,sizeof *initial),*expected=calloc(1,sizeof *expected);
-    IndexStateForTest *actual=calloc(1,sizeof *actual),*pending=calloc(1,sizeof *pending);
-    assert(initial&&expected&&actual&&pending);capture_indices_for_test(initial);
-    const unsigned counts[]={0,1,2,31,511,2047};unsigned trials=0,cuts=0;
-    for(unsigned n=0;n<6;n++)for(unsigned active=0;active<2;active++)for(unsigned wrap=0;wrap<2;wrap++)
-    for(unsigned pull=counts[n]?1:0;pull<2;pull++) {
-        unsigned count=counts[n],get=wrap?512:0,end=get+(count+1)*4,put=wrap?8:end;
-        uint32_t *packet=words+get/4;
-        for(unsigned pass=0;pass<2;pass++) {
-            restore_indices_for_test(initial);s_gpu.prim=active?5:0;
-            s_gpu.idx_count=1;s_gpu.idx[0]=0xabcdef01;
-            r[NV_PFIFO_CACHE1_DMA_STATE]=0;r[NV_PFIFO_CACHE1_DMA_GET]=get;r[NV_PFIFO_CACHE1_DMA_PUT]=put;
-            r[NV_PFIFO_CACHE1_PULL0]=pull;
-            packet[0]=(pass?NV2A_NATIVE_INDEX_RANGE:0x40000000u|NV097_ARRAY_ELEMENT16)|(count<<18);
-            for(unsigned i=0;i<count;i++)packet[1+i]=(0x9e3779b9u*i)^0xface1234u;
-            if(wrap) {words[end/4]=1;words[0]=0x40000000u|NV097_ARRAY_ELEMENT16;words[1]=0x40000000u|NV097_ARRAY_ELEMENT16;}
-            if(pass && active && !wrap) {
-                capture_indices_for_test(pending);
-                for(unsigned cut=1;cut<=count;cut++) {
-                    r[NV_PFIFO_CACHE1_DMA_PUT]=get+cut*4;nv2a_fifo_run(gpu);
-                    pending->regs[NV_PFIFO_CACHE1_DMA_PUT]=get+cut*4;capture_indices_for_test(actual);
-                    assert(!memcmp(pending,actual,sizeof *actual));++cuts;
-                }
-                r[NV_PFIFO_CACHE1_DMA_PUT]=put;
-                for(unsigned stop=count?0:1;stop<3;stop++) {
-                    if(stop==0)r[NV_PFIFO_CACHE1_PULL0]=0;
-                    if(stop==1)gpu->pgraph.waiting_for_nop=true;
-                    if(stop==2)gpu->irq_in_service=true;
-                    nv2a_fifo_run(gpu);assert(r[NV_PFIFO_CACHE1_DMA_GET]==get);
-                    r[NV_PFIFO_CACHE1_PULL0]=pull;gpu->pgraph.waiting_for_nop=false;gpu->irq_in_service=false;
-                }
-            }
-            nv2a_fifo_run(gpu);assert(r[NV_PFIFO_CACHE1_DMA_GET]==put);
-            assert(s_gpu.idx_count==(active?1+count*2:1));
-            method(NV097_ARRAY_ELEMENT32,0x12345678);
-            capture_indices_for_test(actual);
-            if(!pass)memcpy(expected,actual,sizeof *actual);
-            else assert(!memcmp(expected,actual,sizeof *actual));
-        }
-        ++trials;
-    }
-    restore_indices_for_test(initial);free(initial);free(expected);free(actual);free(pending);
-    fprintf(stderr,"[NATIVE INDICES] %u complete FIFO/PGRAPH/renderer states, %u partial publications, zero count, inactive primitive, wrap, scalar tail and suspended work passed\n",trials,cuts);
-}
-
 static void verify_batch_boundary(const char *producer) {
     seed();method(NV097_SET_BEGIN_END,5);
     if(!strcmp(producer,"inline")) {
@@ -1363,9 +980,7 @@ static void verify_batch_boundary(const char *producer) {
         method(NV097_SET_VERTEX4F+12,0);
     } else {
         unsigned i=0;
-        if(!strcmp(producer,"native16")) {
-            for(;i+1023<NV2A_MAX_BATCH_LENGTH;i+=1024)index_sequence_for_test(i,1024);
-        } else if(!strcmp(producer,"array16")) {
+        if(!strcmp(producer,"array16")) {
             for(;i+1<NV2A_MAX_BATCH_LENGTH;i+=2)method(NV097_ARRAY_ELEMENT16,(i&0xffff)|(((i+1)&0xffff)<<16));
         } else if(!strcmp(producer,"draw")) {
             for(;i+255<NV2A_MAX_BATCH_LENGTH;i+=256)method(NV097_DRAW_ARRAYS,i|(255u<<24));
@@ -1373,7 +988,6 @@ static void verify_batch_boundary(const char *producer) {
         for(;i<NV2A_MAX_BATCH_LENGTH;i++)method(NV097_ARRAY_ELEMENT32,i);
         assert(s_gpu.idx_count==NV2A_MAX_BATCH_LENGTH && s_gpu.idx[s_gpu.idx_count-1]==NV2A_MAX_BATCH_LENGTH-1);
         fprintf(stderr,"[BATCH BOUNDARY] full index payload retained\n");
-        if(!strcmp(producer,"native16"))index_sequence_for_test(0,2);
         method(!strcmp(producer,"array16")?NV097_ARRAY_ELEMENT16:!strcmp(producer,"draw")?NV097_DRAW_ARRAYS:NV097_ARRAY_ELEMENT32,0);
     }
     assert(!"over-capacity producer must report its bound");
@@ -1392,8 +1006,6 @@ static void verify_large_batch(const char *producer) {
         method(NV097_SET_BEGIN_END,primitive);
         if(!strcmp(producer,"array32")) {
             for(unsigned i=0;i<count;i++)method(NV097_ARRAY_ELEMENT32,i);
-        } else if(!strcmp(producer,"native16")) {
-            for(unsigned i=0;i<count;i+=1000)index_sequence_for_test(i,1000);
         } else if(!strcmp(producer,"array16")) {
             for(unsigned i=0;i<count;i+=2)method(NV097_ARRAY_ELEMENT16,i|((i+1)<<16));
         } else if(!strcmp(producer,"draw")) {
@@ -1437,31 +1049,17 @@ static void verify_large_batch(const char *producer) {
     }
     fprintf(stderr,"[LARGE BATCH] %s: 6000 vertices, six topologies, complete native payload and pixels passed\n",producer);
 }
-static void verify_fifo_worker_checkpoint(int partial,int indices) {
+static void verify_fifo_worker_checkpoint(void) {
     NV2AState *gpu=nv2a_get_state();
     seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
     gpu->vram_ptr=(uint8_t *)(xbox_GetMemoryOffset()+0x80000000u);
     uint32_t *object=(uint32_t *)(gpu->ramin_ptr+0x400);
     object[0]=2;object[1]=4095;object[2]=0x80000;
     uint32_t *commands=(uint32_t *)(gpu->vram_ptr+0x80000);
-    commands[0]=NV2A_NATIVE_CONSTANT_RANGE;commands[1]=17;commands[2]=16;
-    for(unsigned i=0;i<16;i++)commands[3+i]=0x3f000000u+i;
-    const float zero[4]={0};for(unsigned i=17;i<21;i++)nv2a_vsh_set_constant(i,zero);
-    commands[19]=(1u<<18)|NV097_SET_COLOR_CLEAR_VALUE;commands[20]=0xff445566;
-    commands[21]=(1u<<18)|NV097_CLEAR_SURFACE;commands[22]=0xf0;
-    commands[23]=(1u<<18)|NV097_SET_SEMAPHORE_OFFSET;commands[24]=0x70000;
-    commands[25]=(1u<<18)|NV097_BACK_END_WRITE_SEMAPHORE_RELEASE;commands[26]=0x12345678;
-    unsigned end=108,pending_get=0,partial_put=8;
-    if(indices) {
-        method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_DEPTH_MASK,0);vertices(0.25f);
-        commands[23]=(1u<<18)|NV097_SET_BEGIN_END;commands[24]=5;
-        commands[25]=NV2A_NATIVE_INDEX_RANGE|(1u<<18);commands[26]=0x10000;
-        commands[27]=(1u<<18)|NV097_ARRAY_ELEMENT32;commands[28]=2;
-        commands[29]=(1u<<18)|NV097_SET_BEGIN_END;commands[30]=0;
-        commands[31]=(1u<<18)|NV097_SET_SEMAPHORE_OFFSET;commands[32]=0x70000;
-        commands[33]=(1u<<18)|NV097_BACK_END_WRITE_SEMAPHORE_RELEASE;commands[34]=0x12345678;
-        end=140;pending_get=100;partial_put=104;
-    }
+    commands[0]=(1u<<18)|NV097_SET_COLOR_CLEAR_VALUE;commands[1]=0xff445566;
+    commands[2]=(1u<<18)|NV097_CLEAR_SURFACE;commands[3]=0xf0;
+    commands[4]=(1u<<18)|NV097_SET_SEMAPHORE_OFFSET;commands[5]=0x70000;
+    commands[6]=(1u<<18)|NV097_BACK_END_WRITE_SEMAPHORE_RELEASE;commands[7]=0x12345678;
     method(NV097_SET_CONTEXT_DMA_SEMAPHORE,0x100);
     BRIDGE_MEM32(0x80070000u)=0;
     uint32_t *r=gpu->pfifo.regs;
@@ -1470,144 +1068,31 @@ static void verify_fifo_worker_checkpoint(int partial,int indices) {
     r[NV_PFIFO_CACHE1_DMA_GET]=r[NV_PFIFO_CACHE1_DMA_STATE]=0;
     gpu->pgraph.waiting_for_nop=false;gpu->pgraph.regs[NV_PGRAPH_FIFO]=1;
     /* Frozen submission remains pending in the canonical saved FIFO. */
-    nv2a_mmio_write(gpu,0x800040,partial?partial_put:end,4);
+    nv2a_mmio_write(gpu,0x800040,32,4);
     assert(r[NV_PFIFO_CACHE1_DMA_GET]==0 && BRIDGE_MEM32(0x80070000u)==0);
     FILE *snapshot=tmpfile(),*devices=tmpfile();assert(snapshot && devices);
     assert(nv2a_gpu_save_checkpoint(snapshot) && xbox_CheckpointWriteDevices(devices));
     rewind(devices);assert(xbox_CheckpointLoadDevices(devices));fclose(devices);
     for(unsigned pass=0;pass<2;pass++) {
         xbox_CheckpointEnd();nv2a_fifo_wait_idle(gpu);
-        if(partial) {
-            assert(r[NV_PFIFO_CACHE1_DMA_GET]==pending_get && BRIDGE_MEM32(0x80070000u)==0);
-            if(indices) {
-                assert(s_gpu.prim==5 && s_gpu.idx_count==0);
-                assert(!memcmp(nv2a_vsh_constant(17),commands+3,16*4));
-                if(!pass) {
-                    assert(xbox_CheckpointBootstrapBegin());rewind(snapshot);
-                    assert(nv2a_gpu_save_checkpoint(snapshot));xbox_CheckpointEnd();
-                }
-            } else assert(!memcmp(nv2a_vsh_constant(17),zero,sizeof zero));
-            nv2a_mmio_write(gpu,0x800040,end,4);nv2a_fifo_wait_idle(gpu);
-        }
         ULONGLONG deadline=GetTickCount64()+5000;
         while(BRIDGE_MEM32(0x80070000u)!=0x12345678 && GetTickCount64()<deadline) {
             nv2a_pb_request_progress();Sleep(1);
         }
         assert(BRIDGE_MEM32(0x80070000u)==0x12345678);
         assert(xbox_CheckpointBootstrapBegin());nv2a_pb_checkpoint_publish();
-        assert(r[NV_PFIFO_CACHE1_DMA_GET]==end && BRIDGE_MEM32(0x80020000u)==(indices?0xffff0000u:0xff445566u));
-        if(indices)assert(s_gpu.prim==0 && s_gpu.idx_count==3 && s_gpu.idx[0]==0 && s_gpu.idx[1]==1 && s_gpu.idx[2]==2);
-        assert(!memcmp(nv2a_vsh_constant(17),commands+3,16*4));
+        assert(r[NV_PFIFO_CACHE1_DMA_GET]==32 && BRIDGE_MEM32(0x80020000u)==0xff445566);
         if(!pass) {
             BRIDGE_MEM32(0x80070000u)=0;rewind(snapshot);
             assert(nv2a_gpu_load_checkpoint(snapshot));
-            assert(r[NV_PFIFO_CACHE1_DMA_GET]==(indices&&partial?pending_get:0) && BRIDGE_MEM32(0x80070000u)==0);
+            assert(r[NV_PFIFO_CACHE1_DMA_GET]==0 && BRIDGE_MEM32(0x80070000u)==0);
         }
     }
     fclose(snapshot);
     fprintf(stderr,"[FIFO CHECKPOINT] frozen queued commands, device barrier, restored pending FIFO, native pixels and real semaphore completion passed\n");
 }
-static LONG CALLBACK vertex_memory_fault_for_test(PEXCEPTION_POINTERS e) {
-    if(e->ExceptionRecord->ExceptionCode==EXCEPTION_ACCESS_VIOLATION &&
-       nv2a_pb_handle_memory_fault(e->ExceptionRecord->ExceptionInformation[1],(int)e->ExceptionRecord->ExceptionInformation[0]))
-        return EXCEPTION_CONTINUE_EXECUTION;
-    return EXCEPTION_CONTINUE_SEARCH;
-}
-
-
-static void test_dirty_colour(HwColor *color,const float rgba[4]) {
-    if(d3d8_IsNativeVulkan()) assert(nvk_image_clear(hw_vk_render(color),rgba));
-    else ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),((D3D8Surface *)hw_render_surface(color))->rtv,rgba);
-    color->dirty=1;color->dirty_bounds=(RECT){0,0,8,8};
-    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,NULL);
-}
-static void verify_clear_page_ownership(void) {
-    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
-    struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
-    pg->regs[NV_PGRAPH_CLEARRECTX]=7u<<16;pg->regs[NV_PGRAPH_CLEARRECTY]=7u<<16;
-    HwColor *a=hw_color(0);
-    method(NV097_SET_SURFACE_COLOR_OFFSET,0x20400);HwColor *neighbor=hw_color(0);
-    method(NV097_SET_SURFACE_COLOR_OFFSET,0x300000);HwColor *unrelated=hw_color(0);
-    assert(a->memory==neighbor->memory && a->memory_offset+hw_color_bytes(a)<neighbor->memory_offset);
-    assert((a->memory_offset/4096)==(neighbor->memory_offset/4096));
-    const float red[4]={1,0,0,1},green[4]={0,1,0,1},blue[4]={0,0,1,1};
-    test_dirty_colour(a,red);test_dirty_colour(neighbor,green);test_dirty_colour(unrelated,blue);
-    uint64_t readbacks=s_gpu.hardware_color_readbacks;
-    method(NV097_SET_SURFACE_COLOR_OFFSET,0x20000);
-    method(NV097_SET_COLOR_CLEAR_VALUE,0xff123456);method(NV097_CLEAR_SURFACE,0xf0);
-    assert(s_gpu.hardware_color_readbacks==readbacks);
-    assert(a->dirty && neighbor->dirty && unrelated->dirty);
-    assert(BRIDGE_MEM32(a->address)==0xff123456);
-    assert(s_gpu.hardware_color_readbacks==readbacks+3);
-    uint32_t *am=(uint32_t *)(a->memory->host_view+a->memory_offset);
-    uint32_t *nm=(uint32_t *)(neighbor->memory->host_view+neighbor->memory_offset);
-    for(unsigned i=0;i<64;i++)assert(am[i]==0xff123456 && nm[i]==0xff00ff00);
-    test_dirty_colour(unrelated,blue);
-    /* Partial channel writes need the GPU's existing channels. */
-    test_dirty_colour(a,blue);readbacks=s_gpu.hardware_color_readbacks;
-    method(NV097_SET_COLOR_CLEAR_VALUE,0xffaabbcc);method(NV097_CLEAR_SURFACE,NV097_CLEAR_SURFACE_R);
-    assert(s_gpu.hardware_color_readbacks==readbacks+1 && unrelated->dirty);
-    for(unsigned i=0;i<64;i++)assert(am[i]==0xffaa00ff && nm[i]==0xff00ff00);
-    protection_pages_for_test(unrelated->memory,unrelated->memory_offset,1,PAGE_NOACCESS);
-    /* An output outside the target bytes can still share its protection page. */
-    uint8_t *output=(uint8_t *)(xbox_GetMemoryOffset()+a->address+0x800);
-    hw_defer_output(output,0x1234abcd);assert(s_hw_query_count==1);
-    method(NV097_SET_COLOR_CLEAR_VALUE,0xff765432);method(NV097_CLEAR_SURFACE,0xf0);
-    assert(a->dirty && !s_hw_query_count);
-    protection_pages_for_test(a->memory,a->memory_offset,1,PAGE_NOACCESS);
-    assert(BRIDGE_MEM32(a->address)==0xff765432 && *(uint32_t *)output==0x1234abcd);
-    fprintf(stderr,"[CLEAR OWNERSHIP] overwrite discard, same-page nonoverlap preservation, unrelated GPU ownership and partial channels passed\n");
-}
-
-static void verify_native_finished_frame(void) {
-    seed();method(NV097_SET_BEGIN_END,0);
-    method(NV097_SET_SURFACE_PITCH,2560);
-    method(NV097_SET_SURFACE_CLIP_HORIZONTAL,640<<16);
-    method(NV097_SET_SURFACE_CLIP_VERTICAL,480<<16);
-    nv2a_get_state()->pgraph.regs[NV_PGRAPH_CLEARRECTX]=639u<<16;
-    nv2a_get_state()->pgraph.regs[NV_PGRAPH_CLEARRECTY]=479u<<16;
-    method(NV097_SET_COLOR_CLEAR_VALUE,0xff6a8cad);
-    method(NV097_CLEAR_SURFACE,0xf0);
-    _putenv_s("RECOMP_FB_WINDOW","1");
-    const FramebufferNativeRenderer *renderer=nv2a_pb_native_renderer();assert(renderer);
-    s_gpu.drawn_offset=0;
-    uint64_t before=s_gpu.hardware_color_readbacks;
-    method(NV097_FLIP_STALL,0);
-    assert(s_gpu.hardware_color_readbacks==before);
-    unsigned scale=d3d8_RenderScale(),width=640*scale,height=480*scale;
-    if(d3d8_IsNativeVulkan())assert(s_hw_vk_front && s_hw_vk_front_width==width && s_hw_vk_front_height==height);
-    else assert(s_hw_front && ((D3D8Surface *)s_hw_front)->width==width);
-    assert(renderer->capture() && readback_present_bytes==width*height*4);
-    for(unsigned i=0;i<width*height;i++)assert(((uint32_t *)readback_present_pixels)[i]==0xff6a8cad);
-    /* A later render cannot change the already finished display image. */
-    method(NV097_SET_COLOR_CLEAR_VALUE,0xffaabbcc);method(NV097_CLEAR_SURFACE,0xf0);
-    assert(s_gpu.hardware_color_readbacks==before);
-    assert(renderer->capture());
-    for(unsigned i=0;i<width*height;i++)assert(((uint32_t *)readback_present_pixels)[i]==0xff6a8cad);
-    /* Resolve another real CPU alias to the same physical colour owner. */
-    HwColor *color=hw_color(0);
-    XboxSharedMemoryViews *views=&color->memory->views;assert(views->view_count>1);
-    uint32_t alias=(uint32_t)((uintptr_t)views->cpu_views[1]+color->memory_offset-xbox_GetMemoryOffset());
-    hw_finish_native_frame(alias,color->pitch);assert(renderer->capture());
-    for(unsigned i=0;i<width*height;i++)assert(((uint32_t *)readback_present_pixels)[i]==0xffaabbcc);
-    /* A cold restore must present a saved surface before any new draw recreates it. */
-    FILE *snapshot=tmpfile();assert(snapshot && nv2a_gpu_save_checkpoint(snapshot));
-    hw_free_colors(s_hw_colors);s_hw_colors=NULL;
-    rewind(snapshot);assert(nv2a_gpu_load_checkpoint(snapshot));fclose(snapshot);
-    assert(s_hw_colors);
-    hw_finish_native_frame(alias,2560);assert(renderer->capture());
-    for(unsigned i=0;i<width*height;i++)assert(((uint32_t *)readback_present_pixels)[i]==0xffaabbcc);
-    uint32_t *restored=malloc((size_t)width*height*4);assert(restored);
-    for(unsigned i=0;i<width*height;i++)restored[i]=0xff000000|(i&0xffffff);
-    assert(renderer->restore(restored,width,height) && renderer->capture());
-    assert(!memcmp(restored,readback_present_pixels,(size_t)width*height*4));
-    free(restored);renderer->close();assert(!s_hw_front && !s_hw_vk_front);
-    fprintf(stderr,"[NATIVE DISPLAY] no flip readback, finished image isolation, physical alias, capture and restoration bytes passed\n");
-}
-
 int main(int argc,char **argv) {
-    assert(argc==6 || (argc==7 && !strncmp(argv[1],"fifo-worker",11) &&
-        (!strcmp(argv[6],"partial") || !strcmp(argv[6],"complete"))));_putenv_s("RECOMP_GUEST_LOCK","1");_putenv_s("RECOMP_GPU_D3D11",argv[5]);
+    assert(argc==6);_putenv_s("RECOMP_GUEST_LOCK","1");_putenv_s("RECOMP_GPU_D3D11",argv[5]);
     const char *render_scale=getenv("RECOMP_RENDER_SCALE");
     d3d8_DisplayConfigure(render_scale?(unsigned)atoi(render_scale):1,4.0f/3.0f);
     FILE *file=fopen(argv[2],"rb");assert(file);fseek(file,0,SEEK_END);long bytes=ftell(file);rewind(file);
@@ -1616,25 +1101,16 @@ int main(int argc,char **argv) {
     NV2AState *gpu=nv2a_init_standalone((void *)xbox_GetMemoryOffset(),0x04000000,
                          (void *)(xbox_GetMemoryOffset()+0xfd700000u),0x100000);assert(gpu);
     gpu->pfifo.method_consumer=nv2a_pb_exec_method;
-    assert(AddVectoredExceptionHandler(0,vertex_memory_fault_for_test));
-    if(!strncmp(argv[1],"fifo-worker",11))assert(nv2a_fifo_start(gpu, 1));
+    if(!strcmp(argv[1],"fifo-worker"))assert(nv2a_fifo_start(gpu, 1));
     assert(xbox_CheckpointBootstrapBegin());
-    if(!strncmp(argv[1],"fifo-worker",11)) {
-        verify_fifo_worker_checkpoint(argc>6 && !strcmp(argv[6],"partial"),!strcmp(argv[1],"fifo-worker-index"));
-    } else if(!strcmp(argv[1],"native-indices") || !strncmp(argv[1],"reject-native-index-",20)) {
-        verify_native_indices(argv[1]);
+    if(!strcmp(argv[1],"fifo-worker")) {
+        verify_fifo_worker_checkpoint();
     } else if(!strncmp(argv[1],"boundary-",9)) {
         verify_batch_boundary(argv[1]+9);
     } else if(!strncmp(argv[1],"large-",6)) {
         verify_large_batch(argv[1]+6);
     } else if(!strcmp(argv[1],"fixed-texgen")) {
         verify_fixed_texgen_route();
-    } else if(!strcmp(argv[1],"vertex-reuse")) {
-        verify_vertex_conversion_reuse(argv[3],argv[4]);
-    } else if(!strcmp(argv[1],"clear-ownership")) {
-        verify_clear_page_ownership();
-    } else if(!strcmp(argv[1],"native-display")) {
-        verify_native_finished_frame();
     } else if(!strcmp(argv[1],"vertex-payload")) {
         verify_vertex_payloads();
     } else if(!strcmp(argv[1],"clear-transfer")) {
@@ -1663,8 +1139,6 @@ int main(int argc,char **argv) {
         verify_swizzled_regions();
     } else if(!strcmp(argv[1],"clean-overlap")) {
         verify_clean_texture_overlap();
-    } else if(!strcmp(argv[1],"texture-reuse")) {
-        verify_texture_content_reuse(argv[3],argv[4]);
     } else if(!strcmp(argv[1],"semaphore")) {
         verify_semaphore_outputs();
     } else if(!strcmp(argv[1],"save")) {
@@ -1779,16 +1253,6 @@ def test_clean_texture_overlap_keeps_unrelated_colour_deferred(native_gpu,tmp_pa
     assert '[CLEAN OVERLAP]' in result.stderr
 
 
-@pytest.mark.parametrize('backend',['D3D11','D3D12','Vulkan','OpenGL'])
-def test_texture_content_reuse_observes_all_existing_writers(native_gpu,tmp_path,backend):
-    executable,xbe=native_gpu
-    result=subprocess.run([str(executable),'texture-reuse',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
-        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
-        capture_output=True,text=True,errors='replace',timeout=30)
-    assert result.returncode==0,result.stdout+result.stderr
-    assert '[TEXTURE REUSE]' in result.stderr
-
-
 @pytest.mark.parametrize('backend,scale',[('D3D11',1),('D3D11',2),('Vulkan',1),('Vulkan',2),('OpenGL',1),('OpenGL',2)])
 def test_original_colour_protection_avoids_identical_os_updates(native_gpu,tmp_path,backend,scale):
     executable,xbe=native_gpu
@@ -1801,7 +1265,7 @@ def test_original_colour_protection_avoids_identical_os_updates(native_gpu,tmp_p
         if line.startswith('[PROTECTION]'):print(line)
 
 
-@pytest.mark.parametrize('backend,scale',[('D3D11',2),('D3D11',4),('D3D12',2),('D3D12',4),('OpenGL',2),('OpenGL',4)])
+@pytest.mark.parametrize('backend,scale',[('D3D11',2),('D3D11',4),('Vulkan',2),('Vulkan',4),('OpenGL',2),('OpenGL',4)])
 def test_original_flip_queues_both_readbacks_before_mapping(native_gpu,tmp_path,backend,scale):
     executable,xbe=native_gpu
     result=subprocess.run([str(executable),'readback-work',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
@@ -1898,7 +1362,7 @@ def test_original_vsh_upload_updates_coalesce_at_real_consumers(native_gpu,tmp_p
     assert 'four changed upload words use one original decode' in result.stderr
 
 
-@pytest.mark.parametrize('backend',['D3D11','D3D12','OpenGL'])
+@pytest.mark.parametrize('backend',['D3D11','Vulkan','OpenGL'])
 def test_original_geometry_buffer_content_updates_and_lifetime(native_gpu,tmp_path,backend):
     executable,xbe=native_gpu
     result=subprocess.run([str(executable),'geometry-updates',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
@@ -1928,7 +1392,7 @@ def test_original_pixel_state_uploads_preserve_bytes_and_binding(native_gpu,tmp_
         if line.startswith('[PIXEL STATE]'):print(line)
 
 
-@pytest.mark.parametrize('backend',['D3D11','D3D12','OpenGL'])
+@pytest.mark.parametrize('backend',['D3D11','Vulkan','OpenGL'])
 def test_original_combiner_buffer_both_writers(native_gpu,tmp_path,backend):
     executable,xbe=native_gpu
     result=subprocess.run([str(executable),'combiner-work',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
@@ -1960,7 +1424,7 @@ def test_original_linear_texgen_fixed_consumer(native_gpu,tmp_path,backend):
     assert '[FIXED TEXGEN]' in result.stderr
 
 
-@pytest.mark.parametrize('producer',['array32','array16','native16','draw','inline','immediate'])
+@pytest.mark.parametrize('producer',['array32','array16','draw','inline','immediate'])
 @pytest.mark.parametrize('backend',['D3D11','D3D12','Vulkan','OpenGL'])
 def test_large_batches_preserve_geometry(native_gpu,tmp_path,producer,backend):
     executable,xbe=native_gpu
@@ -1971,7 +1435,7 @@ def test_large_batches_preserve_geometry(native_gpu,tmp_path,producer,backend):
     assert '[LARGE BATCH]' in result.stderr
 
 
-@pytest.mark.parametrize('producer',['array32','array16','native16','draw','inline','immediate'])
+@pytest.mark.parametrize('producer',['array32','array16','draw','inline','immediate'])
 def test_batch_capacity_boundary_is_explicit(native_gpu,tmp_path,producer):
     executable,xbe=native_gpu
     result=subprocess.run([str(executable),'boundary-'+producer,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
@@ -1981,62 +1445,11 @@ def test_batch_capacity_boundary_is_explicit(native_gpu,tmp_path,producer):
     assert 'batch exceeds NV2A capacity:' in result.stderr
 
 
-def test_native_index_range_preserves_complete_state_and_pending_publication(native_gpu,tmp_path):
-    executable,xbe=native_gpu
-    result=subprocess.run([str(executable),'native-indices',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
-        capture_output=True,text=True,errors='replace',timeout=60)
-    assert result.returncode==0,result.stdout+result.stderr
-    assert '[NATIVE INDICES]' in result.stderr
-    print(next(line for line in result.stderr.splitlines() if line.startswith('[NATIVE INDICES]')))
-
-
-@pytest.mark.parametrize('invalid',['extent','put','consumer','class'])
-def test_native_index_range_rejects_invalid_submission(native_gpu,tmp_path,invalid):
-    executable,xbe=native_gpu
-    result=subprocess.run([str(executable),'reject-native-index-'+invalid,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
-        capture_output=True,text=True,errors='replace',timeout=30)
-    assert result.returncode==5,result.stdout+result.stderr
-    expected='native index range outside DMA data' if invalid in ('extent','put') else 'native indices require the active game renderer'
-    assert '[STOP] PFIFO '+expected in result.stderr
-
-
 @pytest.mark.parametrize('backend',['D3D11','D3D12','Vulkan','OpenGL'])
-@pytest.mark.parametrize('partial',[False,True])
-@pytest.mark.parametrize('operation',['constant','index'])
-def test_fifo_worker_preserves_pending_checkpoint_and_gpu_completion(native_gpu,tmp_path,backend,partial,operation):
+def test_fifo_worker_preserves_pending_checkpoint_and_gpu_completion(native_gpu,tmp_path,backend):
     executable,xbe=native_gpu
-    result=subprocess.run([str(executable),'fifo-worker-index' if operation=='index' else 'fifo-worker',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1','partial' if partial else 'complete'],
+    result=subprocess.run([str(executable),'fifo-worker',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
         env={**os.environ,'RECOMP_GPU_BACKEND':backend,'DXVK_LOG_PATH':str(tmp_path)},
         capture_output=True,text=True,errors='replace',timeout=30)
     assert result.returncode==0,result.stdout+result.stderr
     assert '[FIFO CHECKPOINT]' in result.stderr
-
-
-@pytest.mark.parametrize('backend',['D3D11','D3D12','Vulkan','OpenGL'])
-def test_cached_vertex_conversion_observes_original_writers_and_restore(native_gpu,tmp_path,backend):
-    executable,xbe=native_gpu
-    result=subprocess.run([str(executable),'vertex-reuse',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
-        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'DXVK_LOG_PATH':str(tmp_path)},
-        capture_output=True,text=True,errors='replace',timeout=30)
-    assert result.returncode==0,result.stdout+result.stderr
-    assert '[VERTEX REUSE]' in result.stderr
-
-
-@pytest.mark.parametrize('backend,scale',[(b,s) for b in ('D3D11','D3D12','Vulkan','OpenGL') for s in (1,2)])
-def test_native_finished_image_avoids_ram_roundtrip(native_gpu,tmp_path,backend,scale):
-    executable,xbe=native_gpu
-    result=subprocess.run([str(executable),'native-display',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
-        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},
-        capture_output=True,text=True,errors='replace',timeout=40)
-    assert result.returncode==0,result.stdout+result.stderr
-    assert '[NATIVE DISPLAY]' in result.stderr
-
-
-@pytest.mark.parametrize('backend,scale',[(b,s) for b in ('D3D11','D3D12','Vulkan','OpenGL') for s in (1,2)])
-def test_clear_keeps_shared_page_and_unrelated_owners(native_gpu,tmp_path,backend,scale):
-    executable,xbe=native_gpu
-    result=subprocess.run([str(executable),'clear-ownership',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
-        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},
-        capture_output=True,text=True,errors='replace',timeout=40)
-    assert result.returncode==0,result.stdout+result.stderr
-    assert '[CLEAR OWNERSHIP]' in result.stderr

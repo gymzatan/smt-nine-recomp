@@ -13,7 +13,6 @@ typedef struct NineConfig {
     wchar_t interface_language[16];
     unsigned fixed_aspect;
     unsigned multithreaded_graphics;
-    unsigned vsync;
     XboxInputBindings controls;
 } NineConfig;
 int nine_config_read(NineConfig *config, wchar_t *error, size_t count);

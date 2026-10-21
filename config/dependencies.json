@@ -3,14 +3,15 @@
   "rust_toolchain": "1.96.0",
   "gpu": [
     {
-      "name": "dxc",
-      "archive": "dxc.zip",
-      "url": "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip",
+      "name": "dxvk",
+      "archive": "dxvk.tar.gz",
+      "url": "https://github.com/doitsujin/dxvk/releases/download/v3.1.1/dxvk-3.1.1.tar.gz",
       "files": [
-        "dxcompiler.dll"
+        "d3d11.dll",
+        "dxgi.dll"
       ],
-      "archive_directory": "bin/x64",
-      "backend": "vulkan"
+      "backend": "vulkan",
+      "import_name": "nvgi.dll"
     },
     {
       "name": "wined3d",

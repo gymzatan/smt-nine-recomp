@@ -8,13 +8,12 @@ cmake_minimum_required(VERSION 3.20)
 
 project(smt9_recomp C)
 if(WIN32)
-    enable_language(RC ASM_MASM)
+    enable_language(RC)
 endif()
 add_executable(apu_dma_identity_test EXCLUDE_FROM_ALL tests/apu_dma_identity_test.c)
 target_include_directories(apu_dma_identity_test PRIVATE ../vendor/xboxrecomp/src ../vendor/xboxrecomp/include)
 target_link_libraries(apu_dma_identity_test PRIVATE xboxrecomp)
 add_executable(nv2a_register_test EXCLUDE_FROM_ALL tests/nv2a_register_test.c)
-target_sources(nv2a_register_test PRIVATE tests/native_vulkan_test.c)
 add_executable(input_foreground_test EXCLUDE_FROM_ALL tests/input_foreground_test.c)
 target_include_directories(input_foreground_test PRIVATE ../vendor/xboxrecomp/src ../vendor/xboxrecomp/include)
 if(MSVC)
@@ -137,30 +136,26 @@ add_executable(${PROJECT_NAME}
     ${RECOMP_GEN_SOURCES}
 )
 
-add_library(smt9_native_matrix OBJECT src/native_matrix.asm)
-target_sources(${PROJECT_NAME} PRIVATE $<TARGET_OBJECTS:smt9_native_matrix>)
-
 # Link against the xboxrecomp umbrella target (all 6 runtime libraries)
 if(WIN32)
     target_sources(${PROJECT_NAME} PRIVATE src/app.rc)
+    foreach(backend IN ITEMS vulkan opengl)
+        if(backend STREQUAL "vulkan")
+            set(runtime_dir "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/backends/vulkan")
+            set(dxgi_name "nvgi.dll")
+        else()
+            set(runtime_dir "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/backends/opengl")
+            set(dxgi_name "nogi.dll")
+        endif()
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/${backend}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${runtime_dir}/d3d11.dll" "${runtime_dir}/${dxgi_name}" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/${backend}")
+    endforeach()
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/vulkan"
-        COMMAND ${CMAKE_COMMAND} -E rm -f
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/vulkan/d3d11.dll"
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/vulkan/nvgi.dll"
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/vulkan/DXVK_LICENSE"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/backends/vulkan/dxcompiler.dll"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/DXC_LICENSE_LLVM"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/DXC_LICENSE_MS"
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/vulkan"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/opengl"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/backends/opengl/d3d11.dll"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/backends/opengl/nogi.dll"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/wined3d/wined3d.dll"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/WINED3D_COPYING.LIB"
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/opengl")
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/wined3d/wined3d.dll" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/opengl")
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/DXVK_LICENSE" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/vulkan"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/WINED3D_COPYING.LIB" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/opengl")
 endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp)
@@ -200,38 +195,6 @@ if(MSVC)
     # The generated code files can be very large. Increase object file section limit.
     target_compile_options(${PROJECT_NAME} PRIVATE /bigobj /utf-8)
 endif()
-
-option(SMT9_LINK_TIME_OPTIMIZATION "Optimize Release game/runtime code across translation units" ON)
-set(SMT9_PROFILE_MODE "Off" CACHE STRING "MSVC profile-guided build: Off, Generate, or Use")
-set_property(CACHE SMT9_PROFILE_MODE PROPERTY STRINGS Off Generate Use)
-set(SMT9_PROFILE_DATA "${CMAKE_CURRENT_BINARY_DIR}/smt9_recomp.pgd" CACHE FILEPATH
-    "MSVC profile database for this game build")
-if(NOT SMT9_PROFILE_MODE MATCHES "^(Off|Generate|Use)$")
-    message(FATAL_ERROR "SMT9_PROFILE_MODE must be Off, Generate, or Use")
-endif()
-if(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
-    if(SMT9_LINK_TIME_OPTIMIZATION)
-        get_target_property(SMT9_RUNTIME_TARGETS xboxrecomp INTERFACE_LINK_LIBRARIES)
-        set_property(TARGET ${PROJECT_NAME} ${SMT9_RUNTIME_TARGETS}
-            nv2a_register_test apu_device_test apu_dma_identity_test
-            PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
-    elseif(NOT SMT9_PROFILE_MODE STREQUAL "Off")
-        message(FATAL_ERROR "Profile-guided builds require SMT9_LINK_TIME_OPTIMIZATION")
-    endif()
-    if(SMT9_PROFILE_MODE STREQUAL "Generate")
-        target_link_options(${PROJECT_NAME} PRIVATE
-            "$<$<CONFIG:Release>:/FASTGENPROFILE:PGD=${SMT9_PROFILE_DATA}>")
-    elseif(SMT9_PROFILE_MODE STREQUAL "Use")
-        if(NOT EXISTS "${SMT9_PROFILE_DATA}")
-            message(FATAL_ERROR "SMT9_PROFILE_DATA must name an existing trained profile database")
-        endif()
-        target_link_options(${PROJECT_NAME} PRIVATE
-            "$<$<CONFIG:Release>:/USEPROFILE:PGD=${SMT9_PROFILE_DATA}>")
-    endif()
-elseif(NOT SMT9_PROFILE_MODE STREQUAL "Off")
-    message(FATAL_ERROR "Profile-guided builds require the MSVC compiler")
-endif()
-mark_as_advanced(SMT9_LINK_TIME_OPTIMIZATION SMT9_PROFILE_MODE SMT9_PROFILE_DATA)
 
 # ── Game-specific additions ─────────────────────────────────────
 #

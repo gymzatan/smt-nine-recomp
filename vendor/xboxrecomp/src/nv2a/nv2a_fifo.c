@@ -16,9 +16,6 @@
  */
 #include "nv2a_state.h"
 #include "kernel/kernel.h"
-#include "kernel/nv2a_vsh_interp.h"
-extern int nv2a_pb_exec_method(uint32_t, uint32_t, uint32_t, uint8_t *);
-extern void nv2a_pb_index_words(const uint32_t *,uint32_t);
 
 extern void nv2a_pb_progress(void);
 static HANDLE s_fifo_ready, s_fifo_wake;
@@ -197,13 +194,7 @@ static uint32_t object_instance(NV2AState *d, uint32_t handle, bool graphics)
     return GET_MASK(context, NV_RAMHT_INSTANCE) << 4;
 }
 
-static
-#ifdef _MSC_VER
-__forceinline
-#else
-inline __attribute__((always_inline))
-#endif
-void consume_method(NV2AState *d, uint32_t subchannel,
+static void consume_method(NV2AState *d, uint32_t subchannel,
                             uint32_t method, uint32_t parameter)
 {
     if (method == 0) {
@@ -226,100 +217,9 @@ void consume_method(NV2AState *d, uint32_t subchannel,
     pgraph_method(d, subchannel, method, parameter);
 }
 
-/* The native producer publishes one immutable range in the original queue.
- * A partial operation stays pending at its tag, including across checkpoints.
- * The same storage cursor advances only after every value has been consumed. */
-static
-#ifdef _MSC_VER
-__declspec(noinline)
-#else
-__attribute__((noinline))
-#endif
-int consume_native_constants(NV2AState *d,const uint8_t *dma,
-                             hwaddr extent,uint32_t get)
-{
-    uint32_t *regs=d->pfifo.regs;
-    uint32_t put=(uint32_t)ReadAcquire((volatile LONG *)&regs[NV_PFIFO_CACHE1_DMA_PUT]);
-    if ((put&3) || (hwaddr)get+12>extent)
-        fifo_stop(d,"invalid native constant header",put);
-    if (put>get && (hwaddr)put<(hwaddr)get+12) return 0;
-    uint32_t count=ldl_le_p(dma+get+8);
-    if (count!=4 && count!=16)
-        fifo_stop(d,"invalid native constant count",count);
-    hwaddr end=(hwaddr)get+(count+3)*4;
-    if (end>extent || end>UINT32_MAX)
-        fifo_stop(d,"native constants outside DMA data",count);
-    if (put>get && (hwaddr)put<end) return 0;
-    if (!(regs[NV_PFIFO_CACHE1_PULL0]&NV_PFIFO_CACHE1_PULL0_ACCESS)) return 0;
-    if (d->pfifo.method_consumer!=nv2a_pb_exec_method ||
-        (d->pgraph.regs[NV_PGRAPH_CTX_CACHE1]&NV_PGRAPH_CTX_SWITCH1_GRCLASS)!=NV_KELVIN_PRIMITIVE)
-        fifo_stop(d,"native constants require the active game renderer",count);
-
-    regs[NV_PFIFO_CACHE1_STATUS]&=~NV_PFIFO_CACHE1_STATUS_LOW_MARK;
-    /* This establishes the original context, initialization and load cursor. */
-    pgraph_method(d,0,NV097_SET_TRANSFORM_CONSTANT_LOAD,ldl_le_p(dma+get+4));
-    nv2a_vsh_constant_words((const uint32_t *)(dma+get+12),count);
-
-    /* Retain the driver-visible completed state of the replaced operation. */
-    regs[NV_PFIFO_CACHE1_DMA_RSVD_SHADOW]=(count<<18)|NV097_SET_TRANSFORM_CONSTANT;
-    regs[NV_PFIFO_CACHE1_DMA_DATA_SHADOW]=ldl_le_p(dma+(uint32_t)end-4);
-    uint32_t state=regs[NV_PFIFO_CACHE1_DMA_STATE];
-    SET_MASK(state,NV_PFIFO_CACHE1_DMA_STATE_METHOD,(NV097_SET_TRANSFORM_CONSTANT+count*4)>>2);
-    SET_MASK(state,NV_PFIFO_CACHE1_DMA_STATE_SUBCHANNEL,0);
-    SET_MASK(state,NV_PFIFO_CACHE1_DMA_STATE_METHOD_COUNT,0);
-    SET_MASK(state,NV_PFIFO_CACHE1_DMA_STATE_METHOD_TYPE,0);
-    regs[NV_PFIFO_CACHE1_DMA_STATE]=state;
-    regs[NV_PFIFO_CACHE1_DMA_DCOUNT]=count;
-    regs[NV_PFIFO_CACHE1_STATUS]|=NV_PFIFO_CACHE1_STATUS_LOW_MARK;
-    WriteRelease((volatile LONG *)&regs[NV_PFIFO_CACHE1_DMA_GET],(LONG)end);
-    return 1;
-}
-
-/* The game resource owns the source indices; the original queue owns this
- * immutable copy. Pending publication remains at its tag until complete. */
-static
-#ifdef _MSC_VER
-__declspec(noinline)
-#else
-__attribute__((noinline))
-#endif
-int consume_native_indices(NV2AState *d,const uint8_t *dma,hwaddr extent,
-                           uint32_t get,uint32_t header)
-{
-    uint32_t *regs=d->pfifo.regs;
-    uint32_t count=(header&NV2A_NATIVE_INDEX_COUNT_MASK)>>18;
-    uint32_t put=(uint32_t)ReadAcquire((volatile LONG *)&regs[NV_PFIFO_CACHE1_DMA_PUT]);
-    hwaddr end=(hwaddr)get+(count+1)*4;
-    if ((put&3) || end>extent || end>UINT32_MAX)
-        fifo_stop(d,"native index range outside DMA data",header);
-    if (put>get && (hwaddr)put<end) return 0;
-    if (count) {
-        if (!(regs[NV_PFIFO_CACHE1_PULL0]&NV_PFIFO_CACHE1_PULL0_ACCESS)) return 0;
-        if (d->pfifo.method_consumer!=nv2a_pb_exec_method ||
-            (d->pgraph.regs[NV_PGRAPH_CTX_CACHE1]&NV_PGRAPH_CTX_SWITCH1_GRCLASS)!=NV_KELVIN_PRIMITIVE)
-            fifo_stop(d,"native indices require the active game renderer",header);
-        regs[NV_PFIFO_CACHE1_STATUS]&=~NV_PFIFO_CACHE1_STATUS_LOW_MARK;
-        pgraph_method(d,0,NV097_ARRAY_ELEMENT16,ldl_le_p(dma+get+4));
-        nv2a_pb_index_words((const uint32_t *)(dma+get+8),count-1);
-        regs[NV_PFIFO_CACHE1_DMA_DATA_SHADOW]=ldl_le_p(dma+(uint32_t)end-4);
-        regs[NV_PFIFO_CACHE1_STATUS]|=NV_PFIFO_CACHE1_STATUS_LOW_MARK;
-    }
-    regs[NV_PFIFO_CACHE1_DMA_RSVD_SHADOW]=(count<<18)|0x40000000u|NV097_ARRAY_ELEMENT16;
-    uint32_t state=regs[NV_PFIFO_CACHE1_DMA_STATE];
-    SET_MASK(state,NV_PFIFO_CACHE1_DMA_STATE_METHOD,NV097_ARRAY_ELEMENT16>>2);
-    SET_MASK(state,NV_PFIFO_CACHE1_DMA_STATE_SUBCHANNEL,0);
-    SET_MASK(state,NV_PFIFO_CACHE1_DMA_STATE_METHOD_COUNT,0);
-    SET_MASK(state,NV_PFIFO_CACHE1_DMA_STATE_METHOD_TYPE,1);
-    regs[NV_PFIFO_CACHE1_DMA_STATE]=state;
-    regs[NV_PFIFO_CACHE1_DMA_DCOUNT]=count;
-    WriteRelease((volatile LONG *)&regs[NV_PFIFO_CACHE1_DMA_GET],(LONG)end);
-    return 1;
-}
-
 /* Original PFIFO header/control-flow and persistent partial-method state.
- * GET advances after each legacy word or fully consumed native range; no
- * inferred ring bounds or GET=PUT acknowledgement. Disabled and suspended
- * states retain pending work. */
+ * GET advances after each consumed word; no inferred ring bounds or GET=PUT
+ * acknowledgement. Device-disabled and suspended states retain pending work. */
 void nv2a_fifo_run(NV2AState *d)
 {
     uint32_t *regs = d->pfifo.regs;
@@ -386,14 +286,6 @@ void nv2a_fifo_run(NV2AState *d)
             } while (true);
             continue;
         } else {
-            if (word == NV2A_NATIVE_CONSTANT_RANGE) {
-                if (!consume_native_constants(d,dma,dma_extent,get)) return;
-                continue;
-            }
-            if ((word&~NV2A_NATIVE_INDEX_COUNT_MASK)==NV2A_NATIVE_INDEX_RANGE) {
-                if (!consume_native_indices(d,dma,dma_extent,get,word)) return;
-                continue;
-            }
             regs[NV_PFIFO_CACHE1_DMA_RSVD_SHADOW] = word;
             uint32_t *subroutine = &regs[NV_PFIFO_CACHE1_DMA_SUBROUTINE];
             if ((word & 0xE0000003u) == 0x20000000u) {

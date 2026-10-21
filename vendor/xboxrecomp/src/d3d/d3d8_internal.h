@@ -22,8 +22,6 @@ IDirect3DDevice8 *d3d8_GetDevice(void);
 
 #include <d3d11.h>
 #include <dxgi.h>
-#include "nv2a_vulkan.h"
-int d3d8_IsNativeVulkan(void);
 
 /* ================================================================
  * D3D11 device accessors (implemented in d3d8_device.c)
@@ -38,21 +36,14 @@ HWND                 d3d8_GetHWND(void);
 UINT                 d3d8_GetBackbufferWidth(void);
 UINT                 d3d8_GetBackbufferHeight(void);
 HRESULT d3d8_InitializeOffscreenDevice(UINT width, UINT height);
-BOOL d3d8_window_needs_resize(UINT width,UINT height);
-HRESULT d3d8_window_draw(HWND window,IDirect3DSurface8 *image,const RECT *bounds,UINT width,UINT height);
-HRESULT d3d8_window_present(void);
-void d3d8_window_release(void);
 HRESULT d3d8_backend_create_device(ID3D11Device **device,ID3D11DeviceContext **context);
 void d3d8_DisplayConfigure(unsigned scale,float aspect);
-void d3d8_DisplayVSyncConfigure(int enabled);
-int d3d8_DisplayVSync(void);
 unsigned d3d8_RenderScale(void);
 float d3d8_GameAspect(void);
 const char *d3d8_ActiveBackend(void);
 void d3d8_LogVideoMemory(void);
 void d3d8_video_memory_shutdown(void);
 HRESULT d3d8_shaders_bind_nv2a_outputs(float width, float height, int raw_position);
-const char *d3d8_shaders_nv2a_output_source(void);
 
 /* Presentation-only gamma. End restores the saved backbuffer even if Present fails. */
 void d3d8_gamma_set(const D3DGAMMARAMP *ramp);
@@ -164,7 +155,6 @@ typedef struct D3D8Surface {
     UINT                    palette_index; /* stage palette baked into it */
 } D3D8Surface;
 HRESULT d3d8_surface_resample(IDirect3DSurface8 *input,IDirect3DSurface8 *output);
-HRESULT d3d8_surface_resample_rect(IDirect3DSurface8 *input,IDirect3DSurface8 *output,const RECT *bounds);
 /* Split a full read-only lock using the surface's existing staging resource.
  * The caller keeps the surface alive and excludes writes between these calls. */
 HRESULT d3d8_surface_queue_readback(IDirect3DSurface8 *surface);
@@ -239,8 +229,6 @@ BOOL d3d8_format_is_depth(D3DFORMAT fmt);
 
 /* Upload one range in the original continuous vertex/index stream. */
 UINT d3d8_upload_vertices(const void *data, UINT size, ID3D11Buffer **buffer);
-uint64_t d3d8_vertex_upload_generation(void);
-BOOL d3d8_reuse_vertex_upload(uint64_t generation,UINT offset,UINT size,ID3D11Buffer **buffer);
 
 /* bpp of the data actually uploaded to D3D11 (post-conversion). */
 UINT d3d8_upload_bpp(D3DFORMAT fmt);

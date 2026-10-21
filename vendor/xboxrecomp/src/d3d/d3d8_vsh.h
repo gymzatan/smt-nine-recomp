@@ -47,7 +47,6 @@
 #define XBOXRECOMP_D3D8_VSH_H
 
 #include <d3d11.h>
-#include "nv2a_vulkan.h"
 #include <stdint.h>
 #include <windows.h>
 
@@ -278,9 +277,6 @@ typedef struct NV2AVSConstants {
  * Must be called after D3D11 device creation.
  */
 HRESULT d3d8_vsh_init(void);
-const char *d3d8_vsh_geometry_source(void);
-char *d3d8_vsh_fixed_source(void);
-NvkShader *d3d8_vsh_vulkan_program(const DWORD *microcode,int length,uint32_t *inputs);
 
 typedef struct NV2ANativeGeometry {
     float screen[4], bounds[4], tex_scale[4][4], fog[4];

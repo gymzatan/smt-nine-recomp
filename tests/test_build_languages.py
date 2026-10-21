@@ -39,11 +39,7 @@ def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese,dir
             assert chinese
             for n in (27,28,33,35,60):write(f'data/chinese/Media/Videos/video_{n}.xmv')
         elif command[0]=='rustup':write('build_dsp_jit/x86_64-pc-windows-msvc/release/dsp56300_emu_ffi.lib')
-        elif '--build' in command:
-            write('smt9_recomp.exe');write('Config.exe');write('Updater.exe')
-            if 'English-test' in text:
-                assert calls[-2]=='import-generation'
-                write('runtime/languages/packages/English-test/bin/smt9_recomp.exe')
+        elif '--build' in command:write('smt9_recomp.exe');write('Config.exe');write('Updater.exe')
     monkeypatch.setattr(build,'run',run)
     def extract(*args):
         calls.append('retail');write('data/japanese/default.xbe')
@@ -83,21 +79,7 @@ def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese,dir
     assert calls.count('retail')==calls.count('generation')==calls.count('images')==1
     protected={p:p.read_bytes() for p in (tmp_path/'data').rglob('*') if p.is_file()}
     previous_calls=len(calls)
-    package=tmp_path/'runtime/languages/packages/English-test'
-    write('runtime/languages/packages/English-test/build/CMakeCache.txt')
-    write('runtime/languages/packages/English-test/native_game.xbe')
-    (package/'receipt.json').write_text(json.dumps({'name':'English','changed_functions':['old']}))
-    (tmp_path/'runtime/languages/English.ini').write_text('[Language]\nState=Ready\nPackage=English-test\n',encoding='utf-16')
-    def refresh(imported):
-        assert imported==package
-        assert calls.count('generation')==2
-        calls.append('import-generation')
-        return {'changed_functions':['current'],'new_helpers':[]}
-    monkeypatch.setitem(sys.modules,'import_language',SimpleNamespace(refresh_generated=refresh))
     build.build(None,2,update=True)
-    updated=json.loads((package/'receipt.json').read_text())
-    assert updated['changed_functions']==['current'] and updated['name']=='English'
-    assert updated['executable_sha256']==build.digest(package/'bin/smt9_recomp.exe')
     assert calls.count('retail')==1
     assert calls.count('images')==(2 if chinese else 1)
     assert calls.count('generation')==2
@@ -116,38 +98,6 @@ def test_build_language_dependencies_and_resume(tmp_path,monkeypatch,chinese,dir
     progress_path.write_text(json.dumps(progress))
     with pytest.raises(ValueError,match='did not record its language selection'):
         build.build(iso,2,resume=True,with_chinese=chinese)
-
-
-
-
-@pytest.mark.parametrize('fail',[False,True])
-def test_import_refresh_uses_generator_and_preserves_failed_sources(tmp_path,monkeypatch,fail):
-    sys.path.insert(0,str(ROOT))
-    spec=importlib.util.spec_from_file_location('nine_import_refresh',ROOT/'import_language.py')
-    importer=importlib.util.module_from_spec(spec);spec.loader.exec_module(importer)
-    package=tmp_path/'English-test';generated=package/'generated';generated.mkdir(parents=True)
-    for name in ('recomp_0087.c','recomp_imported_helpers.c','notes.txt'):
-        (generated/name).write_text('previous '+name)
-    before={path.name:path.read_bytes() for path in generated.iterdir()}
-    def generate(original,destination):
-        assert original==package and destination.parent.parent==package
-        destination.mkdir()
-        (destination/'recomp_0087.c').write_text('current native producer')
-        (destination/'recomp_funcs.h').write_text('current declarations')
-        if fail: raise ValueError('unsupported imported code')
-        return {'changed_functions':['original identity'],'new_helpers':[]}
-    monkeypatch.setattr(importer,'generate',generate)
-    if fail:
-        with pytest.raises(ValueError,match='unsupported imported code'):
-            importer.refresh_generated(package)
-        assert {path.name:path.read_bytes() for path in generated.iterdir()}==before
-    else:
-        assert importer.refresh_generated(package)['changed_functions']==['original identity']
-        assert (generated/'recomp_0087.c').read_text()=='current native producer'
-        assert (generated/'recomp_funcs.h').read_text()=='current declarations'
-        assert not (generated/'recomp_imported_helpers.c').exists()
-        assert (generated/'notes.txt').read_bytes()==before['notes.txt']
-    assert list(package.glob('source-update-*'))==[]
 
 
 @pytest.mark.parametrize('chinese',[False,True])
@@ -176,13 +126,7 @@ int main(void) {
     _set_error_mode(_OUT_TO_STDERR);_set_abort_behavior(0,_WRITE_ABORT_MSG|_CALL_REPORTFAULT);
     assert(nine_paths_init());
     NineConfig config;wchar_t error[256];assert(nine_config_read(&config,error,256));
-    assert(config.multithreaded_graphics==1 && config.vsync==0);
-    config.vsync=1;config.refresh_hz=60;assert(nine_config_write(&config,error,256));
-    assert(nine_config_read(&config,error,256) && config.vsync==1 && config.refresh_hz==60);
-    config.vsync=2;assert(!nine_config_write(&config,error,256));
-    assert(nine_config_read(&config,error,256) && config.vsync==1);
-    config.vsync=0;config.refresh_hz=30;assert(nine_config_write(&config,error,256));
-    assert(nine_config_read(&config,error,256) && !config.vsync && config.refresh_hz==30);
+    assert(config.multithreaded_graphics==1);
     config.multithreaded_graphics=0;assert(nine_config_write(&config,error,256));
     assert(nine_config_read(&config,error,256) && config.multithreaded_graphics==0);
     config.multithreaded_graphics=2;assert(!nine_config_write(&config,error,256));

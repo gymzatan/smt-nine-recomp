@@ -7662,14 +7662,8 @@ static void bridge_NtProtectVirtualMemory(void)
     uint32_t base_va = base_ptr ? BRIDGE_MEM32(base_ptr) : 0;
     uint32_t size    = size_ptr ? BRIDGE_MEM32(size_ptr) : 0;
     DWORD old = 0;
-#if defined(_WIN32)
-    int gpu_write=nv2a_pb_host_write_begin(XBOX_TO_NATIVE(base_va),size);
-#endif
-    BOOL protected=VirtualProtect(XBOX_TO_NATIVE(base_va), size, (DWORD)new_prot, &old);
-#if defined(_WIN32)
-    nv2a_pb_host_write_end(gpu_write);
-#endif
-    if (protected) {
+
+    if (VirtualProtect(XBOX_TO_NATIVE(base_va), size, (DWORD)new_prot, &old)) {
         if (old_ptr)
             BRIDGE_MEM32(old_ptr) = (uint32_t)old;
         g_eax = 0;  /* STATUS_SUCCESS */

@@ -3,9 +3,7 @@
 #   POSIX  -> backed by OpenGL 3.3 core via SDL2 + libepoxy (d3d8_gl.c)
 
 if(WIN32)
-    enable_language(CXX)
     add_library(xbox_d3d8 STATIC
-        nv2a_vulkan.cpp
         d3d8_device.c
         d3d8_backend.c
         d3d8_surface_scale.c
@@ -17,10 +15,6 @@ if(WIN32)
         d3d8_vsh.c
     )
     target_link_libraries(xbox_d3d8 PUBLIC platform d3d11 d3d12 dxgi dxguid d3dcompiler winmm)
-    target_compile_features(xbox_d3d8 PRIVATE cxx_std_17)
-    if(MSVC)
-        target_compile_options(xbox_d3d8 PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
-    endif()
 
     # Offline smoke test for the pure format layer (no D3D11 device needed).
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../../tests/d3d8_smoke

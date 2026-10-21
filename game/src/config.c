@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <wchar.h>
 
-typedef enum ConfigError {CE_UI,CE_REFRESH,CE_SCALE,CE_SIZE,CE_ASPECT,CE_BACKEND,CE_NUMBERS,CE_GAME,CE_PATH,CE_WRITE,CE_SAVE,CE_FIXED,CE_CONTROLS,CE_THREADING,CE_VSYNC} ConfigError;
+typedef enum ConfigError {CE_UI,CE_REFRESH,CE_SCALE,CE_SIZE,CE_ASPECT,CE_BACKEND,CE_NUMBERS,CE_GAME,CE_PATH,CE_WRITE,CE_SAVE,CE_FIXED,CE_CONTROLS,CE_THREADING} ConfigError;
 static int config_error(const NineConfig *c,wchar_t *error,size_t count,ConfigError code)
 {
     static const wchar_t *const messages[][3]={
@@ -21,8 +21,7 @@ static int config_error(const NineConfig *c,wchar_t *error,size_t count,ConfigEr
         {L"无法保存配置文件。",L"設定ファイルを保存できません。",L"Could not save the settings file."},
         {L"FixedAspectRatio 必须为 0 或 1。",L"FixedAspectRatio は 0 または 1 で指定してください。",L"FixedAspectRatio must be 0 or 1."},
         {L"按键映射无效。F1～F5、F8、F9 为保留快捷键。",L"入力割り当てが無効です。F1～F5、F8、F9 は予約されています。",L"Invalid control binding. F1–F5, F8 and F9 are reserved hotkeys."},
-        {L"MultithreadedGraphics 必须为 0 或 1。",L"MultithreadedGraphics は 0 または 1 で指定してください。",L"MultithreadedGraphics must be 0 or 1."},
-        {L"VSync 必须为 0 或 1。",L"VSync は 0 または 1 で指定してください。",L"VSync must be 0 or 1."}
+        {L"MultithreadedGraphics 必须为 0 或 1。",L"MultithreadedGraphics は 0 または 1 で指定してください。",L"MultithreadedGraphics must be 0 or 1."}
     };
     unsigned language=!wcscmp(c->interface_language,L"Chinese")?0:!wcscmp(c->interface_language,L"Japanese")?1:2;
     if(error && count)swprintf_s(error,count,L"%s",messages[code][language]);
@@ -48,7 +47,6 @@ int nine_config_validate(const NineConfig *c,wchar_t *error,size_t count)
         return config_error(c,error,count,CE_BACKEND);
     if(!nine_language_id_valid(c->language))return config_error(c,error,count,CE_GAME);
     if(c->multithreaded_graphics>1)return config_error(c,error,count,CE_THREADING);
-    if(c->vsync>1)return config_error(c,error,count,CE_VSYNC);
     if(c->fixed_aspect>1)return config_error(c,error,count,CE_FIXED);
     if(!xbox_bindings_valid(&c->controls))return config_error(c,error,count,CE_CONTROLS);
     return 1;
@@ -67,7 +65,7 @@ static int read_number(const wchar_t *key,unsigned initial,unsigned *value) {
 }
 int nine_config_read(NineConfig *c,wchar_t *error,size_t count)
 {
-    *c=(NineConfig){1,960,720,4,3,L"Auto",SMT9_DEFAULT_GAME_LANGUAGE_W,30,SMT9_DEFAULT_UI_LANGUAGE_W,0,1,0};
+    *c=(NineConfig){1,960,720,4,3,L"Auto",SMT9_DEFAULT_GAME_LANGUAGE_W,30,SMT9_DEFAULT_UI_LANGUAGE_W,0,1};
     c->controls=(XboxInputBindings)XBOX_DEFAULT_BINDINGS;
     if(GetPrivateProfileStringW(L"Interface",L"Language",SMT9_DEFAULT_UI_LANGUAGE_W,c->interface_language,16,SMT9_CONFIG_PATH_W)>=15)
         return config_error(c,error,count,CE_UI);
@@ -78,8 +76,7 @@ int nine_config_read(NineConfig *c,wchar_t *error,size_t count)
        !read_number(L"AspectWidth",4,&c->aspect_width) || !read_number(L"AspectHeight",3,&c->aspect_height) ||
        !read_number(L"RefreshHz",30,&c->refresh_hz) ||
        !read_number(L"FixedAspectRatio",0,&c->fixed_aspect) ||
-       !read_number(L"MultithreadedGraphics",1,&c->multithreaded_graphics) ||
-       !read_number(L"VSync",0,&c->vsync))
+       !read_number(L"MultithreadedGraphics",1,&c->multithreaded_graphics))
         return config_error(c,error,count,CE_NUMBERS);
     wchar_t language_id[NINE_LANGUAGE_ID+1];
     if(GetPrivateProfileStringW(L"Display",L"Language",SMT9_DEFAULT_GAME_LANGUAGE_W,language_id,NINE_LANGUAGE_ID+1,SMT9_CONFIG_PATH_W)>=NINE_LANGUAGE_ID)
@@ -97,8 +94,8 @@ int nine_config_write(const NineConfig *c,wchar_t *error,size_t count)
     wchar_t temporary[MAX_PATH],content[4096];
     if(swprintf_s(temporary,MAX_PATH,L"%s.tmp",SMT9_CONFIG_PATH_W)<0)
         return config_error(c,error,count,CE_PATH);
-    int length=swprintf_s(content,4096,L"[Interface]\r\nLanguage=%s\r\n\r\n[Display]\r\nBackend=%s\r\nLanguage=%s\r\nRenderScale=%u\r\nWindowWidth=%u\r\nWindowHeight=%u\r\nAspectWidth=%u\r\nAspectHeight=%u\r\nRefreshHz=%u\r\nFixedAspectRatio=%u\r\nMultithreadedGraphics=%u\r\nVSync=%u\r\n",
-        c->interface_language,c->backend,c->language,c->render_scale,c->window_width,c->window_height,c->aspect_width,c->aspect_height,c->refresh_hz,c->fixed_aspect,c->multithreaded_graphics,c->vsync);
+    int length=swprintf_s(content,4096,L"[Interface]\r\nLanguage=%s\r\n\r\n[Display]\r\nBackend=%s\r\nLanguage=%s\r\nRenderScale=%u\r\nWindowWidth=%u\r\nWindowHeight=%u\r\nAspectWidth=%u\r\nAspectHeight=%u\r\nRefreshHz=%u\r\nFixedAspectRatio=%u\r\nMultithreadedGraphics=%u\r\n",
+        c->interface_language,c->backend,c->language,c->render_scale,c->window_width,c->window_height,c->aspect_width,c->aspect_height,c->refresh_hz,c->fixed_aspect,c->multithreaded_graphics);
     for(unsigned section=0;section<2;section++) {
         int added=swprintf_s(content+length,4096-length,L"\r\n[%s]\r\n",section?L"Gamepad":L"Keyboard");
         if(added<0)return config_error(c,error,count,CE_WRITE);length+=added;

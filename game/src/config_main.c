@@ -72,7 +72,7 @@ static void select_window_size(HWND window)
 static void apply_ui(HWND window)
 {
     const struct {int id;UiText text;} labels[]={
-        {135,UI_VSYNC},{134,UI_GRAPHICS},{121,UI_BACKEND},{122,UI_SCALE},{125,UI_ASPECT},{126,UI_GAME},
+        {134,UI_GRAPHICS},{121,UI_BACKEND},{122,UI_SCALE},{125,UI_ASPECT},{126,UI_GAME},
         {127,UI_REFRESH},{128,UI_SIZE},{129,UI_HINT},{108,UI_IMPORT},{133,UI_SIZE_CUSTOM},{132,UI_FIXED_ASPECT},
         {111,UI_CONTROLS},{IDOK,UI_SAVE},{IDCANCEL,UI_CANCEL}};
     SetWindowTextW(window,tr(UI_TITLE));
@@ -123,7 +123,6 @@ static INT_PTR CALLBACK config_dialog(HWND window,UINT message,WPARAM wparam,LPA
         }
         combo(window,112,tr(UI_SIZE_CUSTOM));SendDlgItemMessageW(window,112,CB_SETCURSEL,selected_size,0);select_window_size(window);
         CheckDlgButton(window,132,settings.fixed_aspect?BST_CHECKED:BST_UNCHECKED);
-        CheckDlgButton(window,135,settings.vsync?BST_CHECKED:BST_UNCHECKED);
         combo(window,114,tr(UI_MULTI));combo(window,114,tr(UI_SINGLE));
         SendDlgItemMessageW(window,114,CB_SETCURSEL,!settings.multithreaded_graphics,0);
         apply_ui(window);
@@ -180,7 +179,6 @@ static INT_PTR CALLBACK config_dialog(HWND window,UINT message,WPARAM wparam,LPA
             chosen.multithreaded_graphics=graphics==0;
             chosen.refresh_hz=refresh?60:30;
             chosen.fixed_aspect=IsDlgButtonChecked(window,132)==BST_CHECKED;
-            chosen.vsync=IsDlgButtonChecked(window,135)==BST_CHECKED;
             wcscpy_s(chosen.interface_language,16,ui_ids[ui_language]);
             wcscpy_s(chosen.language,NINE_LANGUAGE_ID,languages[language].id);
             wcscpy_s(chosen.backend,16,backends[backend]);chosen.render_scale=(unsigned)scale+1;

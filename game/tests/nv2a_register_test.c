@@ -1074,38 +1074,6 @@ static int check_register_masks(void)
     return 0;
 }
 
-static void check_direct_guest_mmio(NV2AState *gpu)
-{
-    uint32_t old_mask=(uint32_t)nv2a_mmio_read(gpu,0x140,4);
-    uint32_t old_start=(uint32_t)nv2a_mmio_read(gpu,0x600800,4);
-    assert(nv2a_guest_read32(0xFD000000u)==0x02A000A3u);
-    nv2a_guest_write32(0xFD000140u,1);
-    assert(nv2a_mmio_read(gpu,0x140,4)==1 && nv2a_guest_read32(0xFD000140u)==1);
-    nv2a_guest_write32(0xFD100410u,0x10000);
-    assert(nv2a_guest_read32(0xFD100410u)==0);
-    nv2a_guest_write32(0xFD600800u,0x80000080u);
-    const uint8_t load[]={0x8B,0x01},store[]={0x89,0x01};
-    CONTEXT ctx={0};ctx.Rip=(DWORD64)(uintptr_t)load;ctx.EFlags=0x246;
-    assert(xbox_mmio_decode(&ctx,0x600800,0,gpu,decoder_nv_read,decoder_nv_write));
-    assert(ctx.Rax==0x80 && ctx.Rax==nv2a_guest_read32(0xFD600800u) && ctx.EFlags==0x246);
-    ctx.Rip=(DWORD64)(uintptr_t)store;ctx.Rax=0x90;
-    assert(xbox_mmio_decode(&ctx,0x600800,1,gpu,decoder_nv_read,decoder_nv_write));
-    assert(nv2a_guest_read32(0xFD600800u)==0x90 && ctx.EFlags==0x246);
-    nv2a_guest_write32(0xFD000140u,old_mask);nv2a_guest_write32(0xFD600800u,old_start);
-    uint32_t words[4]={0x01234567,0x89ABCDEF,0x10203040,0x50607080};
-    ptrdiff_t original_offset=g_xbox_mem_offset;
-    g_xbox_mem_offset=(ptrdiff_t)words-0x2000;
-    assert(nv2a_guest_read32(0x2004)==words[1]);
-    nv2a_guest_write32(0x2008,0xDEADBEEF);assert(words[2]==0xDEADBEEF);
-    uint32_t unaligned;memcpy(&unaligned,(uint8_t *)words+1,4);
-    assert(nv2a_guest_read32(0x2001)==unaligned);
-    uint8_t expected[sizeof words];memcpy(expected,words,sizeof words);
-    uint32_t value=0xA1B2C3D4;memcpy(expected+3,&value,4);
-    nv2a_guest_write32(0x2003,value);assert(!memcmp(words,expected,sizeof words));
-    g_xbox_mem_offset=original_offset;
-    fprintf(stderr,"[DIRECT MMIO] original decoder/handler equivalence, masked writes, flush and aligned/unaligned RAM passed\n");
-}
-
 static HANDLE s_worker_entered,s_worker_continue;
 static DWORD s_worker_consumer_thread;
 static int consume_worker_packet(uint32_t subchannel,uint32_t method,uint32_t parameter,uint8_t *output)
@@ -1140,8 +1108,6 @@ static int check_fifo_worker(NV2AState *gpu,uint8_t *ram,uint8_t *ramin)
     assert(s_worker_consumer_thread!=GetCurrentThreadId());
     assert(r[NV_PFIFO_CACHE1_DMA_GET]==4 && s_packet_seen==0);
     assert(nv2a_mmio_read(gpu,0x800044,4)==4);
-    assert(nv2a_guest_read32(0xFD800044u)==4);
-    nv2a_guest_write32(0xFD800040u,36);
     nv2a_mmio_write(gpu,0x100410,0x10000,4);
     assert(nv2a_mmio_read(gpu,0x100410,4)==0);
     nv2a_mmio_write(gpu,0x800040,36,4); /* PUT must not wait for the blocked consumer. */
@@ -1167,154 +1133,9 @@ static int check_fifo_worker(NV2AState *gpu,uint8_t *ram,uint8_t *ramin)
     return 0;
 }
 
-
-static void finish_window_test_gpu(void)
-{
-    ID3D11Device *device=d3d8_GetD3D11Device();ID3D11DeviceContext *context=d3d8_GetD3D11Context();
-    D3D11_QUERY_DESC desc={D3D11_QUERY_EVENT,0};ID3D11Query *query=NULL;
-    assert(SUCCEEDED(ID3D11Device_CreateQuery(device,&desc,&query)));
-    ID3D11DeviceContext_End(context,(ID3D11Asynchronous *)query);
-    HRESULT hr;do{hr=ID3D11DeviceContext_GetData(context,(ID3D11Asynchronous *)query,NULL,0,0);if(hr==S_FALSE)SwitchToThread();}while(hr==S_FALSE);
-    assert(SUCCEEDED(hr));ID3D11Query_Release(query);
-}
-static int check_native_window_render(void)
-{
-    assert(SUCCEEDED(d3d8_InitializeOffscreenDevice(64,48)));
-    ID3D11Device *device=d3d8_GetD3D11Device();ID3D11DeviceContext *context=d3d8_GetD3D11Context();
-    HWND window=CreateWindowExW(0,L"STATIC",L"NINE native surface probe",WS_OVERLAPPEDWINDOW,
-        0,0,160,128,NULL,NULL,GetModuleHandleW(NULL),NULL);assert(window);
-    IDirect3DSurface8 *input=NULL;IDirect3DDevice8 *compat=d3d8_GetDevice();
-    assert(SUCCEEDED(compat->lpVtbl->CreateRenderTarget(compat,64,48,D3DFMT_LIN_A8R8G8B8,D3DMULTISAMPLE_NONE,TRUE,&input)));
-    ID3D11RenderTargetView *original_default=d3d8_GetDefaultRTV();
-    uint32_t pixels[64*48];
-    for(unsigned frame=0;frame<12;++frame) {
-        UINT width=frame==3?72:frame<4?96:frame<8?40:128,height=frame==3?56:frame<4?64:frame<8?32:96;
-        RECT bounds={4,4,(LONG)width-4,(LONG)height-4};
-        uint32_t color=(frame&1)?0xFF38A6D1u:0xFFD18237u;
-        for(unsigned i=0;i<64*48;++i)pixels[i]=frame==3?0xff000000u|(((i%64)*3)<<16)|(((i/64)*4)<<8)|frame:color;
-        ID3D11DeviceContext_UpdateSubresource(context,(ID3D11Resource *)((D3D8Surface *)input)->d3d11_texture,0,NULL,pixels,64*4,0);
-        if(d3d8_window_needs_resize(width,height))finish_window_test_gpu();
-        assert(SUCCEEDED(d3d8_window_draw(window,input,&bounds,width,height)));
-        assert(d3d8_GetDefaultRTV()==original_default);
-        ID3D11Texture2D *buffer=NULL,*staging=NULL;
-        assert(SUCCEEDED(IDXGISwapChain_GetBuffer(d3d8_GetSwapChain(),0,&IID_ID3D11Texture2D,(void **)&buffer)));
-        D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(buffer,&desc);
-        assert(desc.Width==width && desc.Height==height);
-        desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.MiscFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
-        assert(SUCCEEDED(ID3D11Device_CreateTexture2D(device,&desc,NULL,&staging)));
-        ID3D11DeviceContext_CopyResource(context,(ID3D11Resource *)staging,(ID3D11Resource *)buffer);
-        D3D11_MAPPED_SUBRESOURCE mapped;
-        assert(SUCCEEDED(ID3D11DeviceContext_Map(context,(ID3D11Resource *)staging,0,D3D11_MAP_READ,0,&mapped)));
-        for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x) {
-            uint32_t got=((const uint32_t *)((const uint8_t *)mapped.pData+(size_t)y*mapped.RowPitch))[x];
-            uint32_t expected=x>=4 && x<width-4 && y>=4 && y<height-4?color:0xFF000000u;
-            if(frame==3 && x>=4 && x<width-4 && y>=4 && y<height-4)
-                expected=0xff000000u|(((x-4)*3)<<16)|(((y-4)*4)<<8)|frame;
-            assert(got==expected);
-        }
-        ID3D11DeviceContext_Unmap(context,(ID3D11Resource *)staging,0);
-        ID3D11Texture2D_Release(staging);ID3D11Texture2D_Release(buffer);
-        d3d8_DisplayVSyncConfigure(frame%2);
-        assert(d3d8_DisplayVSync()==(int)(frame%2));
-        assert(SUCCEEDED(d3d8_window_present()));
-    }
-    finish_window_test_gpu();d3d8_window_release();
-    input->lpVtbl->Release(input);DestroyWindow(window);
-    fprintf(stderr,"[NATIVE WINDOW] %s: 12 actual backbuffers, alternating colors, full pixel rectangles/black bars, shrink/grow, present and device-state preservation passed\n",d3d8_ActiveBackend());
-    return 0;
-}
-
-
-extern int nv2a_pb_exec_method(uint32_t,uint32_t,uint32_t,uint8_t *);
-typedef struct NativeConstantResult {
-    uint32_t regs[sizeof(((NV2AState *)0)->pfifo.regs)/4];
-    struct PGRAPHState pgraph;
-    uint32_t constants[NV2A_VSH_CONSTANTS][4];
-} NativeConstantResult;
-static void capture_native_constants(NV2AState *gpu,NativeConstantResult *out)
-{
-    memcpy(out->regs,gpu->pfifo.regs,sizeof out->regs);
-    memcpy(&out->pgraph,&gpu->pgraph,sizeof out->pgraph);
-    memcpy(out->constants,nv2a_vsh_constant(0),sizeof out->constants);
-}
-static int check_native_constants(NV2AState *gpu,uint8_t *ram,uint8_t *ramin,const char *mode)
-{
-    uint32_t *r=gpu->pfifo.regs,*commands=(uint32_t *)ram,*object=(uint32_t *)(ramin+0x100);
-    object[0]=2;object[1]=4095;object[2]=0;
-    ((uint32_t *)(ramin+0x200))[0]=NV_KELVIN_PRIMITIVE;
-    pgraph_method(gpu,0,0,0x200);gpu->pfifo.method_consumer=nv2a_pb_exec_method;
-    r[NV_PFIFO_MODE]=1;r[NV_PFIFO_CACHE1_PUSH1]=0x100;r[NV_PFIFO_CACHE1_PUSH0]=1;
-    r[NV_PFIFO_CACHE1_DMA_PUSH]=1;r[NV_PFIFO_CACHE1_DMA_INSTANCE]=0x10;
-    r[NV_PFIFO_CACHE1_PULL0]=1;gpu->pgraph.regs[NV_PGRAPH_FIFO]=1;
-    if(strcmp(mode,"--native-constants")) {
-        commands[0]=NV2A_NATIVE_CONSTANT_RANGE;commands[1]=0;commands[2]=4;
-        r[NV_PFIFO_CACHE1_DMA_GET]=0;r[NV_PFIFO_CACHE1_DMA_PUT]=28;
-        if(!strcmp(mode,"--reject-native-constant-count"))commands[2]=3;
-        else if(!strcmp(mode,"--reject-native-constant-consumer"))gpu->pfifo.method_consumer=NULL;
-        else if(!strcmp(mode,"--reject-native-constant-class"))gpu->pgraph.regs[NV_PGRAPH_CTX_CACHE1]=NV_IMAGE_BLIT;
-        else if(!strcmp(mode,"--reject-native-constant-extent"))object[1]=15;
-        else if(!strcmp(mode,"--reject-native-constant-put"))r[NV_PFIFO_CACHE1_DMA_PUT]=27;
-        else assert(0);
-        nv2a_fifo_run(gpu);assert(!"invalid native operation accepted");return 1;
-    }
-    NativeConstantResult *initial=calloc(1,sizeof *initial),*expected=calloc(2,sizeof *expected);
-    NativeConstantResult *actual=calloc(1,sizeof *actual),*pending=calloc(1,sizeof *pending);
-    assert(initial&&expected&&actual&&pending);capture_native_constants(gpu,initial);
-    const uint32_t loads[]={0,1,188,190,191,192,0xFFFFFFFEu,0xFFFFFFFFu};
-    const uint32_t bits[]={0,0x80000000u,0x7FC12345u,0x7F812345u,0x7F800000u,0xFF800000u,0xDEADBEEFu};
-    unsigned trials=0,partial=0;
-    for(unsigned load=0;load<8;load++)for(unsigned kind=0;kind<2;kind++)for(unsigned wrap=0;wrap<2;wrap++) {
-        uint32_t count=kind?16:4,get=wrap?512:0,end=get+(3+count)*4,put=wrap?8:end;
-        for(unsigned pass=0;pass<2;pass++) {
-            memcpy(r,initial->regs,sizeof initial->regs);memcpy(&gpu->pgraph,&initial->pgraph,sizeof initial->pgraph);
-            for(unsigned row=0;row<NV2A_VSH_CONSTANTS;row++) {
-                uint32_t raw[4]={row,0x80000000u|row,0x7F800001u|row,0x3F000000u|row};
-                nv2a_vsh_set_constant(row,(const float *)raw);
-            }
-            nv2a_vsh_set_constant_load(17);nv2a_vsh_constant_word(0x7FA98765);
-            uint32_t *packet=(uint32_t *)(ram+get);
-            packet[0]=pass?NV2A_NATIVE_CONSTANT_RANGE:0x41EA4;
-            packet[1]=loads[load];packet[2]=pass?count:(count<<18)|NV097_SET_TRANSFORM_CONSTANT;
-            for(unsigned i=0;i<count;i++)packet[3+i]=bits[i%7]^((i/7)<<4);
-            if(wrap) {commands[end/4]=1;commands[0]=0x40100;commands[1]=0;}
-            r[NV_PFIFO_CACHE1_DMA_STATE]=0;r[NV_PFIFO_CACHE1_DMA_GET]=get;r[NV_PFIFO_CACHE1_DMA_PUT]=put;
-            if(pass) {
-                capture_native_constants(gpu,pending);
-                for(unsigned cut=1;cut<count+3;cut++) {
-                    r[NV_PFIFO_CACHE1_DMA_PUT]=get+cut*4;nv2a_fifo_run(gpu);
-                    capture_native_constants(gpu,actual);pending->regs[NV_PFIFO_CACHE1_DMA_PUT]=get+cut*4;
-                    assert(!memcmp(actual,pending,sizeof *actual));++partial;
-                }
-                r[NV_PFIFO_CACHE1_DMA_PUT]=put;
-                for(unsigned stop=0;stop<3;stop++) {
-                    if(stop==0)r[NV_PFIFO_CACHE1_PULL0]=0;
-                    if(stop==1)gpu->pgraph.waiting_for_nop=true;
-                    if(stop==2)gpu->irq_in_service=true;
-                    nv2a_fifo_run(gpu);assert(r[NV_PFIFO_CACHE1_DMA_GET]==get);
-                    r[NV_PFIFO_CACHE1_PULL0]=1;gpu->pgraph.waiting_for_nop=false;gpu->irq_in_service=false;
-                }
-            }
-            nv2a_fifo_run(gpu);assert(r[NV_PFIFO_CACHE1_DMA_GET]==put);
-            for(unsigned part=0;part<2;part++) {
-                if(part)for(unsigned i=0;i<5;i++)nv2a_vsh_constant_word(0x7FA54321u+i);
-                capture_native_constants(gpu,actual);
-                if(!pass)memcpy(expected+part,actual,sizeof *actual);
-                else assert(!memcmp(expected+part,actual,sizeof *actual));
-            }
-        }
-        ++trials;
-    }
-    free(initial);free(expected);free(actual);free(pending);
-    fprintf(stderr,"[NATIVE CONSTANTS] %u complete legacy/native states, %u partial publications, mixed jump/legacy stream, disabled/suspended work and subsequent scalar cursor passed\n",trials,partial);
-    return 0;
-}
-
 int main(int argc, char **argv)
 {
     check_register_masks();
-    if(argc==3 && !strcmp(argv[1],"--direct-vulkan")){extern int check_direct_vulkan(const char *);return check_direct_vulkan(argv[2]);}
-    if(argc==2 && !strcmp(argv[1],"--native-window-render"))return check_native_window_render();
-
     if(argc==2 && !strcmp(argv[1],"--register-masks"))return 0;
     if (argc == 2 && !strcmp(argv[1], "--point-geometry"))
         return check_point_geometry(0);
@@ -1327,12 +1148,9 @@ int main(int argc, char **argv)
     uint8_t ram[4096] = {0}, ramin[4096] = {0};
     NV2AState *gpu = nv2a_init_standalone(ram, sizeof(ram), ramin, sizeof(ramin));
     assert(gpu && gpu->vram_ptr == ram && gpu->ramin_ptr == ramin);
-    check_direct_guest_mmio(gpu);
     if(argc==2 && !strcmp(argv[1],"--fifo-worker")) return check_fifo_worker(gpu,ram,ramin);
     if(argc==2 && !strcmp(argv[1],"--fifo-packet-benchmark")) return benchmark_fifo_packets(gpu,ram,ramin);
     if(argc==2 && !strcmp(argv[1],"--fifo-packets")) return check_fifo_packets(gpu,ram,ramin);
-    if(argc==2 && (!strcmp(argv[1],"--native-constants") || !strncmp(argv[1],"--reject-native-constant-",25)))
-        return check_native_constants(gpu,ram,ramin,argv[1]);
     if(argc==2 && !strcmp(argv[1],"--vblank-clock")) return check_vblank_clock(gpu);
     if(argc==2 && !strcmp(argv[1],"--prmdio-palette")) {
         nv2a_mmio_write(gpu,0x6813C8,128,1);

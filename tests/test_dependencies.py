@@ -56,7 +56,7 @@ def dependency(tmp_path, monkeypatch):
              'prepared_sha256': hashlib.sha256(files['d3d11.dll'].replace(b'dxgi.dll\0',b'nogi.dll\0')).hexdigest()}
     (tmp_path/'config').mkdir(); (tmp_path/'config/dependencies.json').write_text(json.dumps({'gpu': [entry]}))
     (tmp_path/'LICENSES').mkdir()
-    for name in ('DXC_LICENSE_LLVM', 'DXC_LICENSE_MS', 'WINED3D_COPYING.LIB'): (tmp_path/'LICENSES'/name).write_text('fixture')
+    for name in ('DXVK_LICENSE', 'WINED3D_COPYING.LIB'): (tmp_path/'LICENSES'/name).write_text('fixture')
     return module, payload, entry
 
 
@@ -132,20 +132,3 @@ def test_unusable_dlls_are_not_cached(tmp_path,monkeypatch,dependency,failure):
     monkeypatch.setattr(module.urllib.request,'urlretrieve',lambda url,target:Path(target).write_bytes(zipped(files)))
     with pytest.raises(ValueError):module.prepare()
     assert list((tmp_path/'build/downloads').iterdir())==[]
-
-
-def test_native_vulkan_selects_x64_compiler_without_rewriting_its_imports(tmp_path, monkeypatch, dependency):
-    module, _, _ = dependency
-    entry = {'name': 'dxc', 'archive': 'dxc.zip', 'url': 'https://example.invalid/dxc.zip',
-             'files': ['dxcompiler.dll'], 'archive_directory': 'bin/x64', 'backend': 'vulkan'}
-    (tmp_path/'config/dependencies.json').write_text(json.dumps({'gpu': [entry]}))
-    output=tmp_path/'runtime/backends/vulkan';output.mkdir(parents=True)
-    for name in ('d3d11.dll','nvgi.dll'):(output/name).write_bytes(b'old generated dependency')
-    native = dll(b'compiler x64')
-    payload = zipped({'bin/x64/dxcompiler.dll': native, 'bin/x86/dxcompiler.dll': dll(b'x86'),
-                      'bin/arm64/dxcompiler.dll': dll(b'arm64')})
-    monkeypatch.setattr(module.urllib.request, 'urlretrieve', lambda url, target: Path(target).write_bytes(payload))
-    module.prepare()
-    assert (tmp_path/'runtime/backends/vulkan/dxcompiler.dll').read_bytes() == native
-    assert not (tmp_path/'runtime/backends/vulkan/d3d11.dll').exists()
-    assert not (tmp_path/'runtime/backends/vulkan/nvgi.dll').exists()

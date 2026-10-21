@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 import shutil
+import tarfile
 import tempfile
 import urllib.error
 import urllib.request
@@ -12,18 +13,23 @@ from common import ROOT
 
 def read_dependency(archive, entry):
     files = {}
-    with zipfile.ZipFile(archive) as bundle:
-        damaged=bundle.testzip()
-        if damaged is not None:
-            raise ValueError('ZIP member is damaged: '+damaged)
-        for filename in entry['files']:
-            folder=entry.get('archive_directory')
-            members=[name for name in bundle.namelist()
-                     if name==folder+'/'+filename] if folder else [
-                         name for name in bundle.namelist() if Path(name).name==filename]
-            if len(members)!=1:
-                raise ValueError(entry['name']+' archive must contain one '+filename)
-            files[filename]=bundle.read(members[0])
+    if entry['name']=='dxvk':
+        with tarfile.open(archive,'r:gz') as bundle:
+            for filename in entry['files']:
+                members=[m for m in bundle.getmembers() if m.isfile() and m.name.endswith('/x64/'+filename)]
+                if len(members)!=1:
+                    raise ValueError('DXVK archive must contain one x64/'+filename)
+                files[filename]=bundle.extractfile(members[0]).read()
+    else:
+        with zipfile.ZipFile(archive) as bundle:
+            damaged=bundle.testzip()
+            if damaged is not None:
+                raise ValueError('ZIP member is damaged: '+damaged)
+            for filename in entry['files']:
+                members=[name for name in bundle.namelist() if Path(name).name==filename]
+                if len(members)!=1:
+                    raise ValueError('WineD3D archive must contain one '+filename)
+                files[filename]=bundle.read(members[0])
     patched = None
     for filename,content in files.items():
         with pefile.PE(data=content,fast_load=True) as pe:
@@ -54,7 +60,7 @@ def prepare():
         if archive.exists():
             try:
                 files,patched=read_dependency(archive,entry)
-            except (ValueError,zipfile.BadZipFile,pefile.PEFormatError) as error:
+            except (ValueError,zipfile.BadZipFile,tarfile.TarError,pefile.PEFormatError) as error:
                 raise ValueError(f'Invalid cached dependency: {archive}: {error}. Replace this cached archive. '+recovery) from error
         else:
             print('Downloading dependency:',entry['url'],flush=True)
@@ -63,7 +69,7 @@ def prepare():
                 try:
                     urllib.request.urlretrieve(entry['url'],pending)
                     files,patched=read_dependency(pending,entry)
-                except (ValueError,zipfile.BadZipFile,pefile.PEFormatError,urllib.error.URLError) as error:
+                except (ValueError,zipfile.BadZipFile,tarfile.TarError,pefile.PEFormatError,urllib.error.URLError) as error:
                     size=pending.stat().st_size if pending.exists() else 0
                     raise ValueError(f'Downloaded dependency is unusable: {archive.name} ({size} bytes): {error}. '
                                      'The failed download is discarded. '+recovery) from error
@@ -74,17 +80,10 @@ def prepare():
             (target/filename).write_bytes(content)
         output = runtime/entry['backend']
         output.mkdir(parents=True,exist_ok=True)
-        if entry['name']=='dxc':
-            # These generated artifacts belong to the retired translation path.
-            for name in ('d3d11.dll','nvgi.dll'):
-                (output/name).unlink(missing_ok=True)
-        if patched is not None:
-            (output/'d3d11.dll').write_bytes(patched)
-            shutil.copyfile(target/'dxgi.dll',output/entry['import_name'])
-        else:
-            for filename in entry['files']:shutil.copyfile(target/filename,output/filename)
-    for name in ('DXC_LICENSE_LLVM', 'DXC_LICENSE_MS', 'WINED3D_COPYING.LIB'):
-        shutil.copyfile(ROOT/'LICENSES'/name,reference/name)
+        (output/'d3d11.dll').write_bytes(patched)
+        shutil.copyfile(target/'dxgi.dll',output/entry['import_name'])
+    shutil.copyfile(ROOT/'LICENSES/DXVK_LICENSE',reference/'DXVK_LICENSE')
+    shutil.copyfile(ROOT/'LICENSES/WINED3D_COPYING.LIB',reference/'WINED3D_COPYING.LIB')
     return lock
 
 

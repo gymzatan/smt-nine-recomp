@@ -7,7 +7,6 @@
 
 #include "nv2a_mmio_hook.h"
 #include "nv2a_state.h"
-#include "kernel/xbox_memory_layout.h"
 #include <stdio.h>
 
 /* NV2A MMIO base in Xbox VA space */
@@ -16,24 +15,6 @@
 #define NV2A_VRAM_BASE  0xF0000000u
 #define NV2A_VRAM_SIZE  (64 * 1024 * 1024)  /* 64MB Xbox VRAM */
 #define NV2A_RAMIN_SIZE (1 * 1024 * 1024)   /* 1MB RAMIN */
-
-/* Some original driver paths address USER registers and ordinary RAM through
- * the same pointer. Preserve that address-space selection, using the existing
- * handler for NV2A and the original volatile word access for mapped memory. */
-uint32_t nv2a_guest_read32(uint32_t address)
-{
-    if (address-NV2A_MMIO_BASE < NV2A_MMIO_SIZE)
-        return (uint32_t)nv2a_mmio_read(nv2a_get_state(),address-NV2A_MMIO_BASE,4);
-    return *(volatile uint32_t *)((uintptr_t)address+xbox_GetMemoryOffset());
-}
-void nv2a_guest_write32(uint32_t address,uint32_t value)
-{
-    if (address-NV2A_MMIO_BASE < NV2A_MMIO_SIZE) {
-        nv2a_mmio_write(nv2a_get_state(),address-NV2A_MMIO_BASE,value,4);
-        return;
-    }
-    *(volatile uint32_t *)((uintptr_t)address+xbox_GetMemoryOffset())=value;
-}
 
 static ptrdiff_t g_mem_offset = 0;
 static uint8_t *g_nv2a_vram = NULL;
