@@ -18,7 +18,7 @@ def quad_probe(tmp_path_factory):
 #include <string.h>
 #include <math.h>
 #include <assert.h>
-static unsigned char ram[0x10000];
+static unsigned char ram[0x600000];
 #define MEM32(a) (*(uint32_t *)(ram+((uint32_t)(a)&0x7fffffffu)))
 #define MEMF(a) (*(float *)(ram+((uint32_t)(a)&0x7fffffffu)))
 #define NINE_TITLE_UI_ORIGIN 0
@@ -152,9 +152,9 @@ static void check_projection(uint32_t caller,int active,float x,float y,float ra
     MEMF(0x4000)=x;MEMF(0x4004)=y;MEM32(0x4008)=0x3f000000;
     prepare_original_preview_projection();
     float factor=(4.0f/3.0f)/aspect;
-    int appearance=active && caller!=0x001427AE;
+    int appearance=active && caller!=0x001427AE && caller!=0x0010DFFF;
     if(!active || aspect==4.0f/3.0f)assert(MEMF(0x4000)==x);
-    else assert(MEMF(0x4000)==(x==144?188:290));
+    else assert(MEMF(0x4000)==320+(x-320)*factor);
     if(appearance) {
         /* The patched appearance shader reads c36.y for Y instead of X.
          * Reconstruct the original scalar on both axes, then widen X only. */
@@ -166,6 +166,29 @@ static void check_projection(uint32_t caller,int active,float x,float y,float ra
         assert(MEMF(g_esp+12)==scale);
     }
     assert(MEMF(0x4004)==y && MEM32(0x4008)==0x3f000000);
+}
+static void check_sword_preview(void) {
+    memset(ram,0,sizeof ram);MEM32(g_esp)=0x0010E033;MEM32(g_esp+4)=0x00333FD0;
+    uint32_t original[6]={200,224,112,112,0,0x3f800000};
+    memcpy(ram+0x00333FD0,original,sizeof original);
+    float selected=aspect;
+    /* Static table survives many draws and a display aspect change. */
+    for(unsigned mode=0;mode<3;mode++) {
+        aspect=mode==1?4.0f/3.0f:selected;
+        for(unsigned frame=0;frame<120;frame++) {
+            prepare_original_preview_viewport();
+            float factor=(4.0f/3.0f)/aspect;
+            assert(MEM32(0x00333FD0)==(uint32_t)(320+(200-320)*factor+0.5f));
+            assert(MEM32(0x00333FD8)==(uint32_t)(112*factor+0.5f));
+            assert(MEM32(0x00333FD4)==224 && !memcmp(ram+0x00333FDC,original+3,12));
+            /* Equal physical width/height and centered on the model's X=256. */
+            assert(fabsf(MEM32(0x00333FD8)*aspect*480/640-112)<0.001f);
+            assert(MEM32(0x00333FD0)+MEM32(0x00333FD8)/2.0f==320+(256-320)*factor);
+        }
+    }
+    aspect=selected;MEM32(g_esp+4)=0x00333FE8;
+    uint32_t full[6]={0,0,640,480,0,0x3f800000};memcpy(ram+0x00333FE8,full,sizeof full);
+    prepare_original_preview_viewport();assert(!memcmp(ram+0x00333FE8,full,sizeof full));
 }
 static void check_window_transition(void) {
     memset(ram,0,sizeof ram);g_ecx=0x2000;
@@ -214,7 +237,7 @@ int main(int argc,char **argv) {
     check_portrait_strip(352,164,272);check_portrait_strip(171,217,216);check_portrait_strip(202,163,80);
     check_dialogue_connector();check_speech_anchor();
     check_item_icons();
-    check_window_transition();
+    check_window_transition();check_sword_preview();
     memset(ram,0,sizeof ram);g_ecx=0x2000;MEM32(g_ecx+0x50)=640;MEM32(g_ecx+0x54)=480;
     smt9_prepare_window_transition(g_ecx);assert(MEMF(g_ecx+0x3c)==0 && MEM32(g_ecx+0x50)==640);
     const float guide_x[]={426,426,381,384,381,384},guide_y[]={262,265,280,282,319,319};
@@ -243,6 +266,7 @@ int main(int argc,char **argv) {
     check_preview(0x000F826F,1);check_preview(0x000F8709,1);
     check_preview(0x000F84D8,0);check_preview(0x000F8969,0);check_preview(0x000EE537,0);
     check_projection(0x001427AE,1,144,176,1.09523809f,84);
+    check_projection(0x0010DFFF,1,256,280,1,112);
     check_projection(0x000F819E,1,280,240,0.75f,320);
     check_projection(0x000F8638,1,280,240,0.75f,320);
     check_projection(0x000EE537,0,280,240,0.75f,320);

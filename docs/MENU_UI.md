@@ -20,6 +20,14 @@ The small speech-window connector is rebuilt by `1059A0` and submitted by `105C6
 
 The appearance producers preserve the original ratio-times-scale on both physical shader axes, then apply the shared widescreen factor to X. Their viewport and screen origin use the existing UI mapping. The Status producer keeps its separate accepted projection handling. Production-helper checks exercise 4:3 and 16:9; complete appearance-route visual coverage remains pending.
 
+## Sword fusion preview and scene
+
+The sword preview at `10DFBD` uses the same centered horizontal mapping for its projection and its original 112×112 viewport. The static viewport table is mapped from its original dimensions on every draw, preventing repeated scaling. Its full-screen entry and depth range remain unchanged.
+
+The original scene camera `31389` supplies the shader's screen scale. With independent native shader axes, its scale is 240 times the original zoom instead of 320, preserving the original scalar used by both axes. Model positions then agree with the fixed-function platform and depth geometry; the original solid/wireframe animation and depth tests remain intact.
+
+The supplied sword-fusion route was captured through confirmation, the full animation and result at 4:3 and 16:9 on native Vulkan, and at 16:9 on OpenGL. These are 20-second displayed sequences sampled at 12 Hz. The preview remains square inside its menu; the demon's feet stand on the platform before its intended wireframe dissolution. This does not establish coverage of every fusion combination.
+
 ## Random encounter gauge
 
 The selection countdown's textured frame and its plain branch are rebuilt by `110106` and submitted through `1102DC` and `110305`. Both use the same centered horizontal mapping as the existing `110102` green fill and the adjacent command panels. The original stack quad is rebuilt each draw, so the adjustment does not accumulate. The four-vertex payload retains Y, depth, RHW, color and UV values, and 4:3 retains every original byte. This screen-space frame is separate from the projected HP/MP bars above battle actors.

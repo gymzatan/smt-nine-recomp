@@ -240,6 +240,19 @@ static void prepare_original_speech_anchor(void)
 static void prepare_original_preview_viewport(void)
 {
     uint32_t caller=MEM32(g_esp);
+    if(caller==0x0010E033u){
+        uint32_t viewport=MEM32(g_esp+4);
+        /* 10DFBD reuses the original static square preview rectangle.
+         * Always derive X/width from that rectangle, never from last frame. */
+        if(viewport!=0x00333FD0u)return;
+        if(MEM32(viewport+4)!=224 || MEM32(viewport+12)!=112){
+            fprintf(stderr,"[STOP] original sword preview viewport contract\n");exit(5);
+        }
+        float factor=(4.0f/3.0f)/smt9_game_aspect();
+        MEM32(viewport)=(uint32_t)floorf(320+(200-320)*factor+0.5f);
+        MEM32(viewport+8)=(uint32_t)floorf(112*factor+0.5f);
+        return;
+    }
     if(caller!=0x000F826Fu && caller!=0x000F8709u)return;
     if(smt9_game_aspect()==4.0f/3.0f)return;
     /* F8070/F84E0 recreate the male/female preview viewport each draw.
@@ -258,13 +271,13 @@ static void prepare_original_preview_viewport(void)
 static void prepare_original_preview_projection(void)
 {
     uint32_t caller=MEM32(g_esp);
-    if(caller!=0x000F819Eu && caller!=0x000F8638u && caller!=0x001427AEu)return;
+    if(caller!=0x000F819Eu && caller!=0x000F8638u && caller!=0x001427AEu && caller!=0x0010DFFFu)return;
     /* Original appearance and status producers set screen origin and X/Y
      * scale ratio before 16370 uploads c36. Keep their Y and depth intact. */
     uint32_t position=MEM32(g_esp+4);
     float factor=(4.0f/3.0f)/smt9_game_aspect();
     MEMF(position)=320+(MEMF(position)-320)*factor;
-    if(caller==0x001427AEu)MEMF(g_esp+8)*=factor;
+    if(caller==0x001427AEu || caller==0x0010DFFFu)MEMF(g_esp+8)*=factor;
     else {
         /* Appearance uses the field shader's independent c36 axes. Its
          * original scalar was ratio*scale for both axes, including at 4:3. */
@@ -272,7 +285,7 @@ static void prepare_original_preview_projection(void)
         MEMF(g_esp+8)=factor;
     }
     static unsigned seen;
-    unsigned bit=caller==0x001427AEu?4:caller==0x000F8638u?2:1;
+    unsigned bit=caller==0x0010DFFFu?8:caller==0x001427AEu?4:caller==0x000F8638u?2:1;
     if(!(seen&bit)){seen|=bit;fprintf(stderr,"[UI PRODUCER] preview projection caller=%08X origin=%g,%g ratio=%g scale=%g\n",caller,MEMF(position),MEMF(position+4),MEMF(g_esp+8),MEMF(g_esp+12));}
 }
 void smt9_prepare_window_transition(uint32_t object)

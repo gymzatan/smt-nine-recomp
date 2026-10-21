@@ -21,7 +21,7 @@ Known coverage limits:
 - Horizontal character gaps and incorrect occlusion have been reported on some player configurations. Local four-backend street samples and an AMD-integrated D3D11 sample did not reproduce them; the exact female-player and restaurant scenes, affected builds and drivers remain unverified. A graphics-memory cause has not been established, and 512 MiB support is not certified. See the README for hardware requirements and memory-report fields.
 - Full playthrough, later chapters, all battles, complete audio coverage and long-session stability remain incomplete.
 - Performance in heavy scenes still needs work. Selecting 60 Hz is not a promise that every scene maintains it.
-- The previously unresolved fusion callback is integrated and the original two-demon selector has been reached. Final fusion confirmation/result coverage remains pending.
+- Fusion callbacks, encoding and the original two-demon selector have been exercised. The supplied sword-fusion route reaches confirmation, animation and result with matched model/platform projection at 4:3 and 16:9. Other final fusion combinations remain unverified.
 - CLOVER viewport/projection corrections are integrated; complete appearance-route visual coverage remains pending.
 - Later hardware/render states can still expose explicit unsupported boundaries. The runtime does not silently turn them into successful operations.
 - Newly edited Chinese text has structural/reference verification, but every scene has not been replayed in game.

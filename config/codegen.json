@@ -14162,7 +14162,15 @@
       "address": 201609,
       "name": "sub_00031389",
       "file": "recomp_0006.c",
-      "edits": []
+      "edits": [
+        [
+          4972,
+          "MEMF(0x380390) = (float)fp_top(); fp_pop(); /* fstp */",
+          "MEMF(0x380390) = (float)fp_top()*0.75f; fp_pop(); /* native independent axes preserve original scalar */",
+          "TEP(4); /* movsd */\n    ",
+          "\n    fp_push(MEMF(0x31B5"
+        ]
+      ]
     },
     {
       "address": 201874,
