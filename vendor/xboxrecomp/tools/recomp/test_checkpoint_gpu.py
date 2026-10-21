@@ -692,7 +692,8 @@ static void verify_vsh_upload_updates(void) {
     for(unsigned i=0;i<4;i++)nv2a_vsh_program_word(words[i]);
     assert(!vsh_decode_calls);
     assert(nv2a_vsh_inputs_used()==(1u<<3) && vsh_decode_calls==1);
-    int length=0;const uint32_t *program=nv2a_vsh_program(&length);
+    int length=0;uint32_t used=0;const uint32_t *program=nv2a_vsh_program(&length,&used);
+    assert(used==(1u<<3));
     assert(program && length==1 && !memcmp(program,words,sizeof words) && vsh_decode_calls==1);
     float inputs[16][4]={{0}};const float value[4]={1.25f,-2.5f,3.75f,4};memcpy(inputs[3],value,sizeof value);
     Nv2aVshOutput output;assert(nv2a_vsh_run(inputs,&output) && !memcmp(output.pos,value,sizeof value));
@@ -731,6 +732,20 @@ static void verify_vsh_upload_updates(void) {
         Nv2aVshInstruction expected;nv2a_vsh_decode_instruction(s_program[slot],&expected);
         assert(!memcmp(&expected,&s_decoded[slot],sizeof expected));
     }
+    uint32_t first[4];memcpy(first,words,sizeof first);first[3]&=~1u;
+    nv2a_vsh_set_instruction(5,first);nv2a_vsh_set_instruction(6,words);
+    nv2a_vsh_set_load_slot(6);nv2a_vsh_program_word(words[0]);
+    nv2a_vsh_program_word((1u<<21)|(9u<<9)|0x1bu);
+    assert(nv2a_vsh_program(&length,&used) && length==2 && used==((1u<<3)|(1u<<9)));
+    assert(used==nv2a_vsh_inputs_used() && nv2a_vsh_program(&length,NULL));
+    first[3]=(15u<<12);nv2a_vsh_set_instruction(5,first);nv2a_vsh_set_cxt_write(1);
+    length=-1;used=0x12345678;
+    assert(!nv2a_vsh_program(&length,&used) && length==-1 && used==0x12345678);
+    nv2a_vsh_set_cxt_write(0);nv2a_vsh_set_start_slot(NV2A_VSH_SLOTS-1);
+    nv2a_vsh_set_instruction(NV2A_VSH_SLOTS-1,first);
+    assert(!nv2a_vsh_program(&length,&used) && length==-1 && used==0x12345678);
+    nv2a_vsh_set_start_slot(NV2A_VSH_SLOTS);
+    assert(!nv2a_vsh_program(&length,&used) && length==-1 && used==0x12345678);
     fprintf(stderr,"[VSH] four changed upload words use one original decode; partial consumer, raw identity, output, direct setter, dump and pending checkpoint passed\n");
 }
 static void geometry_driver_bytes(const NV2ANativeGeometry *expected) {

@@ -128,27 +128,39 @@ static void update_decoded(void)
     s_decoded_first=NV2A_VSH_SLOTS;s_decoded_limit=0;
 }
 
+static uint32_t instruction_inputs(const Nv2aVshInstruction *ins)
+{
+    for (unsigned which = 0; which < 3; ++which)
+        if ((ins->sources_used & (1u << which)) && ins->source[which].mux == 2)
+            return 1u << ins->input;
+    return 0;
+}
+
 uint32_t nv2a_vsh_inputs_used(void)
 {
     update_decoded();
     uint32_t inputs = 0;
     for (uint32_t slot = s_start_slot; slot < NV2A_VSH_SLOTS; ++slot) {
         const Nv2aVshInstruction *ins = &s_decoded[slot];
-        for (unsigned which = 0; which < 3; ++which)
-            if ((ins->sources_used & (1u << which)) && ins->source[which].mux == 2)
-                inputs |= 1u << ins->input;
+        inputs |= instruction_inputs(ins);
         if (ins->final) break;
     }
     return inputs;
 }
 
-const uint32_t *nv2a_vsh_program(int *length)
+const uint32_t *nv2a_vsh_program(int *length, uint32_t *inputs)
 {
     update_decoded();
+    uint32_t used=0;
     for (uint32_t slot=s_start_slot; slot<NV2A_VSH_SLOTS; ++slot) {
         const Nv2aVshInstruction *ins=&s_decoded[slot];
         if(s_cxt_write && ins->out_mask && !ins->out_to_register && ins->out_address<NV2A_VSH_CONSTANTS) return NULL;
-        if(ins->final) { *length=(int)(slot-s_start_slot+1); return s_program[s_start_slot]; }
+        if(inputs) used |= instruction_inputs(ins);
+        if(ins->final) {
+            *length=(int)(slot-s_start_slot+1);
+            if(inputs) *inputs=used;
+            return s_program[s_start_slot];
+        }
     }
     return NULL;
 }

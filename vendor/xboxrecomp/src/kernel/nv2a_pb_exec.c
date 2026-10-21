@@ -2572,12 +2572,14 @@ static void raster_batch_vertices(int fixed)
      * Context writes make repeated indices stateful, so those execute every
      * vertex. No outputs are retained across command batches. */
     int reuse = fixed || !nv2a_vsh_cxt_write();
-    uint32_t inputs = fixed ? 0x1FFFu : nv2a_vsh_inputs_used();
+    uint32_t inputs = 0x1FFFu;
 #if defined(_WIN32)
     if(hw_enabled()) {
         hw_initialize();
-        int length=0;
-        if(!fixed && !nv2a_vsh_program(&length)) hw_check(E_NOTIMPL,"vertex program context writes or missing final");
+        if(!fixed) {
+            s_hw_program=nv2a_vsh_program(&s_hw_program_length,&inputs);
+            if(!s_hw_program) hw_check(E_NOTIMPL,"vertex program context writes or missing final");
+        }
         s_hw_program_active=1;s_hw_fixed_active=fixed;s_hw_program_vertex_count=0;
         s_hw_program_inputs=inputs;
         /* The native input layout uses this same decoded input mask, in
@@ -2589,8 +2591,9 @@ static void raster_batch_vertices(int fixed)
         }
         s_hw_topology=s_gpu.prim==NV_PRIM_POINTS?D3D11_PRIMITIVE_TOPOLOGY_POINTLIST:s_gpu.prim<=NV_PRIM_LINE_STRIP?D3D11_PRIMITIVE_TOPOLOGY_LINELIST_ADJ:D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ;
         s_hw_bounds=(RECT){(LONG)s_gpu.clip_x,(LONG)s_gpu.clip_y,(LONG)(s_gpu.clip_x+s_gpu.clip_w),(LONG)(s_gpu.clip_y+s_gpu.clip_h)};
-    }
+    } else
 #endif
+    if(!fixed) inputs=nv2a_vsh_inputs_used();
 #if defined(_WIN32)
     int cache_hit=0,cache_locked=s_hw_program_active && !s_gpu.inline_active;
     HwVertexBatch *cache=NULL;

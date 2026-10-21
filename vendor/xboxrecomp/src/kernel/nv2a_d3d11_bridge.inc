@@ -79,6 +79,9 @@ static int s_hw_program_active, s_hw_fixed_active;
 static D3D11_PRIMITIVE_TOPOLOGY s_hw_topology;
 static uint32_t s_hw_program_vertex_count;
 static uint32_t s_hw_program_inputs;
+/* Valid only during raster_batch_vertices and its immediate flush. */
+static const uint32_t *s_hw_program;
+static int s_hw_program_length;
 static uint32_t s_hw_program_vertex_rows[NV_MAX_INDICES];
 static struct { float vertex[NV_MAX_INDICES*16][4]; uint32_t indices[NV_MAX_INDICES*6]; } s_hw_program_upload;
 static void hw_program_triangle(uint32_t a,uint32_t b,uint32_t c,uint32_t p)
@@ -1641,8 +1644,7 @@ static void hw_flush_batch(void)
         if(s_gpu.prim==NV_PRIM_POINTS && geometry.point_flags[1] && geometry.tex_scale[3][0]!=1)
             hw_check(E_NOTIMPL,"rectangle texture on point sprite stage3");
         if(!s_hw_fixed_active) {
-            int length=0;const DWORD *program=(const DWORD *)nv2a_vsh_program(&length);
-            if(!program) hw_check(E_NOTIMPL,"vertex program context writes or missing final");
+            const DWORD *program=(const DWORD *)s_hw_program;int length=s_hw_program_length;
             if(d3d8_IsNativeVulkan())native_draw.vertex=hw_vk_shader(d3d8_vsh_vulkan_program(program,length,&s_hw_program_inputs),"vertex program");
             else hw_check(d3d8_vsh_bind_native(program,length,nv2a_vsh_constant(0),&geometry,s_hw_topology,&s_hw_program_inputs),"native vertex program binding");
         } else {
