@@ -43,7 +43,8 @@ typedef struct HwTexture {
     IDirect3DBaseTexture8 *texture;
     NvkImage *native;
     unsigned host_width,host_height;
-    struct HwTexture *next;
+    struct HwTexture *next, *hash_next, *valid_next;
+    struct HwTexture **valid_link;
 } HwTexture;
 
 /* Retain only the existing attribute conversion and index-to-row results.
@@ -72,6 +73,10 @@ static uint64_t s_hw_vertex_cache_hits,s_hw_vertex_cache_misses;
 static HwColor *s_hw_colors;
 static HwDepth *s_hw_depths;
 static HwTexture *s_hw_textures;
+enum { HW_TEXTURE_BUCKETS=256 };
+static HwTexture *s_hw_texture_buckets[HW_TEXTURE_BUCKETS];
+/* Index the original content-valid entries; invalid history needs no write checks. */
+static HwTexture *s_hw_valid_textures;
 static Nv2aVshOutput *s_hw_vertices;
 static uint32_t s_hw_count, s_hw_capacity;
 static RECT s_hw_bounds;
@@ -126,6 +131,7 @@ typedef struct HwQuery {
 } HwQuery;
 static HwQuery *s_hw_queries;
 static volatile LONG64 s_hw_query_count;
+static size_t s_hw_query_capacity;
 static void hw_check(HRESULT hr, const char *operation)
 {
     if (FAILED(hr)) {
@@ -182,6 +188,29 @@ static HwMemory *hw_memory(const XboxSharedMemoryViews *views)
     if(!m->texture_guard_protections) hw_check(E_OUTOFMEMORY,"texture protection ownership");
     m->next=s_hw_memories;s_hw_memories=m;return m;
 }
+static void hw_texture_invalidate(HwTexture *texture)
+{
+    if(!texture->content_valid) return;
+    *texture->valid_link=texture->valid_next;
+    if(texture->valid_next) texture->valid_next->valid_link=texture->valid_link;
+    texture->valid_link=NULL;texture->valid_next=NULL;texture->content_valid=0;
+}
+static void hw_texture_validate(HwTexture *texture)
+{
+    texture->valid_next=s_hw_valid_textures;
+    texture->valid_link=&s_hw_valid_textures;
+    if(texture->valid_next) texture->valid_next->valid_link=&texture->valid_next;
+    s_hw_valid_textures=texture;texture->content_valid=1;
+}
+static unsigned hw_texture_bucket(const Texture *source,size_t bytes)
+{
+    const uint32_t words[]={source->offset,source->width,source->height,source->color,
+        source->pitch,source->cube,source->levels,(uint32_t)bytes,(uint32_t)((uint64_t)bytes>>32)};
+    uint32_t hash=2166136261u;
+    for(unsigned i=0;i<sizeof words/sizeof *words;i++) hash=(hash^words[i])*16777619u;
+    hash^=hash>>16;
+    return hash%HW_TEXTURE_BUCKETS;
+}
 static void hw_invalidate_texture_range(HwMemory *memory,size_t offset,size_t bytes)
 {
     size_t lo=offset&~(size_t)4095,hi=(offset+bytes+4095)&~(size_t)4095;
@@ -193,10 +222,12 @@ static void hw_invalidate_texture_range(HwMemory *memory,size_t offset,size_t by
             if(range->memory==memory && lo<range->offset+range->bytes && range->offset<hi) {entry->valid=0;break;}
         }
     }
-    for(HwTexture *t=s_hw_textures;t;t=t->next)
+    for(HwTexture *t=s_hw_valid_textures,*next;t;t=next) {
+        next=t->valid_next;
         if((t->memory==memory && lo<t->memory_offset+t->raw_size && t->memory_offset<hi) ||
            (t->palette_memory==memory && lo<t->palette_offset+sizeof t->palette && t->palette_offset<hi))
-            t->content_valid=0;
+            hw_texture_invalidate(t);
+    }
 }
 static void hw_protect_views(HwMemory *memory,size_t offset,size_t bytes,DWORD protection)
 {
@@ -271,10 +302,16 @@ static void hw_protect(HwMemory *memory,size_t offset,size_t bytes,DWORD protect
 }
 static void hw_append_query(HwQuery query)
 {
-    HwQuery *queries=(HwQuery *)realloc(s_hw_queries,(s_hw_query_count+1)*sizeof *queries);
-    if(!queries) hw_check(E_OUTOFMEMORY,"query output storage");
+    size_t count=(size_t)s_hw_query_count;
+    if(count==s_hw_query_capacity) {
+        if(s_hw_query_capacity>SIZE_MAX/sizeof(HwQuery)/2) hw_check(E_OUTOFMEMORY,"query output capacity");
+        size_t capacity=s_hw_query_capacity?s_hw_query_capacity*2:16;
+        HwQuery *queries=(HwQuery *)realloc(s_hw_queries,capacity*sizeof *queries);
+        if(!queries) hw_check(E_OUTOFMEMORY,"query output storage");
+        s_hw_queries=queries;s_hw_query_capacity=capacity;
+    }
     query.pending=1;
-    s_hw_queries=queries;s_hw_queries[s_hw_query_count]=query;InterlockedIncrement64(&s_hw_query_count);
+    s_hw_queries[count]=query;InterlockedIncrement64(&s_hw_query_count);
 }
 static void hw_initialize(void);
 static void hw_defer_output(uint8_t *output,uint32_t value)
@@ -402,8 +439,6 @@ static HwVertexBatch *hw_vertex_batch_begin(uint32_t inputs,unsigned attribute_c
             entry->used=++s_hw_vertex_cache_clock;
             if(entry->valid) {
                 memcpy(s_hw_program_vertex_rows,entry->data+n*4,n*4);
-                /* Vulkan consumes the existing cached rows directly. */
-                if(!d3d8_IsNativeVulkan()) memcpy(s_hw_program_upload.vertex,entry->data+n*8,entry->bytes);
                 s_hw_program_vertex_count=entry->vertices;
                 s_gpu.vertices_reused+=n-entry->vertices;
                 ++s_hw_vertex_cache_hits;*hit=1;return entry;
@@ -484,8 +519,10 @@ static void hw_disarm_texture(HwTexture *texture)
 }
 static void hw_free_textures(void)
 {
+    memset(s_hw_texture_buckets,0,sizeof s_hw_texture_buckets);
     while(s_hw_textures) {
         HwTexture *texture=s_hw_textures;s_hw_textures=texture->next;
+        hw_texture_invalidate(texture);
         hw_disarm_texture(texture);
         if(texture->native)nvk_image_destroy(texture->native);
         if(texture->texture) texture->texture->lpVtbl->Release(texture->texture);
@@ -1211,7 +1248,7 @@ static void hw_colour_cleared(uint32_t param)
     if(!s_hw_initialized) return;
     hw_enter();(void)hw_color(param);hw_leave();
 }
-static void hw_texture_bind(unsigned stage)
+static void hw_texture_bind(unsigned stage,HwColor *current_target)
 {
     Texture *source=&s_gpu.texs[stage];
     unsigned mode=(s_gpu.rc.stage_program>>(stage*5))&31;
@@ -1231,7 +1268,9 @@ static void hw_texture_bind(unsigned stage)
            source->offset==color->address && source->pitch==color->pitch &&
            source->width==color->width && source->height==color->height) {
             D3D8Surface *surface=(D3D8Surface *)hw_render_surface(color);
-            if(color==hw_color(0))continue;
+            /* Earlier texture stages can complete writes on a shared page. */
+            if(current_target->upload_needed)hw_upload_color(current_target,0);
+            if(color==current_target)continue;
             if(color->native_surface){s_hw_vk_textures[stage]=hw_vk_render(color);return;}
             if(!surface->scale_srv)hw_check(ID3D11Device_CreateShaderResourceView(d3d8_GetD3D11Device(),(ID3D11Resource *)surface->d3d11_texture,NULL,&surface->scale_srv),"render target texture view");
             ID3D11DeviceContext_PSSetShaderResources(context,stage,1,&surface->scale_srv);
@@ -1243,11 +1282,12 @@ static void hw_texture_bind(unsigned stage)
     for(HwColor *color=s_hw_colors;color;color=color->next)
         if(source->offset < color->address+color->height*color->pitch && color->address < source->offset+bytes &&
            color->dirty) hw_publish_all();
+    unsigned bucket=hw_texture_bucket(source,bytes);
     HwTexture *entry,**link;
-    for(link=&s_hw_textures;(entry=*link)!=NULL;link=&entry->next)
+    for(link=&s_hw_texture_buckets[bucket];(entry=*link)!=NULL;link=&entry->hash_next)
         if(entry->identity.offset==source->offset && entry->identity.width==source->width && entry->identity.height==source->height && entry->identity.color==source->color && entry->identity.pitch==source->pitch && entry->identity.cube==source->cube && entry->identity.levels==source->levels && entry->raw_size==bytes) break;
-    if(entry && link!=&s_hw_textures) {
-        *link=entry->next;entry->next=s_hw_textures;s_hw_textures=entry;
+    if(entry && link!=&s_hw_texture_buckets[bucket]) {
+        *link=entry->hash_next;entry->hash_next=s_hw_texture_buckets[bucket];s_hw_texture_buckets[bucket]=entry;
     }
     const uint8_t *raw=(uint8_t *)xbox_GetMemoryOffset()+source->offset;
     const uint32_t *palette=source->color==0x0B ? (uint32_t *)((uint8_t *)xbox_GetMemoryOffset()+source->palette) : NULL;
@@ -1261,13 +1301,14 @@ static void hw_texture_bind(unsigned stage)
         if(!xbox_GetSharedMemoryViews(raw,bytes,&views)) hw_check(E_INVALIDARG,"texture shared memory identity");
         entry->memory=hw_memory(&views);entry->memory_offset=views.offset;
         entry->next=s_hw_textures; s_hw_textures=entry;
+        entry->hash_next=s_hw_texture_buckets[bucket];s_hw_texture_buckets[bucket]=entry;
     }
     if(palette && (!entry->palette_memory || entry->identity.palette!=source->palette)) {
         if(entry->palette_memory) hw_release_texture_range(entry->palette_memory,entry->palette_offset,sizeof entry->palette);
         XboxSharedMemoryViews views;
         if(!xbox_GetSharedMemoryViews(palette,sizeof entry->palette,&views)) hw_check(E_INVALIDARG,"palette shared memory identity");
         entry->palette_memory=hw_memory(&views);entry->palette_offset=views.offset;
-        entry->identity.palette=source->palette;entry->content_valid=0;
+        entry->identity.palette=source->palette;hw_texture_invalidate(entry);
     }
     if(hw_pending_output(entry->memory,entry->memory_offset,bytes) ||
        (palette && hw_pending_output(entry->palette_memory,entry->palette_offset,sizeof entry->palette)))
@@ -1327,7 +1368,7 @@ static void hw_texture_bind(unsigned stage)
     if(!entry->content_valid) {
         hw_guard_texture_range(entry->memory,entry->memory_offset,bytes);
         if(palette) hw_guard_texture_range(entry->palette_memory,entry->palette_offset,sizeof entry->palette);
-        entry->content_valid=1;
+        hw_texture_validate(entry);
     }
     if(entry->native)s_hw_vk_textures[stage]=entry->native;
     else { ID3D11ShaderResourceView *view=d3d8_base_srv(entry->texture);
@@ -1597,7 +1638,7 @@ static void hw_flush_batch(void)
         combiner.tex_mode[stage]=mode==0?NV2A_TEXMODE_NONE:mode>=4?(NV2ATextureMode)mode:mode==3 && s_gpu.texs[stage].cube?NV2A_TEXMODE_CUBEMAP:NV2A_TEXMODE_2D;
         if(mode==1 || mode==2) combiner.projected_mask|=1u<<stage;
         if(mode>=1 && mode<=3 && texture_alpha_kill_enabled(stage)) combiner.alpha_kill_mask|=1u<<stage;
-        hw_texture_bind(stage);
+        hw_texture_bind(stage,color);
         Texture *texture=&s_gpu.texs[stage];
         DWORD address_u=texture->addr_u,address_v=texture->addr_v;
         if(address_u>5 || address_v>5) hw_check(E_NOTIMPL,"texture address mode");
@@ -1760,17 +1801,18 @@ static void hw_flush_batch(void)
         }
         vertex_stride=count*16;
     }
-    uint32_t vertex_bytes=s_hw_program_vertex_count*vertex_stride;
-    uint32_t bytes=s_hw_program_active ? vertex_bytes+s_hw_count*sizeof(uint32_t) : s_hw_count*sizeof *s_hw_vertices;
-    /* Only the D3D upload API needs one contiguous vertex/index payload. */
-    if(s_hw_program_active && !d3d8_IsNativeVulkan()) memmove((uint8_t *)&s_hw_program_upload+vertex_bytes,s_hw_program_upload.indices,s_hw_count*sizeof(uint32_t));
+    uint32_t vertex_bytes=s_hw_program_active?s_hw_program_vertex_count*vertex_stride:s_hw_count*sizeof *s_hw_vertices;
+    uint32_t index_bytes=s_hw_program_active?s_hw_count*sizeof(uint32_t):0;
+    uint32_t bytes=vertex_bytes+index_bytes;
     ID3D11Buffer *vertices_buffer=NULL;
     UINT offset=0;
     HwVertexBatch *entry=s_hw_program_active?s_hw_vertex_batch:NULL;
+    /* Both backends consume the original cached rows without staging a copy. */
+    const void *vertex_data=s_hw_program_active?(entry?(const void *)(entry->data+entry->count*8):(const void *)s_hw_program_upload.vertex):(const void *)s_hw_vertices;
     uint32_t provoking=pg->regs[NV_PGRAPH_CONTROL_3]&NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX;
     if(d3d8_IsNativeVulkan()) {
-        native_draw.vertices=s_hw_program_active?(entry?(const void *)(entry->data+entry->count*8):(const void *)&s_hw_program_upload):(const void *)s_hw_vertices;
-        native_draw.vertex_bytes=s_hw_program_active?vertex_bytes:bytes;native_draw.stride=vertex_stride;native_draw.count=s_hw_count;
+        native_draw.vertices=vertex_data;
+        native_draw.vertex_bytes=vertex_bytes;native_draw.stride=vertex_stride;native_draw.count=s_hw_count;
         if(s_hw_program_active)native_draw.indices=s_hw_program_upload.indices;
         if(entry && entry->valid) {
             if(entry->upload_primitive!=s_gpu.prim || entry->upload_provoking!=provoking || entry->upload_indices!=s_hw_count)
@@ -1784,7 +1826,7 @@ static void hw_flush_batch(void)
        d3d8_reuse_vertex_upload(entry->upload_generation,entry->upload_offset,bytes,&vertices_buffer)) {
         offset=entry->upload_offset;
     } else {
-        offset=d3d8_upload_vertices(s_hw_program_active?(const void *)&s_hw_program_upload:(const void *)s_hw_vertices,bytes,&vertices_buffer);
+        offset=d3d8_upload_vertices(vertex_data,vertex_bytes,s_hw_program_upload.indices,index_bytes,&vertices_buffer);
         if(offset==(UINT)-1) hw_check(E_OUTOFMEMORY,"original vertex stream upload");
         ++s_gpu.hardware_vertex_stream_uploads;
         if(!offset) ++s_gpu.hardware_vertex_stream_starts;

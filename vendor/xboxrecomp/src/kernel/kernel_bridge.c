@@ -4074,7 +4074,8 @@ static void bridge_ObReferenceObjectByHandle(void)
  *
  * Called by CRT / SEH code to raise structured exceptions.
  * On Xbox this triggers the kernel exception dispatcher.
- * For recompilation, we log and continue (no real SEH dispatch yet).
+ * C++ throws execute the registered guest handlers and their original cleanup.
+ * The guest CRT transfers to the selected catch through xbox_ExceptionContinue.
  */
 static void bridge_RtlRaiseException(void)
 {
@@ -4086,7 +4087,54 @@ static void bridge_RtlRaiseException(void)
     if (raise_count <= 10) {
         fprintf(stderr, "  [KERNEL] RtlRaiseException: record=0x%08X code=0x%08X (#%d)\n",
                 record_ptr, code, raise_count);
+        /* Retain the first exception's original record and exact active
+         * continuation chain before a later fault destroys that context. */
+#ifdef _WIN32
+        uint32_t record[20];
+        SIZE_T copied = 0;
+        if (record_ptr && ReadProcessMemory(GetCurrentProcess(),
+                XBOX_TO_NATIVE(record_ptr), record, sizeof record, &copied) &&
+                copied == sizeof record) {
+            fprintf(stderr, "    thread=%lu flags=%08X address=%08X parameters=%u",
+                    GetCurrentThreadId(), record[1], record[3], record[4]);
+            for (unsigned i = 0; i < record[4] && i < 15; i++)
+                fprintf(stderr, " %08X", record[5 + i]);
+            fputc('\n', stderr);
+        } else {
+            fprintf(stderr, "    exception record unavailable (%zu bytes read)\n", (size_t)copied);
+        }
+#endif
+        RecompContFrame *frame = recomp_cont_current();
+        for (unsigned depth = 0; frame && depth < 64; depth++, frame = frame->parent)
+            fprintf(stderr, "    active[%u] function=%08X site=%llX\n",
+                    depth, frame->function, (unsigned long long)frame->site);
+        if (frame) fprintf(stderr, "    active chain truncated after 64 frames\n");
         fflush(stderr);
+    }
+
+    if (code == 0xE06D7363u) {
+        XboxGuestRegisters saved;
+        xbox_CaptureGuestRegisters(&saved);
+        guest_cpu_join();
+        uint32_t reg = BRIDGE_MEM32(XBOX_FS_BASE);
+        for (unsigned depth = 0; depth < XBOX_SEH_MAX_FRAMES && reg && reg != XBOX_SEH_END_OF_CHAIN; ++depth) {
+            if (!bridge_va_mapped(reg, 12) || (reg & 3)) recomp_cont_invalid();
+            uint32_t next = BRIDGE_MEM32(reg), handler = BRIDGE_MEM32(reg + 4);
+            recomp_func_t fn = recomp_lookup(handler);
+            if (!fn) recomp_cont_invalid();
+            g_esp -= 4; BRIDGE_MEM32(g_esp) = 0;
+            g_esp -= 4; BRIDGE_MEM32(g_esp) = 0;
+            g_esp -= 4; BRIDGE_MEM32(g_esp) = reg;
+            g_esp -= 4; BRIDGE_MEM32(g_esp) = record_ptr;
+            g_esp -= 4; BRIDGE_MEM32(g_esp) = 0;
+            fn();
+            uint32_t disposition = g_eax;
+            if (!xbox_RestoreGuestRegisters(&saved)) recomp_cont_invalid();
+            if (disposition != 1 || (next != XBOX_SEH_END_OF_CHAIN && next <= reg)) recomp_cont_invalid();
+            reg = next;
+        }
+        fprintf(stderr,"[STOP] unhandled guest C++ exception at %08X\n",record_ptr);
+        fflush(stderr);ExitProcess(5);
     }
 
     /* Handle float exceptions by clearing the FPU status.
@@ -9629,12 +9677,23 @@ static void checkpoint_park_control(void) {
     }
     AcquireSRWLockExclusive(&g_checkpoint_lock);thread->parked=0;ReleaseSRWLockExclusive(&g_checkpoint_lock);
 }
+void xbox_ExceptionContinue(uint32_t target, uint32_t frame_ebp) {
+    if (!t_checkpoint_root_valid || !recomp_lookup(target)) recomp_cont_invalid();
+    XboxGuestRegisters registers;
+    xbox_CaptureGuestRegisters(&registers);
+    registers.ebp=registers.seh_ebp=frame_ebp;
+    recomp_cont_prepare_transfer(frame_ebp,target);
+    if (t_kernel_wait || t_dispatch_depth) recomp_cont_invalid();
+    if (!xbox_RestoreGuestRegisters(&registers)) recomp_cont_invalid();
+    longjmp(t_checkpoint_root_jump,2);
+}
 void xbox_RunGuestRoot(void (*fn)(void)) {
     if(t_checkpoint_root_valid) {fn();return;}
     if(recomp_cont_active()) recomp_cont_invalid();
     t_checkpoint_root_function=fn;t_checkpoint_cancelled=0;t_checkpoint_root_valid=1;
     if(t_checkpoint_thread) t_checkpoint_thread->root_ready=1;
-    if(setjmp(t_checkpoint_root_jump)) {
+    int root_transfer=setjmp(t_checkpoint_root_jump);
+    if(root_transfer==1) {
         GuestCheckpointThread *thread=t_checkpoint_thread;
         if(thread->hot_stop) {
             XboxGuestRegisters clean;xbox_CaptureGuestRegisters(&clean);
@@ -9645,6 +9704,7 @@ void xbox_RunGuestRoot(void (*fn)(void)) {
         InterlockedExchange(&thread->hot_ready,1);checkpoint_park_control();
         if(!thread->hot_loaded) recomp_cont_invalid();thread->hot_loaded=0;guest_cpu_join();
     }
+    if(root_transfer!=0 && root_transfer!=1 && root_transfer!=2) recomp_cont_invalid();
     t_checkpoint_root_function();t_checkpoint_root_valid=0;
 }
 static int checkpoint_restore_thread(struct bridge_thread_start *start) {
@@ -10474,7 +10534,9 @@ static void kernel_thunk_dispatch(void)
                        g_kernel_dispatch_slot < XBOX_KERNEL_THUNK_TABLE_SIZE &&
                        (g_slot_ordinals[g_kernel_dispatch_slot] == 160 ||
                         g_slot_ordinals[g_kernel_dispatch_slot] == 277 ||
-                        g_slot_ordinals[g_kernel_dispatch_slot] == 294);
+                        g_slot_ordinals[g_kernel_dispatch_slot] == 294 ||
+                        g_slot_ordinals[g_kernel_dispatch_slot] == 302 ||
+                        g_slot_ordinals[g_kernel_dispatch_slot] == 312);
     if (held && !retain_cpu && xbox_CurrentIrql() < DISPATCH_LEVEL) {
         t_guest_held = 0;
         LeaveCriticalSection(&g_guest_cpu);

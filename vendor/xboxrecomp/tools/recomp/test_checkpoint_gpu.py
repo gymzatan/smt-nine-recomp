@@ -77,9 +77,9 @@ static __declspec(noinline) ptrdiff_t attribute_offset_for_test(void) {
 static unsigned query_status_calls,query_event_payload_calls;
 static unsigned query_context_getter_calls;
 static UINT vertex_stream_test_bytes;
-static UINT vertex_upload_for_test(const void *data,UINT bytes,ID3D11Buffer **buffer) {
-    vertex_stream_test_bytes=bytes;
-    return d3d8_upload_vertices(data,bytes,buffer);
+static UINT vertex_upload_for_test(const void *data,UINT vertex_bytes,const void *indices,UINT index_bytes,ID3D11Buffer **buffer) {
+    vertex_stream_test_bytes=vertex_bytes+index_bytes;
+    return d3d8_upload_vertices(data,vertex_bytes,indices,index_bytes,buffer);
 }
 
 static BOOL vertex_reuse_for_test(uint64_t generation,UINT offset,UINT bytes,ID3D11Buffer **buffer) {
@@ -322,18 +322,18 @@ static void verify_clean_texture_overlap(void) {
     s_gpu.texs[0]=(Texture){.offset=source_color->address,.width=128,.height=256,.pitch=512,.color=6,.levels=1,.valid=1};
     s_gpu.rc.stage_program=1;
     uint64_t readbacks=s_gpu.hardware_color_readbacks;
-    hw_texture_bind(0);
+    hw_texture_bind(0,hw_color(0));
     assert(unrelated->dirty && s_gpu.hardware_color_readbacks==readbacks);
     assert(s_hw_textures && !memcmp(s_hw_textures->raw,memory,128u*256u*4u));
     /* An output elsewhere must not publish unrelated rendering just because
      * this clean texture overlaps a retained colour identity. */
     hw_defer_output((uint8_t *)(xbox_GetMemoryOffset()+0x80180000u),0x11223344);
-    hw_texture_bind(0);
+    hw_texture_bind(0,hw_color(0));
     assert(s_hw_query_count==1 && unrelated->dirty && s_gpu.hardware_color_readbacks==readbacks);
     /* The existing physical texture-range query still collects relevant output,
      * including earlier queued outputs, before reading the texture bytes. */
     hw_defer_output((uint8_t *)(xbox_GetMemoryOffset()+source_color->address),0xffabcdef);
-    hw_texture_bind(0);
+    hw_texture_bind(0,hw_color(0));
     assert(!s_hw_query_count && memory[0]==0xffabcdef && unrelated->dirty);
     assert(BRIDGE_MEM32(0x80180000u)==0x11223344);
     assert(s_gpu.hardware_color_readbacks==readbacks);
@@ -343,7 +343,7 @@ static void verify_clean_texture_overlap(void) {
     if(source_color->native_surface)assert(nvk_image_clear(source_color->native_host?source_color->native_host:source_color->native_surface,rgba));
     else ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),((D3D8Surface *)hw_render_surface(source_color))->rtv,rgba);
     source_color->dirty=1;source_color->dirty_bounds=(RECT){0,0,128,256};
-    hw_texture_bind(0);
+    hw_texture_bind(0,hw_color(0));
     assert(!source_color->dirty && !unrelated->dirty && s_gpu.hardware_color_readbacks==readbacks+2);
     assert(memory[0]==0xffff0000 && !memcmp(s_hw_textures->raw,memory,128u*256u*4u));
     fprintf(stderr,"[CLEAN OVERLAP] clean texture avoids unrelated colour readback; dirty texture still publishes original pixels\n");
@@ -374,11 +374,11 @@ static void verify_texture_content_reuse(const char *snapshot,const char *memory
     uint32_t *raw=(uint32_t *)(xbox_GetMemoryOffset()+0x80080000u);
     for(unsigned i=0;i<4096;i++) raw[i]=0xff335577;
     Texture source={.offset=0x80080000u,.width=64,.height=64,.pitch=256,.color=6,.levels=1,.valid=1};
-    s_gpu.texs[0]=source;s_gpu.rc.stage_program=1;hw_texture_bind(0);
+    s_gpu.texs[0]=source;s_gpu.rc.stage_program=1;hw_texture_bind(0,hw_color(0));
     HwTexture *entry=s_hw_textures;assert(entry && entry->raw_size==16384 && entry->content_valid);
     texture_compare_left=entry->raw;texture_compare_calls=0;
     uint64_t uploads=s_gpu.hardware_texture_uploads;
-    for(unsigned i=0;i<100;i++) hw_texture_bind(0);
+    for(unsigned i=0;i<100;i++) hw_texture_bind(0,hw_color(0));
     assert(!texture_compare_calls && s_gpu.hardware_texture_uploads==uploads);
     assert(texture_first_pixel(entry)==0xff335577);
     for(unsigned view=0;view<entry->memory->views.view_count;view++) {
@@ -391,7 +391,7 @@ static void verify_texture_content_reuse(const char *snapshot,const char *memory
         /* A guarded texture write has no dependency on another physical page.
          * Preserve the existing queued output until an actual consumer needs it. */
         assert(s_hw_query_count==1 && s_hw_queries[0].pending);
-        assert(!entry->content_valid);hw_texture_bind(0);
+        assert(!entry->content_valid);hw_texture_bind(0,hw_color(0));
         assert(entry->content_valid && !memcmp(entry->raw,raw,entry->raw_size));
         assert(texture_first_pixel(entry)==expected);
         assert(s_hw_query_count==1 && s_hw_queries[0].pending);
@@ -402,14 +402,14 @@ static void verify_texture_content_reuse(const char *snapshot,const char *memory
         alias[0]=expected;
         assert(!s_hw_query_count && raw[0]==expected && raw[2]==0xffabcdef);
         assert(*unrelated==0x11223300+view && !entry->content_valid);
-        hw_texture_bind(0);assert(texture_first_pixel(entry)==expected);
+        hw_texture_bind(0,hw_color(0));assert(texture_first_pixel(entry)==expected);
     }
     assert(texture_compare_calls>=entry->memory->views.view_count);
-    source.width=32;source.pitch=128;s_gpu.texs[0]=source;hw_texture_bind(0);
+    source.width=32;source.pitch=128;s_gpu.texs[0]=source;hw_texture_bind(0,hw_color(0));
     HwTexture *overlap=s_hw_textures;assert(overlap!=entry && overlap->content_valid);
     raw[0]=0xffaabbcc;assert(!entry->content_valid && !overlap->content_valid);
-    hw_texture_bind(0);assert(texture_first_pixel(overlap)==0xffaabbcc);
-    source.width=64;source.pitch=256;s_gpu.texs[0]=source;hw_texture_bind(0);
+    hw_texture_bind(0,hw_color(0));assert(texture_first_pixel(overlap)==0xffaabbcc);
+    source.width=64;source.pitch=256;s_gpu.texs[0]=source;hw_texture_bind(0,hw_color(0));
     assert(texture_first_pixel(entry)==0xffaabbcc);
 
     HANDLE file=CreateFileA(memory_path,GENERIC_READ|GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
@@ -419,15 +419,15 @@ static void verify_texture_content_reuse(const char *snapshot,const char *memory
     LARGE_INTEGER offset={0};XBOX_IO_STATUS_BLOCK ios={0};
     uint32_t *alias=(uint32_t *)((uint8_t *)entry->memory->views.cpu_views[1]+entry->memory_offset);
     assert(xbox_NtReadFile(file,NULL,NULL,NULL,&ios,alias,4,&offset)==STATUS_SUCCESS);
-    assert(ios.Information==4 && !entry->content_valid && !overlap->content_valid);hw_texture_bind(0);
+    assert(ios.Information==4 && !entry->content_valid && !overlap->content_valid);hw_texture_bind(0,hw_color(0));
     assert(texture_first_pixel(entry)==file_pixel);
-    xbox_MmSetAddressProtect(alias,4096,PAGE_READONLY);hw_texture_bind(0);
+    xbox_MmSetAddressProtect(alias,4096,PAGE_READONLY);hw_texture_bind(0,hw_color(0));
     assert(!nv2a_pb_handle_memory_fault((uintptr_t)alias,1));
     assert(xbox_NtReadFile(file,NULL,NULL,NULL,&ios,alias,4,&offset)!=STATUS_SUCCESS);
     MEMORY_BASIC_INFORMATION page;assert(VirtualQuery(alias,&page,sizeof page) && page.Protect==PAGE_READONLY);
     xbox_MmSetAddressProtect(alias,4096,PAGE_READWRITE);CloseHandle(file);
-    hw_texture_bind(0);
-    hw_defer_output((uint8_t *)raw,0xffabcdef);hw_texture_bind(0);
+    hw_texture_bind(0,hw_color(0));
+    hw_defer_output((uint8_t *)raw,0xffabcdef);hw_texture_bind(0,hw_color(0));
     assert(!s_hw_query_count && texture_first_pixel(entry)==0xffabcdef);
 
     uint32_t *palette=(uint32_t *)(xbox_GetMemoryOffset()+0x80090000u);
@@ -435,19 +435,19 @@ static void verify_texture_content_reuse(const char *snapshot,const char *memory
     for(unsigned i=0;i<256;i++){palette[i]=0xff56789a;palette2[i]=0xff987654;}
     memset(raw,0,4096);
     source.color=0x0b;source.pitch=64;source.palette=0x80090000u;s_gpu.texs[0]=source;
-    hw_texture_bind(0);HwTexture *paletted=s_hw_textures;
+    hw_texture_bind(0,hw_color(0));HwTexture *paletted=s_hw_textures;
     assert(texture_first_pixel(paletted)==palette[0]);
-    source.palette=0x80091000u;s_gpu.texs[0]=source;hw_texture_bind(0);
+    source.palette=0x80091000u;s_gpu.texs[0]=source;hw_texture_bind(0,hw_color(0));
     assert(texture_first_pixel(paletted)==palette2[0]);
-    palette2[0]=0xff112233;assert(!paletted->content_valid);hw_texture_bind(0);
+    palette2[0]=0xff112233;assert(!paletted->content_valid);hw_texture_bind(0,hw_color(0));
     assert(texture_first_pixel(paletted)==palette2[0]);
     assert(VirtualQuery(palette,&page,sizeof page) && page.Protect==PAGE_READWRITE);
     FILE *saved=fopen(snapshot,"wb");assert(saved && nv2a_gpu_save_checkpoint(saved));fclose(saved);
     saved=fopen(memory_path,"wb");assert(saved && xbox_SavePhysicalMemory(saved));fclose(saved);
-    palette2[0]=0xff778899;hw_texture_bind(0);
+    palette2[0]=0xff778899;hw_texture_bind(0,hw_color(0));
     saved=fopen(memory_path,"rb");assert(saved && xbox_LoadPhysicalMemory(saved));fclose(saved);
     saved=fopen(snapshot,"rb");assert(saved && nv2a_gpu_load_checkpoint(saved));fclose(saved);
-    assert(!s_hw_textures);hw_texture_bind(0);
+    assert(!s_hw_textures);hw_texture_bind(0,hw_color(0));
     assert(texture_first_pixel(s_hw_textures)==0xff112233);
     nv2a_pb_release_memory_views();
     assert(VirtualQuery(raw,&page,sizeof page) && page.Protect==PAGE_READWRITE);
@@ -554,7 +554,7 @@ static void verify_vertex_conversion_reuse(const char *snapshot,const char *memo
     uint64_t generation=d3d8_vertex_upload_generation();
     void *overwrite=malloc(4*1024*1024);assert(overwrite);memset(overwrite,0xC7,4*1024*1024);
     ID3D11Buffer *ring=NULL;
-    assert(d3d8_upload_vertices(overwrite,4*1024*1024,&ring)!=(UINT)-1);free(overwrite);
+    assert(d3d8_upload_vertices(overwrite,4*1024*1024,NULL,0,&ring)!=(UINT)-1);free(overwrite);
     assert(d3d8_vertex_upload_generation()!=generation);
     draw_reused_vertex_payload();assert(s_gpu.hardware_vertex_stream_uploads==uploads+1);
     }
@@ -562,10 +562,10 @@ static void verify_vertex_conversion_reuse(const char *snapshot,const char *memo
     /* Force a fresh upload from a cache hit while the unused staging rows
      * contain different bytes. verify_vertex_bytes reads the actual GPU data. */
     unsigned char untouched[128];memset(untouched,0xA5,sizeof untouched);
-    if(d3d8_IsNativeVulkan())memcpy(s_hw_program_upload.vertex,untouched,sizeof untouched);
+    memcpy(s_hw_program_upload.vertex,untouched,sizeof untouched);
     method(NV097_SET_PROVOKING_VERTEX,1);draw_reused_vertex_payload();
     assert(s_gpu.hardware_vertex_stream_uploads==uploads+1);
-    if(d3d8_IsNativeVulkan())assert(!memcmp(s_hw_program_upload.vertex,untouched,sizeof untouched));
+    assert(!memcmp(s_hw_program_upload.vertex,untouched,sizeof untouched));
     method(NV097_SET_PROVOKING_VERTEX,0);
 
     XboxSharedMemoryViews views;assert(xbox_GetSharedMemoryViews(raw,60,&views));

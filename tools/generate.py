@@ -34,6 +34,23 @@ def apply_project_edits(body, row):
     return body
 
 
+def lower_exception_continuation(body):
+    """Resume an original catch without replaying a discarded native callee."""
+    first_label=body.index('\nloc_')
+    if '{"ebp", &ebp, sizeof ebp}' not in body[:first_label]:
+        return body
+    before='    default: recomp_cont_invalid();\n    }'
+    at=body.rfind(before,0,first_label)
+    if at<0:
+        raise ValueError('Missing continuation dispatch for an EBP frame')
+    after=('    default:\n'
+           '        if ((_cont_resume >> 32) != 7) recomp_cont_invalid();\n'
+           '        RECOMP_ITAIL((uint32_t)_cont_resume);\n'
+           '        recomp_cont_leave(&_cont_frame); return;\n'
+           '    }')
+    return body[:at]+after+body[at+len(before):]
+
+
 def generate(image, destination):
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
@@ -55,7 +72,7 @@ def generate(image, destination):
         body = generated[definition.start():].strip()
         body = re.sub(r'^void \w+\(void\)', 'void '+row['name']+'(void)', body, count=1)
         body = normalize(body)
-        body=apply_project_edits(body,row)
+        body=lower_exception_continuation(apply_project_edits(body,row))
         units[row['file']].append(body)
         if index % 1000 == 0:
             print(f'Generated {index+1}/{len(recipe["functions"])} functions', flush=True)

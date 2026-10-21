@@ -237,8 +237,8 @@ UINT        d3d8_row_pitch(D3DFORMAT fmt, UINT width);
 /* Is the Xbox format a depth/stencil format? */
 BOOL d3d8_format_is_depth(D3DFORMAT fmt);
 
-/* Upload one range in the original continuous vertex/index stream. */
-UINT d3d8_upload_vertices(const void *data, UINT size, ID3D11Buffer **buffer);
+/* Upload vertices and optional indices contiguously with one ring-buffer map. */
+UINT d3d8_upload_vertices(const void *data, UINT vertex_size, const void *indices, UINT index_size, ID3D11Buffer **buffer);
 uint64_t d3d8_vertex_upload_generation(void);
 BOOL d3d8_reuse_vertex_upload(uint64_t generation,UINT offset,UINT size,ID3D11Buffer **buffer);
 

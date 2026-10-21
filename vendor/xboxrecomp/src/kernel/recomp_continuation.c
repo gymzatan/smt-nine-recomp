@@ -148,6 +148,52 @@ uint64_t recomp_cont_jump_restore(RecompContFrame *f,uint32_t buffer) {
 uint64_t recomp_cont_jump_return(RecompContFrame *f) {
     return recomp_cont_jump_restore(f,returned_jump_buffer);
 }
+/* The original guest EH runtime has already selected and unwound the catch.
+ * Retain the same suspended callers and rebuild only their native C frames. */
+void recomp_cont_prepare_transfer(uint32_t frame_ebp, uint32_t target) {
+    if (recovery || !frame_ebp || !target) recomp_cont_invalid();
+    RecompContFrame *owner=0;
+    for (RecompContFrame *f=head;f;f=f->parent) {
+        for (size_t i=0;i<f->local_count;++i) {
+            const RecompContLocal *v=&f->locals[i];
+            if (v->size==4 && !strcmp(v->name,"ebp") &&
+                *(const uint32_t *)v->address==frame_ebp) owner=f;
+        }
+    }
+    /* Tail fragments inherit their caller's EBP. The oldest matching frame
+     * owns that guest activation; none of its fragments may be replayed. */
+    if (!owner || ((owner->site>>32)!=1 && (owner->site>>32)!=3 &&
+                   (owner->site>>32)!=7)) recomp_cont_invalid();
+    uint32_t count=0;
+    for (RecompContFrame *f=owner;f;f=f->parent) {
+        if (count==UINT32_MAX || f->local_count>UINT32_MAX) recomp_cont_invalid();
+        ++count;
+    }
+    SavedFrame *frames=calloc(count,sizeof *frames);
+    if (!frames) recomp_cont_invalid();
+    recomp_cont_unwind(owner,0);
+    uint32_t index=count;
+    for (RecompContFrame *f=owner;f;f=f->parent) {
+        SavedFrame *saved=&frames[--index];
+        saved->function=f->function;
+        saved->site=f==owner ? (7ULL<<32)|target : f->site;
+        saved->count=(uint32_t)f->local_count;
+        saved->locals=calloc(saved->count,sizeof *saved->locals);
+        if (saved->count && !saved->locals) recomp_cont_invalid();
+        for (size_t i=0;i<f->local_count;++i) {
+            const RecompContLocal *v=&f->locals[i];
+            size_t len=strlen(v->name);
+            if (!len || len>=64 || !v->size || v->size>8) recomp_cont_invalid();
+            memcpy(saved->locals[i].name,v->name,len+1);
+            saved->locals[i].size=(uint32_t)v->size;
+            memcpy(saved->locals[i].data,v->address,v->size);
+        }
+        saved->jumps=f->jumps;f->jumps=0;
+    }
+    while (head) recomp_cont_leave(head);
+    recovery=frames;recovery_count=count;recovery_next=0;
+}
+
 void recomp_cont_site(RecompContFrame *f, uint64_t site) {
     if (head!=f) recomp_cont_invalid();
     f->site=site;
@@ -172,7 +218,7 @@ static size_t snapshot_depth(void) {
     size_t depth=0;
     for (RecompContFrame *f=head; f; f=f->parent) {
         if (!f->site || depth==UINT32_MAX || f->local_count>UINT32_MAX) return 0;
-        if (f!=head && (f->site>>32)!=1 && (f->site>>32)!=3 &&
+        if (f!=head && (f->site>>32)!=1 && (f->site>>32)!=3 && (f->site>>32)!=7 &&
             !((f->site>>32)==6 && (uint32_t)f->site==f->function)) return 0;
         ++depth;
     }
@@ -232,7 +278,7 @@ static int read_recovery(FILE *in,SavedFrame **result,uint32_t *result_count) {
            read_u32(in,&f->count) && (size_t)f->count<=SIZE_MAX/sizeof(SavedLocal);
         if (ok) {
             uint64_t kind=f->site>>32;
-            ok=i+1<count ? (kind==1 || kind==3 || (kind==6 && (uint32_t)f->site==f->function)) :
+            ok=i+1<count ? (kind==1 || kind==3 || (kind==7 && (uint32_t)f->site) || (kind==6 && (uint32_t)f->site==f->function)) :
                            (kind==2 || (kind==5 && (uint32_t)f->site==f->function));
         }
         if (!ok) break;

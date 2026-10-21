@@ -39,5 +39,7 @@ uint64_t recomp_cont_jump_return(RecompContFrame *);
 int recomp_cont_save(FILE *);
 int recomp_cont_load(FILE *);
 int recomp_cont_validate(FILE *, uint32_t *);
+void recomp_cont_prepare_transfer(uint32_t frame_ebp, uint32_t target);
+void xbox_ExceptionContinue(uint32_t target, uint32_t frame_ebp);
 void recomp_cont_discard_root(void);
 #endif

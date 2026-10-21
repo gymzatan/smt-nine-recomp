@@ -654,6 +654,7 @@ static HRESULT __stdcall dev_SetRenderState(IDirect3DDevice8 *self, D3DRENDERSTA
     (void)self;
     g_d3d_setrs_count++;
     if ((DWORD)State < MAX_RENDER_STATES) {
+        if (g_device_state.render_states[(DWORD)State] == Value) return S_OK;
         g_device_state.render_states[(DWORD)State] = Value;
     }
     /* Mark combiner state dirty if any PS register combiner state changed */
@@ -891,8 +892,8 @@ BOOL d3d8_reuse_vertex_upload(uint64_t generation,UINT offset,UINT size,ID3D11Bu
     *buffer=g_up_ring_buffer;return TRUE;
 }
 
-/* Upload vertex data to ring buffer, returns offset. Returns (UINT)-1 on failure. */
-UINT d3d8_upload_vertices(const void *data, UINT size, ID3D11Buffer **buffer)
+/* Upload adjacent vertex/index ranges in one map. Returns (UINT)-1 on failure. */
+UINT d3d8_upload_vertices(const void *data, UINT vertex_size, const void *indices, UINT index_size, ID3D11Buffer **buffer)
 {
     D3D11_MAPPED_SUBRESOURCE mapped;
     D3D11_MAP map_type;
@@ -903,7 +904,8 @@ UINT d3d8_upload_vertices(const void *data, UINT size, ID3D11Buffer **buffer)
         if (FAILED(up_ring_init())) return (UINT)-1;
     }
 
-    if (size > UP_RING_BUFFER_SIZE) return (UINT)-1;
+    if (vertex_size > UP_RING_BUFFER_SIZE || index_size > UP_RING_BUFFER_SIZE - vertex_size) return (UINT)-1;
+    UINT size = vertex_size + index_size;
 
     /* Wrap around if not enough space */
     if (g_up_ring_offset + size > UP_RING_BUFFER_SIZE) {
@@ -919,7 +921,8 @@ UINT d3d8_upload_vertices(const void *data, UINT size, ID3D11Buffer **buffer)
     if (FAILED(hr)) return (UINT)-1;
 
     offset = g_up_ring_offset;
-    memcpy((BYTE *)mapped.pData + offset, data, size);
+    memcpy((BYTE *)mapped.pData + offset, data, vertex_size);
+    if (index_size) memcpy((BYTE *)mapped.pData + offset + vertex_size, indices, index_size);
 
     ID3D11DeviceContext_Unmap(g_device_state.d3d11_context,
         (ID3D11Resource *)g_up_ring_buffer, 0);
@@ -994,7 +997,7 @@ static HRESULT __stdcall dev_DrawPrimitiveUP(IDirect3DDevice8 *self, D3DPRIMITIV
     vb_size = vertex_count * VertexStreamZeroStride;
 
     /* Upload to ring buffer */
-    ring_offset = d3d8_upload_vertices(draw_data, vb_size, &g_up_ring_buffer);
+    ring_offset = d3d8_upload_vertices(draw_data, vb_size, NULL, 0, &g_up_ring_buffer);
     if (converted) free(converted);
 
     if (ring_offset == (UINT)-1) return E_OUTOFMEMORY;

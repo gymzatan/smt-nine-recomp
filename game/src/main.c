@@ -275,6 +275,50 @@ extern void nv2a_pb_release_memory_views(void);
 extern bool nv2a_hook_handle_mmio(PCONTEXT ctx, uintptr_t fault_addr,
                                   uint32_t fault_xbox_va, int is_write);
 
+/* WER's normal dump omits the file-mapped guest heap. Read the original
+ * section through a separate view so diagnostic reads do not complete GPU
+ * work or change guest page protections. This is raw RAM, not a save state;
+ * device threads are not frozen and may still write while it is copied. */
+static void write_crash_ram(void)
+{
+    static volatile LONG started;
+    if (InterlockedCompareExchange(&started, 1, 0)) return;
+    HANDLE section = xbox_GetMappingHandle();
+    size_t bytes = xbox_GetMappedSize();
+    if (!section || !bytes || bytes > MAXDWORD) {
+        fprintf(stderr, "[CRASH] guest RAM capture unavailable: no bounded mapping\n");
+        return;
+    }
+    void *ram = MapViewOfFile(section, FILE_MAP_READ, 0, 0, bytes);
+    if (!ram) {
+        fprintf(stderr, "[CRASH] guest RAM view failed: %lu\n", GetLastError());
+        return;
+    }
+    FILETIME time;
+    GetSystemTimeAsFileTime(&time);
+    wchar_t path[MAX_PATH];
+    if (swprintf_s(path, MAX_PATH, L"%s/crash-%lu-%08lX%08lX-ram.bin",
+                   nine_paths.runtime_w, GetCurrentProcessId(),
+                   time.dwHighDateTime, time.dwLowDateTime) < 0) {
+        fprintf(stderr, "[CRASH] guest RAM path too long\n");
+        UnmapViewOfFile(ram);
+        return;
+    }
+    HANDLE file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+                              CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) {
+        fprintf(stderr, "[CRASH] guest RAM file failed: %lu\n", GetLastError());
+    } else {
+        DWORD written = 0;
+        BOOL ok = WriteFile(file, ram, (DWORD)bytes, &written, NULL);
+        DWORD error = ok ? ERROR_SUCCESS : GetLastError();
+        CloseHandle(file);
+        fprintf(stderr, "[CRASH] guest RAM %s: %ls (%lu/%zu bytes, error=%lu; guest base=0)\n",
+                ok && written == bytes ? "saved" : "incomplete", path, written, bytes, error);
+    }
+    UnmapViewOfFile(ram);
+}
+
 static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
 {
     if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_STACK_OVERFLOW) {
@@ -330,6 +374,7 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
             g_ebx, g_esi, g_edi);
         fprintf(stderr, "  Xbox VA of fault: 0x%08X\n",
             (uint32_t)(fault_addr - (uintptr_t)g_xbox_mem_offset));
+        write_crash_ram();
         print_guest_context((void *)ep->ContextRecord->Rip);
 
         /*

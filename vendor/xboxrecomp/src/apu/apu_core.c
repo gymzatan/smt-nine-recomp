@@ -700,6 +700,12 @@ MCPXAPUState *mcpx_apu_init_standalone(uint8_t *ram_ptr,
         fprintf(stderr,"[STOP] APU frame worker creation failed\n");
         exit(5);
     }
+    /* The original DAC producer must meet its sample deadline even when
+     * foreground CPU work competes with this background process. */
+    if (!SetThreadPriority(d->apu_thread.thread, THREAD_PRIORITY_ABOVE_NORMAL)) {
+        fprintf(stderr,"[STOP] APU frame worker priority failed: %lu\n",GetLastError());
+        exit(5);
+    }
     mcpx_apu_wait_for_idle(d);
     qemu_mutex_unlock(&d->lock);
 
