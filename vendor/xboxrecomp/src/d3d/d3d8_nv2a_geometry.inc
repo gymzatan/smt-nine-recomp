@@ -49,16 +49,8 @@ static HRESULT bind_native_geometry(const float *constants,const NV2ANativeGeome
     return S_OK;
 }
 
-HRESULT d3d8_vsh_bind_native(const DWORD *microcode, int length, const float *constants, const NV2ANativeGeometry *geometry, D3D11_PRIMITIVE_TOPOLOGY topology, uint32_t *inputs_read)
+static VshCacheEntry *native_program(const DWORD *microcode,int length)
 {
-    if(!inputs_read) return E_INVALIDARG;
-    unsigned kind;
-    if(topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ) kind=0;
-    else if(topology==D3D11_PRIMITIVE_TOPOLOGY_LINELIST_ADJ) kind=1;
-    else if(topology==D3D11_PRIMITIVE_TOPOLOGY_POINTLIST) kind=2;
-    else return E_INVALIDARG;
-    ID3D11Device *device=d3d8_GetD3D11Device();
-    ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
     static DWORD previous_program[NV2A_VS_MAX_INSTRUCTIONS * 4];
     static int previous_length;
     static uint32_t previous_hash;
@@ -71,6 +63,20 @@ HRESULT d3d8_vsh_bind_native(const DWORD *microcode, int length, const float *co
     uint32_t hash=previous_hash;
     VshCacheEntry *entry=cache_lookup(hash);
     if(!entry) entry=compile_shader(microcode,length,hash);
+    return entry;
+}
+
+HRESULT d3d8_vsh_bind_native(const DWORD *microcode, int length, const float *constants, const NV2ANativeGeometry *geometry, D3D11_PRIMITIVE_TOPOLOGY topology, uint32_t *inputs_read)
+{
+    if(!inputs_read) return E_INVALIDARG;
+    unsigned kind;
+    if(topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ) kind=0;
+    else if(topology==D3D11_PRIMITIVE_TOPOLOGY_LINELIST_ADJ) kind=1;
+    else if(topology==D3D11_PRIMITIVE_TOPOLOGY_POINTLIST) kind=2;
+    else return E_INVALIDARG;
+    ID3D11Device *device=d3d8_GetD3D11Device();
+    ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
+    VshCacheEntry *entry=native_program(microcode,length);
     if(!entry) return E_FAIL;
     HRESULT hr;
     if(!entry->native_layout) {
@@ -146,9 +152,7 @@ HRESULT d3d8_vsh_bind_fixed(const float *constants,const NV2ANativeGeometry *geo
     else return E_INVALIDARG;
     ID3D11Device *device=d3d8_GetD3D11Device();ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();HRESULT hr;
     if(!g_vsh_fixed_shader) {
-        size_t bytes=sizeof nv2a_geometry_source+sizeof nv2a_fixed_vertex_source;
-        char *source=(char *)malloc(bytes);if(!source) return E_OUTOFMEMORY;
-        strcpy(source,nv2a_geometry_source);strcat(source,nv2a_fixed_vertex_source);
+        char *source=d3d8_vsh_fixed_source();if(!source) return E_OUTOFMEMORY;
         ID3DBlob *code=NULL,*errors=NULL;
         hr=D3DCompile(source,strlen(source),"nv2a_fixed_vertex",NULL,NULL,"main_fixed","vs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3|D3DCOMPILE_IEEE_STRICTNESS,0,&code,&errors);free(source);
         if(FAILED(hr)) { fprintf(stderr,"NV2A fixed vertex: %s\n",errors?(char *)ID3D10Blob_GetBufferPointer(errors):"compile failed");if(errors) ID3D10Blob_Release(errors);return hr; }

@@ -1,18 +1,8 @@
 /**
- * Show the guest framebuffer in a window.
- *
- * The title renders into its own framebuffer in guest RAM and tells the kernel
- * where it is through AvSetDisplayMode; on hardware the CRTC scans that memory
- * out. Nothing here scans anything out, so however much of the GPU is
- * implemented, none of it is observable. This is the other half: a window that
- * reads that memory and puts it on screen.
- *
- * Deliberately plain GDI rather than the D3D8 layer. The point is to display
- * whatever the guest actually wrote, so the fewer stages between guest memory
- * and the screen the better -- and it must keep working while the D3D8 layer
- * is busy with something else, such as the FMV player's own window.
- *
- * Off unless RECOMP_FB_WINDOW is set.
+ * Show the completed game frame in the existing window. A registered native
+ * renderer presents the finished GPU surface and captures it only for saved
+ * images/checkpoints. Explicit software and pinned-memory diagnostics consume
+ * the original RAM framebuffer. Off unless RECOMP_FB_WINDOW is set.
  */
 #include <stdint.h>
 #include "video_player.h"
@@ -79,6 +69,8 @@ static unsigned s_window_width=640,s_window_height=480;
 static float s_display_aspect=4.0f/3.0f;
 static int s_fixed_aspect;
 static SRWLOCK s_host_lock=SRWLOCK_INIT;
+static const FramebufferNativeRenderer *s_native_renderer;
+void xbox_FramebufferWindowSetRenderer(const FramebufferNativeRenderer *renderer) { s_native_renderer=renderer; }
 static uint32_t *s_host_pixels;
 static unsigned s_host_width,s_host_height;
 static void fb_close_frame_event(void)
@@ -242,6 +234,7 @@ typedef struct FramebufferCheckpoint {
 } FramebufferCheckpoint;
 int xbox_FramebufferSaveCheckpoint(FILE *out) {
     if(!out || !xbox_CheckpointFrozen() || xbox_VideoIsPlaying() || getenv("RECOMP_FMV_HOST"))return 0;
+    if(s_native_renderer && !s_native_renderer->capture())return 0;
     FramebufferCheckpoint saved={s_fb_va,s_fb_pitch,s_fb_width,s_fb_height,0,{0},s_fb_running,s_present_idx,s_flips,s_frame_draws,{0}};
     xbox_CaptureDisplayState(saved.display);memcpy(saved.title,s_title,sizeof s_title);
     for(unsigned i=0;i<2;i++)if(s_present[i])saved.present|=1u<<i;
@@ -279,8 +272,12 @@ int xbox_FramebufferLoadCheckpoint(FILE *in) {
         for(unsigned i=0;i<2;i++){free(s_present[i]);s_present[i]=pixels[i];pixels[i]=NULL;}
         InterlockedExchange(&s_present_idx,saved.index);
         if(s_rgb && saved.index>=0)memcpy(s_rgb,s_present[saved.index],(size_t)saved.width*saved.height*4);
+        if(s_native_renderer) {
+            const uint32_t *front=s_host_pixels?s_host_pixels:(saved.index>=0?s_present[saved.index]:NULL);
+            ok=s_native_renderer->restore(front,s_host_pixels?s_host_width:s_fb_width,s_host_pixels?s_host_height:s_fb_height);
+        }
         const char *dump=getenv("RECOMP_CHECKPOINT_DUMP");
-        if(dump)xbox_FramebufferDumpBmp(dump);
+        if(ok && dump)xbox_FramebufferDumpBmp(dump);
     }
     free(host_pixels);for(unsigned i=0;i<2;i++)free(pixels[i]);return ok;
 }
@@ -301,6 +298,11 @@ void xbox_FramebufferWindowFrameStats(uint32_t draws)
 {
     InterlockedIncrement(&s_flips);
     InterlockedExchange(&s_frame_draws, (LONG)draws);
+    if(s_native_renderer) {
+        AcquireSRWLockShared(&s_host_lock);
+        if(s_frame_ready)SetEvent(s_frame_ready);
+        ReleaseSRWLockShared(&s_host_lock);
+    }
 }
 
 int xbox_FramebufferKeyDown(int vk)
@@ -439,18 +441,21 @@ static int fb_write_bmp(FILE *f,const uint32_t *pixels,unsigned width,unsigned h
 }
 /* Keep diagnostic dumps in their original guest dimensions. F8 consumes the
  * displayed source and uses the same GDI stretch and configured aspect as the window. */
+static int fb_write_display(FILE *file,unsigned width,unsigned height);
 int xbox_FramebufferDumpBmp(const char *path) {
+    if(s_native_renderer && !s_native_renderer->capture())return -1;
     if(!s_rgb || !s_fb_va)return -1;
     FILE *file=fopen(path,"wb");if(!file)return -1;
-    int result=fb_write_bmp(file,s_rgb,s_fb_width,s_fb_height);if(fclose(file))result=-1;
+    int result=s_native_renderer?fb_write_display(file,s_fb_width,s_fb_height):fb_write_bmp(file,s_rgb,s_fb_width,s_fb_height);if(fclose(file))result=-1;
     if(!result)fprintf(stderr,"  [FBWIN] wrote %s (%ux%u from 0x%08X)\n",path,s_fb_width,s_fb_height,s_fb_va);
     return result;
 }
-static int fb_write_screenshot(FILE *file) {
+static int fb_write_display(FILE *file,unsigned width,unsigned height) {
     int result=-1;AcquireSRWLockShared(&s_host_lock);
     const uint32_t *source=s_host_pixels?s_host_pixels:s_rgb;
-    unsigned source_width=s_host_pixels?s_host_width:s_fb_width,height=s_host_pixels?s_host_height:s_fb_height;
-    unsigned width=(unsigned)((float)height*s_display_aspect+0.5f);
+    unsigned source_width=s_host_pixels?s_host_width:s_fb_width,source_height=s_host_pixels?s_host_height:s_fb_height;
+    if(!height)height=source_height;
+    if(!width)width=(unsigned)((float)height*s_display_aspect+0.5f);
     HDC dc=NULL;HBITMAP bitmap=NULL;void *pixels=NULL;
     if(source && width && height) {
         BITMAPINFO bi={0};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=(LONG)width;
@@ -458,8 +463,8 @@ static int fb_write_screenshot(FILE *file) {
         dc=CreateCompatibleDC(NULL);if(dc)bitmap=CreateDIBSection(dc,&bi,DIB_RGB_COLORS,&pixels,NULL,0);
         if(bitmap) {
             HGDIOBJ old=SelectObject(dc,bitmap);SetStretchBltMode(dc,HALFTONE);SetBrushOrgEx(dc,0,0,NULL);
-            bi.bmiHeader.biWidth=(LONG)source_width;
-            int copied=StretchDIBits(dc,0,0,(int)width,(int)height,0,0,(int)source_width,(int)height,source,&bi,DIB_RGB_COLORS,SRCCOPY);
+            bi.bmiHeader.biWidth=(LONG)source_width;bi.bmiHeader.biHeight=-(LONG)source_height;
+            int copied=StretchDIBits(dc,0,0,(int)width,(int)height,0,0,(int)source_width,(int)source_height,source,&bi,DIB_RGB_COLORS,SRCCOPY);
             GdiFlush();if(copied && copied!=GDI_ERROR)result=fb_write_bmp(file,pixels,width,height);
             SelectObject(dc,old);
         }
@@ -467,20 +472,21 @@ static int fb_write_screenshot(FILE *file) {
     if(bitmap)DeleteObject(bitmap);if(dc)DeleteDC(dc);ReleaseSRWLockShared(&s_host_lock);return result;
 }
 static void fb_screenshot(void) {
+    if(s_native_renderer && !s_native_renderer->capture()){fb_notice(fb_text(4));return;}
     SYSTEMTIME time;GetLocalTime(&time);static unsigned sequence;
     wchar_t path[MAX_PATH],notice[512];
     if(!s_screenshot_directory[0] || (!CreateDirectoryW(s_screenshot_directory,NULL) && GetLastError()!=ERROR_ALREADY_EXISTS)) {fb_notice(fb_text(4));return;}
     int length=swprintf_s(path,MAX_PATH,L"%ls/NINE_%04u%02u%02u_%02u%02u%02u_%03u_%lu_%u.bmp",s_screenshot_directory,
         time.wYear,time.wMonth,time.wDay,time.wHour,time.wMinute,time.wSecond,time.wMilliseconds,GetCurrentProcessId(),++sequence);
     FILE *file=length>0?_wfopen(path,L"wbx"):NULL;
-    int result=file?fb_write_screenshot(file):-1;if(file && fclose(file))result=-1;
+    int result=file?fb_write_display(file,0,0):-1;if(file && fclose(file))result=-1;
     if(result) {if(file)DeleteFileW(path);fb_notice(fb_text(4));}
     else {swprintf_s(notice,512,L"%ls%ls",fb_text(3),path);fb_notice(notice);}
 }
 
 static DWORD WINAPI fb_thread(LPVOID unused)
 {
-    HWND hwnd;
+    HWND hwnd,notice_window=NULL;
     HDC hdc;
     BITMAPINFO bi;
     RECT r;
@@ -504,7 +510,7 @@ static DWORD WINAPI fb_thread(LPVOID unused)
     r.left = 0; r.top = 0; r.right = (LONG)s_window_width; r.bottom = (LONG)s_window_height;
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
     hwnd = CreateWindowExA(0, "XboxRecompFramebuffer", "Xbox Recomp - Framebuffer",
-                           WS_OVERLAPPEDWINDOW,
+                           WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                            CW_USEDEFAULT, CW_USEDEFAULT,
                            r.right - r.left, r.bottom - r.top,
                            NULL, NULL, GetModuleHandleA(NULL), NULL);
@@ -513,6 +519,12 @@ static DWORD WINAPI fb_thread(LPVOID unused)
         fb_close_frame_event();
         xbox_CheckpointDeviceLeave(XBOX_CHECKPOINT_FRAMEBUFFER);
         return 0;
+    }
+    if(s_native_renderer) {
+        notice_window=CreateWindowExW(0,L"STATIC",L"",WS_CHILD|SS_LEFT|SS_ENDELLIPSIS,
+            0,0,1,1,hwnd,NULL,GetModuleHandleW(NULL),NULL);
+        if(!notice_window){fprintf(stderr,"[STOP] display notice window failed\n");exit(5);}
+        SendMessageW(notice_window,WM_SETFONT,(WPARAM)GetStockObject(DEFAULT_GUI_FONT),FALSE);
     }
     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
     hdc = GetDC(hwnd);
@@ -541,6 +553,16 @@ static DWORD WINAPI fb_thread(LPVOID unused)
         }
         if(!s_paused)xbox_CheckpointDeviceEnter(XBOX_CHECKPOINT_FRAMEBUFFER);
         RECT display=fb_display_bounds(hwnd),client;GetClientRect(hwnd,&client);
+        if(s_native_renderer) {
+            int32_t bounds[4]={display.left,display.top,display.right,display.bottom};
+            s_native_renderer->display(hwnd,client.right,client.bottom,bounds);
+            int show=s_paused || (s_checkpoint_notice[0] && GetTickCount64()<s_checkpoint_notice_until);
+            if(show) {
+                SetWindowTextW(notice_window,GetTickCount64()<s_checkpoint_notice_until?s_checkpoint_notice:fb_text(0));
+                SetWindowPos(notice_window,HWND_TOP,display.left+8,display.bottom-28,
+                    display.right-display.left>16?display.right-display.left-16:1,20,SWP_NOACTIVATE|SWP_SHOWWINDOW);
+            } else ShowWindow(notice_window,SW_HIDE);
+        } else {
         RECT bars[4]={{0,0,client.right,display.top},{0,display.bottom,client.right,client.bottom},
             {0,display.top,display.left,display.bottom},{display.right,display.top,client.right,display.bottom}};
         for(unsigned i=0;i<4;i++)FillRect(hdc,&bars[i],(HBRUSH)GetStockObject(BLACK_BRUSH));
@@ -593,6 +615,7 @@ static DWORD WINAPI fb_thread(LPVOID unused)
             COLORREF color=SetTextColor(hdc,RGB(255,255,255));
             DrawTextW(hdc,GetTickCount64()<s_checkpoint_notice_until?s_checkpoint_notice:fb_text(0),-1,&text,DT_LEFT|DT_BOTTOM|DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
             SetTextColor(hdc,color);SetBkMode(hdc,background);SelectObject(hdc,font);
+        }
         }
         {
             /* One dump a few seconds in, so the title has had time to render
@@ -659,6 +682,7 @@ static DWORD WINAPI fb_thread(LPVOID unused)
     }
 
     if(s_paused){xbox_CheckpointEnd();s_paused=0;}
+    if(s_native_renderer)s_native_renderer->close();
     free(host_snapshot);
     ReleaseDC(hwnd, hdc);
     DestroyWindow(hwnd);
@@ -690,6 +714,7 @@ void xbox_FramebufferWindowStart(void)
 }
 
 #else
+void xbox_FramebufferWindowSetRenderer(const FramebufferNativeRenderer *renderer) { (void)renderer; }
 void xbox_FramebufferWindowSetControls(const wchar_t *directory,unsigned language) { (void)directory;(void)language; }
 void xbox_FramebufferWindowSet(uint32_t fb_va, uint32_t pitch) { (void)fb_va; (void)pitch; }
 void xbox_FramebufferWindowPresent(uint32_t fb_va, uint32_t pitch) { (void)fb_va; (void)pitch; }

@@ -32,12 +32,17 @@ int main(void) {
     _set_error_mode(_OUT_TO_STDERR);_set_abort_behavior(0,_WRITE_ABORT_MSG|_CALL_REPORTFAULT);
     assert(nine_paths_init());wchar_t error[256],text[256];
     assert(nine_config_read(&settings,error,256) && settings.multithreaded_graphics==1);
+    assert(!settings.vsync && settings.refresh_hz==30);
     for(unsigned language=0;language<3;language++) {
         HWND w=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(100),NULL,config_dialog,0);assert(w);
         assert(SendDlgItemMessageW(w,114,CB_GETCOUNT,0,0)==2);
         assert(SendDlgItemMessageW(w,114,CB_GETCURSEL,0,0)==!settings.multithreaded_graphics);
+        assert(IsDlgButtonChecked(w,135)==BST_UNCHECKED);
+        CheckDlgButton(w,135,BST_CHECKED);
         choose_item(w,114,1);choose_item(w,110,language);
         assert(SendDlgItemMessageW(w,114,CB_GETCURSEL,0,0)==1);
+        GetDlgItemTextW(w,135,text,256);assert(!wcscmp(text,ui_text[UI_VSYNC][language]));
+        assert(IsDlgButtonChecked(w,135)==BST_CHECKED);
         GetDlgItemTextW(w,134,text,256);assert(!wcscmp(text,ui_text[UI_GRAPHICS][language]));
         SendDlgItemMessageW(w,114,CB_GETLBTEXT,0,(LPARAM)text);assert(!wcscmp(text,ui_text[UI_MULTI][language]));
         SendDlgItemMessageW(w,114,CB_GETLBTEXT,1,(LPARAM)text);assert(!wcscmp(text,ui_text[UI_SINGLE][language]));
@@ -47,13 +52,18 @@ int main(void) {
         SendMessageW(w,WM_COMMAND,IDOK,0);DestroyWindow(w);
         assert(nine_config_read(&settings,error,256) && !settings.multithreaded_graphics);
         assert(!wcscmp(settings.interface_language,ui_ids[language]));
+        assert(settings.vsync==1 && settings.refresh_hz==30);
         w=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(100),NULL,config_dialog,0);assert(w);
         assert(SendDlgItemMessageW(w,114,CB_GETCURSEL,0,0)==1);
+        assert(IsDlgButtonChecked(w,135)==BST_CHECKED);
+        CheckDlgButton(w,135,BST_UNCHECKED);
         choose_item(w,114,0);SendMessageW(w,WM_COMMAND,IDCANCEL,0);DestroyWindow(w);
         assert(nine_config_read(&settings,error,256) && !settings.multithreaded_graphics);
+        assert(settings.vsync==1);
         w=CreateDialogParamW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(100),NULL,config_dialog,0);assert(w);
+        CheckDlgButton(w,135,BST_UNCHECKED);
         choose_item(w,114,0);SendMessageW(w,WM_COMMAND,IDOK,0);DestroyWindow(w);
-        assert(nine_config_read(&settings,error,256) && settings.multithreaded_graphics==1);
+        assert(nine_config_read(&settings,error,256) && settings.multithreaded_graphics==1 && !settings.vsync);
     }
     return 0;
 }

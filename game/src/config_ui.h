@@ -3,7 +3,7 @@ typedef enum UiText {
     UI_TITLE,UI_BACKEND,UI_SCALE,UI_ASPECT,UI_GAME,UI_REFRESH,UI_SIZE,UI_HINT,
     UI_IMPORT,UI_SAVE,UI_CANCEL,UI_AUTO,UI_WIDE,UI_ULTRAWIDE,UI_IMPORT_TITLE,
     UI_ID,UI_NAME,UI_ID_HINT,UI_CHOOSE,UI_ID_ERROR,UI_DIALOG_ERROR,UI_START_ERROR,
-    UI_BUSY,UI_READY,UI_FAILED,UI_IMPORT_HELP,UI_LOG_ERROR,UI_INTEGER_ERROR,UI_CONTROLS,UI_CONTROLS_BODY,UI_CLOSE,UI_SIZE_CUSTOM,UI_FIXED_ASPECT,UI_GRAPHICS,UI_MULTI,UI_SINGLE
+    UI_BUSY,UI_READY,UI_FAILED,UI_IMPORT_HELP,UI_LOG_ERROR,UI_INTEGER_ERROR,UI_CONTROLS,UI_CONTROLS_BODY,UI_CLOSE,UI_SIZE_CUSTOM,UI_FIXED_ASPECT,UI_GRAPHICS,UI_MULTI,UI_SINGLE,UI_VSYNC
 } UiText;
 static const wchar_t *const ui_ids[]={L"Chinese",L"Japanese",L"English"};
 static const wchar_t *const ui_text[][3]={
@@ -42,5 +42,6 @@ static const wchar_t *const ui_text[][3]={
     {L"固定窗口宽高比（Fixed Aspect Ratio）",L"ウィンドウの縦横比を固定",L"Fixed Aspect Ratio (when resizing)"},
     {L"图形处理",L"描画処理",L"Graphics processing"},
     {L"多线程（默认）",L"マルチスレッド（標準）",L"Multithreaded (default)"},
-    {L"单线程",L"シングルスレッド",L"Single-threaded"}
+    {L"单线程",L"シングルスレッド",L"Single-threaded"},
+    {L"垂直同步（VSync）",L"垂直同期（VSync）",L"Vertical synchronization (VSync)"}
 };

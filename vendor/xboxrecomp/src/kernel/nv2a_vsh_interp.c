@@ -196,6 +196,13 @@ void nv2a_vsh_constant_word(uint32_t word)
     }
 }
 
+/* Use the same raw storage and cursor operation as scalar uploads. */
+void nv2a_vsh_constant_words(const uint32_t *words, uint32_t count)
+{
+    for (uint32_t i = 0; i < count; ++i)
+        nv2a_vsh_constant_word(words[i]);
+}
+
 void nv2a_vsh_set_constant(uint32_t index, const float v[4])
 {
     if (index < NV2A_VSH_CONSTANTS)

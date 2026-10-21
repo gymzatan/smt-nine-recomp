@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import traceback
 import uuid
 
@@ -45,7 +46,7 @@ def register_imported_helpers(batch, dispatch, additions):
     dispatch.write_text(emitted,encoding='utf-8')
 
 
-def generate(package):
+def generate(package, generated=None):
     """Retain accepted native bodies; lift only changed code and reachable caves."""
     image = package / 'native_game.xbe'
     original = ROOT / 'runtime/native_game_jp.xbe'
@@ -70,7 +71,8 @@ def generate(package):
             if lo < len(offsets) and section.virtual_addr+offsets[lo] < end:
                 changed.add(start)
         changed_addresses.extend(section.virtual_addr+offset for offset in offsets)
-    generated = package / 'generated'
+    if generated is None:
+        generated = package / 'generated'
     shutil.copytree(ROOT / 'build/generated', generated)
     metadata = ROOT / 'config'
     config.configure_from_xbe(str(image))
@@ -157,6 +159,25 @@ def generate(package):
     prepare_battle_camera(generated)
     return {'changed_functions':records,'new_helpers':[f'{a:08X}' for a in sorted(additions)],
             'changed_bytes_without_existing_function':[f'{a:08X}' for a in uncovered]}
+
+
+def refresh_generated(package):
+    """Refresh installed source through the same baseline/translation generator."""
+    with tempfile.TemporaryDirectory(prefix='source-update-', dir=package) as temporary:
+        incoming = Path(temporary) / 'generated'
+        generation = generate(package, incoming)
+        destination = package / 'generated'
+        destination.mkdir(exist_ok=True)
+        # A failed translation leaves the installed sources and program intact.
+        # Only generator-owned files are replaced after successful generation.
+        files = [path for path in incoming.iterdir() if path.is_file()]
+        names = {path.name for path in files}
+        for source in files:
+            os.replace(source, destination / source.name)
+        for stale in destination.glob('recomp_*.c'):
+            if stale.name not in names:
+                stale.unlink()
+    return generation
 
 
 def build_package(args,package,generation,fonts):

@@ -20,6 +20,7 @@
 #include "../d3d/d3d8_swizzle.h"
 #include "nv2a_vsh_interp.h"
 #include "nv2a_combiner.h"
+#include "../video/video_player.h"
 #include "../nv2a/nv2a_state.h"
 #if defined(_WIN32)
 #include <windows.h>
@@ -253,8 +254,9 @@ static int s_pb_exec_verbose = -1;
 static int hw_enabled(void);
 static void hw_publish_all(void);
 static void hw_complete_commands(void);
-static void hw_cpu_write_begin(uint32_t address,size_t bytes);
+static void hw_cpu_write_begin(uint32_t address,size_t bytes,int overwrite);
 static void hw_colour_cleared(uint32_t param);
+static int hw_clear_full_color(void);
 static void hw_clear_depth(uint32_t param);
 static void hw_collect_queries(int wait);
 static void hw_flush_batch(void);
@@ -712,13 +714,11 @@ static ClearBounds clear_bounds(void)
 
 static void clear_surface(uint32_t param)
 {
-#if defined(_WIN32)
-    if (hw_enabled()) hw_publish_all();
-#endif
     uint8_t *mem = (uint8_t *)xbox_GetMemoryOffset();
     uint32_t bpp = surface_bpp();
     uint32_t y, x;
     ClearBounds b = clear_bounds();
+    int gpu_cleared=0;
 
     if (!(param & NV097_CLEAR_COLOR_MASK))
         return;                            /* depth/stencil only */
@@ -742,10 +742,17 @@ static void clear_surface(uint32_t param)
             return;
         s_gpu.color_base = base;
 #if defined(_WIN32)
-        if(hw_enabled()) hw_cpu_write_begin(base,bytes);
+        if(hw_enabled()) {
+            int overwrite=bpp==4 && (param&NV097_CLEAR_COLOR_MASK)==NV097_CLEAR_COLOR_MASK &&
+                !b.x0 && !b.y0 && b.x1==color_width(s_gpu.format,s_gpu.pitch,bpp) &&
+                b.y1==color_height(s_gpu.format,s_gpu.clip_y+s_gpu.clip_h);
+            if(overwrite)gpu_cleared=hw_clear_full_color();
+            if(!gpu_cleared)hw_cpu_write_begin(base,bytes,overwrite);
+        }
 #endif
     }
 
+    if(!gpu_cleared) {
     uint32_t mask = ((param & NV097_CLEAR_SURFACE_R) ? 0x00FF0000u : 0)
                   | ((param & NV097_CLEAR_SURFACE_G) ? 0x0000FF00u : 0)
                   | ((param & NV097_CLEAR_SURFACE_B) ? 0x000000FFu : 0)
@@ -793,9 +800,10 @@ static void clear_surface(uint32_t param)
             }
         }
     }
+    }
     s_gpu.clears++;
 #if defined(_WIN32)
-    if (hw_enabled()) hw_colour_cleared(param);
+    if (hw_enabled() && !gpu_cleared) hw_colour_cleared(param);
 #endif
     /* Progress markers, interleaved with everything else in the log. The
      * summary says drawing stopped; only a marker next to the surrounding
@@ -2575,6 +2583,13 @@ static void raster_batch_vertices(int fixed)
         s_hw_bounds=(RECT){(LONG)s_gpu.clip_x,(LONG)s_gpu.clip_y,(LONG)(s_gpu.clip_x+s_gpu.clip_w),(LONG)(s_gpu.clip_y+s_gpu.clip_h)};
     }
 #endif
+#if defined(_WIN32)
+    int cache_hit=0,cache_locked=s_hw_program_active && !s_gpu.inline_active;
+    HwVertexBatch *cache=NULL;
+    if(cache_locked) {hw_enter();cache=hw_vertex_batch_begin(inputs,attribute_count,&cache_hit);}
+    s_hw_vertex_batch=cache;
+    if(!cache_hit) {
+#endif
     /* Only slots read by this batch need resetting. */
     for (i = 0; i < n; i++)
         s_xf_positions[s_gpu.idx[i] % NV_MAX_INDICES] = 0;
@@ -2606,6 +2621,8 @@ static void raster_batch_vertices(int fixed)
         }
     }
 #if defined(_WIN32)
+    }
+    if(cache_locked) {if(!cache_hit)hw_vertex_batch_end(cache,attribute_count);hw_leave();}
     gpu_timing_finish(transform_start, &s_gpu.vertex_ticks);
 #endif
     if(!fixed) { s_gpu.batches_program++;s_gpu.verts_program += n; }
@@ -3374,6 +3391,18 @@ static NV_NOINLINE void tex_stage_method(uint32_t method, uint32_t param)
         record_tex_reg(method, param);
 }
 
+/* Scalar commands and native ranges append to the same primitive storage. */
+void nv2a_pb_index_words(const uint32_t *words,uint32_t count)
+{
+    if (!s_gpu.prim || !count) return;
+    require_batch_space("index",s_gpu.idx_count,count*2,NV_MAX_INDICES);
+    for (uint32_t i=0;i<count;++i) {
+        uint32_t value=words[i];
+        s_gpu.idx[s_gpu.idx_count++]=(uint16_t)value;
+        s_gpu.idx[s_gpu.idx_count++]=(uint16_t)(value>>16);
+    }
+}
+
 static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
 {
     switch (method) {
@@ -3600,11 +3629,7 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
 
     case NV097_ARRAY_ELEMENT16:
         /* Two 16-bit indices per parameter word. */
-        if (s_gpu.prim) {
-            require_batch_space("index", s_gpu.idx_count, 2, NV_MAX_INDICES);
-            s_gpu.idx[s_gpu.idx_count++] = (uint16_t)(param & 0xFFFF);
-            s_gpu.idx[s_gpu.idx_count++] = (uint16_t)(param >> 16);
-        }
+        nv2a_pb_index_words(&param,1);
         break;
 
     case NV097_ARRAY_ELEMENT32:
@@ -3646,10 +3671,16 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
             displayed=dma_resolve(s_gpu.drawn_offset?s_gpu.drawn_dma_color:nv2a_get_state()->pgraph.dma_color,
                 done,(s_gpu.drawn_offset?s_gpu.drawn_y+s_gpu.drawn_h:s_gpu.clip_y+s_gpu.clip_h)*pitch);
 #if defined(_WIN32)
-        /* Queue the same host readback before the guest colour publication
-         * waits. PFIFO keeps this colour alive and excludes new draws here. */
-        D3D8Surface *host_readback=hw_enabled() && displayed?hw_prepare_scaled_color(displayed,pitch):NULL;
-        hw_publish_all();
+        /* PFIFO keeps the completed colour owner alive. Native display keeps
+         * its GPU image; explicit RAM display consumes the original publication. */
+        D3D8Surface *host_readback=NULL;
+        if(s_hw_native_present) {
+            if(displayed)hw_finish_native_frame(displayed,pitch);
+            else hw_complete_commands();
+        } else {
+            host_readback=hw_enabled() && displayed?hw_prepare_scaled_color(displayed,pitch):NULL;
+            hw_publish_all();
+        }
 #endif
         if (s_ftrace == 2)
             fprintf(stderr, "[FTRACE] FLIP_STALL presenting %08X (color now %08X)%c",
@@ -3693,10 +3724,14 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
         if (s_gpu.pitch && done) {
             extern void xbox_FramebufferWindowPresent(uint32_t, uint32_t);
             xbox_FramebufferWindowSet(displayed,pitch);
-            xbox_FramebufferWindowPresent(displayed,pitch);
+#if defined(_WIN32)
+            if(!s_hw_native_present)
+#endif
+                xbox_FramebufferWindowPresent(displayed,pitch);
         }
 #if defined(_WIN32)
-        hw_present_scaled_color(host_readback);
+        if(!s_hw_native_present)hw_present_scaled_color(host_readback);
+        else d3d8_LogVideoMemory();
 #endif
         {
             /* RECOMP_FB_DUMP_FLIPS: dump every presented frame, not one per

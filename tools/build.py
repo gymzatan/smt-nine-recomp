@@ -117,9 +117,13 @@ def build(iso, jobs, resume=False, with_chinese=False, update=False):
             package=ROOT/'runtime/languages/packages'/package_name
             if not (package/'build/CMakeCache.txt').is_file():
                 raise ValueError('Imported language needs its original source build directory: '+package_name)
+            sys.path.insert(0,str(ROOT))
+            from import_language import refresh_generated
+            generation=refresh_generated(package)
             run([cmake,'--build',package/'build','--target','smt9_recomp','--parallel',jobs],env=environment)
             language_receipt=package/'receipt.json'
             record=json.loads(language_receipt.read_text(encoding='utf-8'))
+            record.update(generation)
             record['executable_sha256']=digest(package/'bin/smt9_recomp.exe')
             language_receipt.write_text(json.dumps(record,indent=2)+'\n',encoding='utf-8')
     source_record={key:progress[key] for key in ('iso_sha256','source_directory') if key in progress}

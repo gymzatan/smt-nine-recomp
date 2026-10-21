@@ -469,6 +469,12 @@ typedef struct XboxSharedMemoryViews {
     unsigned view_count;
 } XboxSharedMemoryViews;
 BOOL xbox_GetSharedMemoryViews(const void *native_address, size_t bytes, XboxSharedMemoryViews *views);
+#if defined(_WIN32)
+/* Native APIs write without entering the guest's memory-fault handler.
+ * Keep the existing GPU memory ownership locked until that write returns. */
+int nv2a_pb_host_write_begin(void *native_address, size_t bytes);
+void nv2a_pb_host_write_end(int held);
+#endif
 
 /**
  * Allocate from the Xbox heap. Returns an Xbox VA, or 0 on failure.

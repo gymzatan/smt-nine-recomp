@@ -17,7 +17,7 @@ static HRESULT initialize(void)
         "Texture2D pixels:register(t0);SamplerState linearSampler:register(s0);\n"
         "cbuffer Dimensions:register(b0){float4 size;}\n"
         "float4 vs(uint id:SV_VertexID):SV_Position{return float4(id==2?3:-1,id==1?3:-1,0,1);}\n"
-        "float4 ps(float4 p:SV_Position):SV_Target{return pixels.SampleLevel(linearSampler,p.xy/size.xy,0);}\n";
+        "float4 ps(float4 p:SV_Position):SV_Target{return pixels.SampleLevel(linearSampler,(p.xy-size.zw)/size.xy,0);}\n";
     ID3D11Device *device=d3d8_GetD3D11Device();ID3DBlob *vs=NULL,*ps=NULL;HRESULT hr;
     hr=D3DCompile(source,sizeof source-1,"surface_scale",NULL,NULL,"vs","vs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&vs,NULL);
     if(SUCCEEDED(hr))hr=D3DCompile(source,sizeof source-1,"surface_scale",NULL,NULL,"ps","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&ps,NULL);
@@ -36,6 +36,10 @@ static HRESULT initialize(void)
 }
 HRESULT d3d8_surface_resample(IDirect3DSurface8 *input,IDirect3DSurface8 *output)
 {
+    return d3d8_surface_resample_rect(input,output,NULL);
+}
+HRESULT d3d8_surface_resample_rect(IDirect3DSurface8 *input,IDirect3DSurface8 *output,const RECT *bounds)
+{
     D3D8Surface *src=(D3D8Surface *)input,*dst=(D3D8Surface *)output;
     if(!src || !dst || src==dst || src->sample_count!=1 || dst->sample_count!=1 || !dst->rtv)return E_INVALIDARG;
     HRESULT hr=initialize();if(FAILED(hr))return hr;
@@ -43,8 +47,11 @@ HRESULT d3d8_surface_resample(IDirect3DSurface8 *input,IDirect3DSurface8 *output
         hr=ID3D11Device_CreateShaderResourceView(d3d8_GetD3D11Device(),(ID3D11Resource *)src->d3d11_texture,NULL,&src->scale_srv);
         if(FAILED(hr))return hr;
     }
-    float size[4]={(float)dst->width,(float)dst->height,0,0};
-    D3D11_VIEWPORT viewport={0,0,(float)dst->width,(float)dst->height,0,1};
+    RECT area=bounds?*bounds:(RECT){0,0,(LONG)dst->width,(LONG)dst->height};
+    if(area.left<0 || area.top<0 || area.right>(LONG)dst->width || area.bottom>(LONG)dst->height ||
+       area.right<=area.left || area.bottom<=area.top)return E_INVALIDARG;
+    float size[4]={(float)(area.right-area.left),(float)(area.bottom-area.top),(float)area.left,(float)area.top};
+    D3D11_VIEWPORT viewport={size[2],size[3],size[0],size[1],0,1};
     ID3D11CommandList *commands=NULL;
     ID3D11DeviceContext_UpdateSubresource(deferred,(ID3D11Resource *)dimensions,0,NULL,size,0,0);
     ID3D11DeviceContext_RSSetViewports(deferred,1,&viewport);
@@ -54,7 +61,7 @@ HRESULT d3d8_surface_resample(IDirect3DSurface8 *input,IDirect3DSurface8 *output
     ID3D11DeviceContext_PSSetShader(deferred,pixel_shader,NULL,0);
     ID3D11DeviceContext_PSSetConstantBuffers(deferred,0,1,&dimensions);
     ID3D11DeviceContext_PSSetShaderResources(deferred,0,1,&src->scale_srv);
-    ID3D11SamplerState *selected=dst->width>src->width?upload_sampler:sampler;
+    ID3D11SamplerState *selected=(UINT)(area.right-area.left)>src->width?upload_sampler:sampler;
     ID3D11DeviceContext_PSSetSamplers(deferred,0,1,&selected);
     ID3D11DeviceContext_Draw(deferred,3,0);
     hr=ID3D11DeviceContext_FinishCommandList(deferred,FALSE,&commands);

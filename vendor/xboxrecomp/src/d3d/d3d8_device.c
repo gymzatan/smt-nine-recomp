@@ -71,6 +71,10 @@ typedef struct D3D8DeviceState {
 static D3D8DeviceState g_device_state;
 static IDirect3DDevice8 g_device;
 static BOOL g_device_initialized = FALSE;
+/* Uses this device's original swap-chain owner; the game render targets stay
+ * offscreen. Window draws and DXGI Present share the renderer's context lock. */
+static D3D8Surface g_window_surface;
+static UINT g_window_width,g_window_height;
 
 /* Current resource bindings */
 static IDirect3DVertexBuffer8 *g_cur_vb = NULL;
@@ -246,6 +250,80 @@ static HRESULT d3d11_create_device_and_swap_chain(
     return S_OK;
 }
 
+
+static void d3d8_window_release_surface(void)
+{
+    if(g_window_surface.rtv)ID3D11RenderTargetView_Release(g_window_surface.rtv);
+    if(g_window_surface.d3d11_texture)ID3D11Texture2D_Release(g_window_surface.d3d11_texture);
+    memset(&g_window_surface,0,sizeof g_window_surface);
+}
+void d3d8_window_release(void)
+{
+    if(!g_window_width)return;
+    d3d8_window_release_surface();
+    if(g_device_state.swap_chain) {
+        IDXGISwapChain_Release(g_device_state.swap_chain);
+        g_device_state.swap_chain=NULL;
+    }
+    g_window_width=g_window_height=0;g_device_state.hwnd=NULL;
+}
+BOOL d3d8_window_needs_resize(UINT width,UINT height)
+{
+    return g_window_width && width && height &&
+        (width!=g_window_width || height!=g_window_height);
+}
+HRESULT d3d8_window_draw(HWND window,IDirect3DSurface8 *image,const RECT *bounds,UINT width,UINT height)
+{
+    if(!g_device_initialized || !window || !image || !bounds)return E_INVALIDARG;
+    if(!width || !height)return S_FALSE;
+    HRESULT hr=S_OK;
+    if(!g_device_state.swap_chain) {
+        IDXGIDevice *dxgi=NULL;IDXGIAdapter *adapter=NULL;IDXGIFactory *factory=NULL;
+        hr=ID3D11Device_QueryInterface(g_device_state.d3d11_device,&IID_IDXGIDevice,(void **)&dxgi);
+        if(SUCCEEDED(hr))hr=IDXGIDevice_GetAdapter(dxgi,&adapter);
+        if(SUCCEEDED(hr))hr=IDXGIAdapter_GetParent(adapter,&IID_IDXGIFactory,(void **)&factory);
+        DXGI_SWAP_CHAIN_DESC desc={0};
+        desc.BufferDesc.Width=width;desc.BufferDesc.Height=height;
+        desc.BufferDesc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;
+        desc.SampleDesc.Count=1;desc.BufferCount=2;desc.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        desc.OutputWindow=window;desc.Windowed=TRUE;
+        desc.SwapEffect=!strcmp(d3d8_ActiveBackend(),"D3D12")?DXGI_SWAP_EFFECT_FLIP_DISCARD:DXGI_SWAP_EFFECT_DISCARD;
+        if(SUCCEEDED(hr))hr=IDXGIFactory_CreateSwapChain(factory,(IUnknown *)g_device_state.d3d11_device,&desc,&g_device_state.swap_chain);
+        if(SUCCEEDED(hr))hr=IDXGIFactory_MakeWindowAssociation(factory,window,DXGI_MWA_NO_ALT_ENTER);
+        if(factory)IDXGIFactory_Release(factory);
+        if(adapter)IDXGIAdapter_Release(adapter);
+        if(dxgi)IDXGIDevice_Release(dxgi);
+        if(FAILED(hr))return hr;
+        g_device_state.hwnd=window;g_window_width=width;g_window_height=height;
+    } else if(!g_window_width || g_device_state.hwnd!=window)return E_UNEXPECTED;
+    else if(d3d8_window_needs_resize(width,height)) {
+        /* The caller has completed the original GPU queue before releasing
+         * these views. Flush retires D3D11On12's deferred object references. */
+        d3d8_window_release_surface();
+        ID3D11DeviceContext_Flush(g_device_state.d3d11_context);
+        hr=IDXGISwapChain_ResizeBuffers(g_device_state.swap_chain,2,width,height,DXGI_FORMAT_B8G8R8A8_UNORM,0);
+        if(FAILED(hr))return hr;
+        g_window_width=width;g_window_height=height;
+    }
+    if(!g_window_surface.d3d11_texture) {
+        hr=IDXGISwapChain_GetBuffer(g_device_state.swap_chain,0,&IID_ID3D11Texture2D,(void **)&g_window_surface.d3d11_texture);
+        if(SUCCEEDED(hr))hr=ID3D11Device_CreateRenderTargetView(g_device_state.d3d11_device,
+            (ID3D11Resource *)g_window_surface.d3d11_texture,NULL,&g_window_surface.rtv);
+        if(FAILED(hr))return hr;
+        g_window_surface.width=width;g_window_surface.height=height;g_window_surface.sample_count=1;
+        g_window_surface.format=D3DFMT_LIN_A8R8G8B8;
+    }
+    const float black[4]={0,0,0,1};
+    ID3D11DeviceContext_ClearRenderTargetView(g_device_state.d3d11_context,g_window_surface.rtv,black);
+    return d3d8_surface_resample_rect(image,&g_window_surface.iface,bounds);
+}
+HRESULT d3d8_window_present(void)
+{
+    if(!g_window_width || !g_device_state.swap_chain)return S_FALSE;
+    HRESULT hr=IDXGISwapChain_Present(g_device_state.swap_chain,d3d8_DisplayVSync()?1:0,DXGI_PRESENT_DO_NOT_WAIT);
+    return hr==DXGI_ERROR_WAS_STILL_DRAWING?S_FALSE:hr;
+}
+
 static HRESULT d3d11_create_render_targets(D3D8DeviceState *state)
 {
     ID3D11Texture2D *back_buffer = NULL;
@@ -374,6 +452,7 @@ static ULONG __stdcall dev_Release(IDirect3DDevice8 *self)
     LONG ref = InterlockedDecrement(&g_device_state.ref_count);
     if (ref <= 0) {
         /* Cleanup subsystems first */
+        d3d8_window_release();
         up_ring_shutdown();
         d3d8_gamma_shutdown();
         d3d8_video_memory_shutdown();
@@ -780,6 +859,7 @@ static void *convert_fan_or_quad(D3DPRIMITIVETYPE pt, const void *src,
 
 static ID3D11Buffer *g_up_ring_buffer = NULL;
 static UINT          g_up_ring_offset = 0;
+static uint64_t g_up_ring_generation=1;
 
 static HRESULT up_ring_init(void)
 {
@@ -798,7 +878,17 @@ static void up_ring_shutdown(void)
         ID3D11Buffer_Release(g_up_ring_buffer);
         g_up_ring_buffer = NULL;
     }
+    ++g_up_ring_generation;
     g_up_ring_offset = 0;
+}
+
+
+uint64_t d3d8_vertex_upload_generation(void) { return g_up_ring_generation; }
+BOOL d3d8_reuse_vertex_upload(uint64_t generation,UINT offset,UINT size,ID3D11Buffer **buffer)
+{
+    if(!g_up_ring_buffer || generation!=g_up_ring_generation ||
+       offset>g_up_ring_offset || size>g_up_ring_offset-offset) return FALSE;
+    *buffer=g_up_ring_buffer;return TRUE;
 }
 
 /* Upload vertex data to ring buffer, returns offset. Returns (UINT)-1 on failure. */
@@ -817,6 +907,7 @@ UINT d3d8_upload_vertices(const void *data, UINT size, ID3D11Buffer **buffer)
 
     /* Wrap around if not enough space */
     if (g_up_ring_offset + size > UP_RING_BUFFER_SIZE) {
+        ++g_up_ring_generation;
         g_up_ring_offset = 0;
         map_type = D3D11_MAP_WRITE_DISCARD;
     } else {
@@ -1575,6 +1666,11 @@ HRESULT d3d8_InitializeOffscreenDevice(UINT width, UINT height)
     g_device_state.height = height;
     hr = d3d8_backend_create_device(&g_device_state.d3d11_device,&g_device_state.d3d11_context);
     if (FAILED(hr)) return hr;
+    if(d3d8_IsNativeVulkan()) {
+        d3d8_init_default_states(&g_device_state);
+        g_device.lpVtbl=&g_device_vtbl;g_device_initialized=TRUE;
+        return S_OK;
+    }
     return d3d8_finish_device_initialization();
 }
 
