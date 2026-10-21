@@ -36,3 +36,10 @@ def test_generation_uses_current_lifter_body_without_fixed_hash(generator,tmp_pa
     receipt=generator.generate(image,tmp_path/'generated')
     assert receipt['functions']==1
     assert 'new_lifter_output();' in (tmp_path/'generated/recomp.c').read_text()
+
+
+@pytest.mark.parametrize('suffix', ['', '\nloc_00001000:\n    return;'])
+def test_exception_lowering_rejects_incomplete_ebp_frame(generator, suffix):
+    body='void sub_test(void)\n{\n    {"ebp", &ebp, sizeof ebp};'+suffix+'\n}'
+    with pytest.raises(ValueError, match='Missing .* for an EBP frame'):
+        generator.lower_exception_continuation(body)

@@ -36,9 +36,12 @@ def apply_project_edits(body, row):
 
 def lower_exception_continuation(body):
     """Resume an original catch without replaying a discarded native callee."""
-    first_label=body.index('\nloc_')
-    if '{"ebp", &ebp, sizeof ebp}' not in body[:first_label]:
+    prologue, separator, _ = body.partition('\nloc_')
+    if '{"ebp", &ebp, sizeof ebp}' not in prologue:
         return body
+    if not separator:
+        raise ValueError('Missing body label for an EBP frame')
+    first_label=len(prologue)
     before='    default: recomp_cont_invalid();\n    }'
     at=body.rfind(before,0,first_label)
     if at<0:
