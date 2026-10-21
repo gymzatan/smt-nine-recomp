@@ -42,6 +42,19 @@ static void check_images(void) {
     uint32_t actual[32][40];ok(nvk_image_read(copy,actual,sizeof actual[0]));
     for(unsigned y=0;y<32;y++)for(unsigned x=0;x<40;x++)
         assert(actual[y][x]==(x>=4 && x<36 && y>=4 && y<28?input[y-4][x-4]:0xff000000));
+    /* Alternate dimensions and new GPU contents: retained transfer storage
+     * must not retain pixels or overwrite the caller's row padding. */
+    for(unsigned pass=0;pass<3;pass++) {
+        for(unsigned y=0;y<24;y++)for(unsigned x=0;x<32;x++)input[y][x]^=0x00010305;
+        ok(nvk_image_upload(image,input,sizeof input[0]));
+        memset(output,0xcc,sizeof output);ok(nvk_image_read(image,output,sizeof output[0]));
+        for(unsigned y=0;y<24;y++)for(unsigned x=0;x<35;x++)
+            assert(output[y][x]==(x<32?input[y][x]:0xcccccccc));
+        const float color[4]={pass==0?1.0f:0,pass==1?1.0f:0,pass==2?1.0f:0,1};
+        ok(nvk_image_clear(copy,color));ok(nvk_image_read(copy,actual,sizeof actual[0]));
+        uint32_t expected=0xff000000u|(pass==0?0x00ff0000u:pass==1?0x0000ff00u:0x000000ffu);
+        for(unsigned y=0;y<32;y++)for(unsigned x=0;x<40;x++)assert(actual[y][x]==expected);
+    }
     nvk_image_destroy(copy);nvk_image_destroy(image);
 }
 static void check_original_draw(void) {
@@ -124,6 +137,16 @@ static void check_original_draw(void) {
     draw.vertices=large;draw.vertex_bytes=large_bytes;draw.upload_generation=NULL;draw.upload_offset=NULL;
     query=draw.query;draw.query=NULL;
     for(unsigned i=0;i<9;i++)ok(nvk_draw(&draw));
+    /* An idle ring segment can lack space without containing GPU work.
+     * Only the real draw should advance the submission count. Active ring
+     * rollover above and completed rollover here both preserve the pixels. */
+    ok(nvk_wait(nvk_fence()));
+    for(unsigned i=0;i<8;i++) {
+        uint64_t submitted=g_nvk_timings[4];
+        ok(nvk_draw(&draw));assert(g_nvk_timings[4]==submitted);
+        ok(nvk_wait(nvk_fence()));assert(g_nvk_timings[4]==submitted+1);
+    }
+
     draw.vertices=vertices;draw.vertex_bytes=sizeof vertices;draw.query=query;
     draw.upload_generation=&generation;draw.upload_offset=&upload_offset;
     ok(nvk_draw(&draw));assert(draw.uploaded==1);

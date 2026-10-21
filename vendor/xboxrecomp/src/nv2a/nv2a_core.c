@@ -812,12 +812,14 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
                      param == NV097_SET_FRONT_FACE_V_CCW);
             return;
         case NV097_SET_FRONT_POLYGON_MODE: case NV097_SET_BACK_POLYGON_MODE:
-            if (param != NV097_SET_FRONT_POLYGON_MODE_V_FILL)
+            if (param != NV097_SET_FRONT_POLYGON_MODE_V_FILL &&
+                param != NV097_SET_FRONT_POLYGON_MODE_V_LINE)
                 pgraph_stop(subchannel, graphics_class, method, param);
             SET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER],
                      method == NV097_SET_FRONT_POLYGON_MODE ? NV_PGRAPH_SETUPRASTER_FRONTFACEMODE :
                                                             NV_PGRAPH_SETUPRASTER_BACKFACEMODE,
-                     NV_PGRAPH_SETUPRASTER_FRONTFACEMODE_FILL);
+                     param == NV097_SET_FRONT_POLYGON_MODE_V_LINE ?
+                     NV_PGRAPH_SETUPRASTER_FRONTFACEMODE_LINE : NV_PGRAPH_SETUPRASTER_FRONTFACEMODE_FILL);
             return;
         case NV097_SET_DITHER_ENABLE:
             if (param > 1) pgraph_stop(subchannel, graphics_class, method, param);

@@ -438,7 +438,12 @@ static int fetch_attr(const VertexAttr * __restrict a, uint32_t index, float out
 
     out[0] = out[1] = out[2] = 0.0f;
     out[3] = 1.0f;
-    if (!a->size || !a->stride)
+    if (!a->size) {
+        /* Disabled arrays consume the original current attribute register. */
+        memcpy(out,s_gpu.imm_attr[a-s_gpu.attr],sizeof s_gpu.imm_attr[0]);
+        return 1;
+    }
+    if (!a->stride)
         return 0;
     if (s_gpu.inline_active) {
         /* The batch arrived as INLINE_ARRAY, so `offset` is a byte offset into
@@ -501,6 +506,9 @@ static uint32_t surface_bpp(void);
 
 static void note_drawn(void)
 {
+    /* Swizzled render targets are textures, not linear scanout buffers. */
+    if(GET_MASK(s_gpu.format,NV097_SET_SURFACE_FORMAT_TYPE)==NV097_SET_SURFACE_FORMAT_TYPE_SWIZZLE)
+        return;
     if (!s_gpu.drawn_stale && s_gpu.drawn_offset
         && s_gpu.clip_w * s_gpu.clip_h < s_gpu.drawn_w * s_gpu.drawn_h)
         return;
@@ -1430,9 +1438,9 @@ static void raster_triangle(const float a[2], const float b[2],
     note_drawn();
 }
 
-/* Attribute 3 is diffuse colour in every NV2A layout that sets one. Absent it,
- * white -- a visible wrong colour beats an invisible correct one during
- * bring-up. */
+/* Attribute 3 supplies diffuse colour. A disabled array consumes its
+ * original current register through the same attribute reader used by
+ * programmable vertices. */
 /* Which attribute carries the colour.
  *
  * Slot 3 is diffuse by convention and titles that follow it are read straight
@@ -2485,7 +2493,7 @@ static int transform_vertex(uint32_t index, uint32_t inputs, Nv2aVshOutput *out)
     if (s_ftrace == 2) inputs |= (1u << 0) | (1u << 9);
     for (a = 0; a < NV2A_VSH_INPUTS; a++)
         if (inputs & (1u << a))
-            fetch_attr(&s_gpu.attr[a], index, in[a]);   /* absent: 0,0,0,1 */
+            fetch_attr(&s_gpu.attr[a], index, in[a]);   /* disabled arrays: current registers */
     int result = nv2a_vsh_run((const float (*)[4])in, out);
     if (s_ftrace == 2 && result && !isfinite(out->pos[3])) {
         static unsigned invalid_w_traces;
@@ -2744,7 +2752,13 @@ static void raster_batch(void)
         return;
 #if defined(_WIN32)
     if(hw_enabled()) s_hw_topology=s_gpu.prim==NV_PRIM_POINTS?D3D11_PRIMITIVE_TOPOLOGY_POINTLIST:s_gpu.prim<=NV_PRIM_LINE_STRIP?D3D11_PRIMITIVE_TOPOLOGY_LINELIST:D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    else
 #endif
+    if(s_gpu.prim>NV_PRIM_LINE_STRIP && (nv2a_get_state()->pgraph.regs[NV_PGRAPH_SETUPRASTER]&
+       (NV_PGRAPH_SETUPRASTER_FRONTFACEMODE|NV_PGRAPH_SETUPRASTER_BACKFACEMODE))) {
+        fprintf(stderr,"[STOP] non-solid polygons require a hardware raster consumer\n");
+        exit(5);
+    }
     static int no_vsh = -1;
     if (no_vsh < 0)
         no_vsh = getenv("RECOMP_NO_VSH") != NULL;

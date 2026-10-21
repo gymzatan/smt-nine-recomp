@@ -53,6 +53,7 @@ enum { HW_VERTEX_CACHE_SETS=128, HW_VERTEX_CACHE_WAYS=4,
 typedef struct HwVertexRange { HwMemory *memory;size_t offset,bytes; } HwVertexRange;
 typedef struct HwVertexBatch {
     VertexAttr attr[16];
+    float current[16][4];
     uint32_t inputs,count,vertices,bytes,hash;
     uint64_t used,upload_generation;
     uint32_t upload_offset,upload_primitive,upload_provoking,upload_indices;
@@ -374,11 +375,17 @@ static HwVertexBatch *hw_vertex_batch_begin(uint32_t inputs,unsigned attribute_c
     if(s_gpu.inline_active || n<=4 ||
        (uint64_t)n*(attribute_count*16u+8u)>HW_VERTEX_CACHE_ENTRY_BYTES) return NULL;
     VertexAttr attributes[16]={0};
+    float current[16][4]={0};
     uint32_t hash=2166136261u;
     for(unsigned i=0;i<16;i++) if(inputs&(1u<<i)) {
         attributes[i]=s_gpu.attr[i];
         const uint32_t *words=(const uint32_t *)&attributes[i];
         for(unsigned word=0;word<sizeof(VertexAttr)/4;word++) hash=(hash^words[word])*16777619u;
+        if(!attributes[i].size) {
+            memcpy(current[i],s_gpu.imm_attr[i],sizeof current[i]);
+            uint32_t bits[4];memcpy(bits,current[i],sizeof bits);
+            for(unsigned word=0;word<4;word++) hash=(hash^bits[word])*16777619u;
+        }
     }
     hash=(hash^inputs)*16777619u;hash=(hash^n)*16777619u;
     hash=(hash^s_gpu.idx[0])*16777619u;
@@ -388,11 +395,12 @@ static HwVertexBatch *hw_vertex_batch_begin(uint32_t inputs,unsigned attribute_c
     HwVertexBatch *selected=NULL;
     for(HwVertexBatch *entry=s_hw_vertex_buckets[hash%HW_VERTEX_CACHE_SETS];entry;entry=entry->next) {
         if(entry->data && entry->hash==hash && entry->inputs==inputs && entry->count==n &&
-           !memcmp(entry->attr,attributes,sizeof attributes) && !memcmp(entry->data,s_gpu.idx,n*4)) {
+           !memcmp(entry->attr,attributes,sizeof attributes) && !memcmp(entry->current,current,sizeof current) && !memcmp(entry->data,s_gpu.idx,n*4)) {
             entry->used=++s_hw_vertex_cache_clock;
             if(entry->valid) {
                 memcpy(s_hw_program_vertex_rows,entry->data+n*4,n*4);
-                memcpy(s_hw_program_upload.vertex,entry->data+n*8,entry->bytes);
+                /* Vulkan consumes the existing cached rows directly. */
+                if(!d3d8_IsNativeVulkan()) memcpy(s_hw_program_upload.vertex,entry->data+n*8,entry->bytes);
                 s_hw_program_vertex_count=entry->vertices;
                 s_gpu.vertices_reused+=n-entry->vertices;
                 ++s_hw_vertex_cache_hits;*hit=1;return entry;
@@ -446,6 +454,7 @@ static HwVertexBatch *hw_vertex_batch_begin(uint32_t inputs,unsigned attribute_c
     selected->data=malloc((size_t)n*(attribute_count*16u+8u));
     if(!selected->data) hw_check(E_OUTOFMEMORY,"vertex conversion cache");
     memcpy(selected->attr,attributes,sizeof attributes);
+    memcpy(selected->current,current,sizeof current);
     selected->inputs=inputs;selected->count=n;selected->hash=hash;
     selected->used=++s_hw_vertex_cache_clock;
     memcpy(selected->data,s_gpu.idx,n*4);
@@ -715,7 +724,9 @@ int nv2a_pb_handle_memory_fault(uintptr_t address,int is_write)
         hw_leave();return 0;
     }
     uint64_t started=gpu_timing_clock();
-    if(owner) hw_publish_all();else hw_collect_queries(1);
+    /* A texture-only guard was found after excluding all colour and output
+     * pages above. Invalidating its CPU bytes cannot require unrelated output. */
+    if(owner) hw_publish_all();else if(!texture_fault) hw_collect_queries(1);
     if(is_write) {
         if(texture_fault) hw_release_texture_range(memory,offset&~(size_t)4095,4096);
         else if(owner && offset>=owner->memory_offset && offset<owner->memory_offset+hw_color_bytes(owner)) hw_mark_cpu_write(owner->memory,owner->memory_offset,hw_color_bytes(owner),NULL);
@@ -1228,10 +1239,13 @@ static void hw_texture_bind(unsigned stage)
     }
     for(HwColor *color=s_hw_colors;color;color=color->next)
         if(source->offset < color->address+color->height*color->pitch && color->address < source->offset+bytes &&
-           (color->dirty || hw_pending_output(NULL,0,0))) hw_publish_all();
-    HwTexture *entry;
-    for(entry=s_hw_textures;entry;entry=entry->next)
+           color->dirty) hw_publish_all();
+    HwTexture *entry,**link;
+    for(link=&s_hw_textures;(entry=*link)!=NULL;link=&entry->next)
         if(entry->identity.offset==source->offset && entry->identity.width==source->width && entry->identity.height==source->height && entry->identity.color==source->color && entry->identity.pitch==source->pitch && entry->identity.cube==source->cube && entry->identity.levels==source->levels && entry->raw_size==bytes) break;
+    if(entry && link!=&s_hw_textures) {
+        *link=entry->next;entry->next=s_hw_textures;s_hw_textures=entry;
+    }
     const uint8_t *raw=(uint8_t *)xbox_GetMemoryOffset()+source->offset;
     const uint32_t *palette=source->color==0x0B ? (uint32_t *)((uint8_t *)xbox_GetMemoryOffset()+source->palette) : NULL;
     int created=!entry;
@@ -1465,6 +1479,7 @@ static void hw_vk_draw_state(NvkDraw *draw,HwColor *color,HwDepth *depth)
     const DWORD *rs=d3d8_GetRenderStates();
     draw->color=hw_vk_render(color);draw->depth=depth?depth->native:NULL;
     draw->topology=hw_vk_topology(s_hw_topology);
+    draw->wireframe=rs[D3DRS_FILLMODE]==D3DFILL_WIREFRAME;
     draw->depth_test=rs[D3DRS_ZENABLE]!=0;draw->depth_write=rs[D3DRS_ZWRITEENABLE]!=0;
     draw->depth_compare=(VkCompareOp)(rs[D3DRS_ZFUNC]-1);
     draw->stencil=rs[D3DRS_STENCILENABLE]!=0;
@@ -1484,6 +1499,24 @@ static void hw_vk_draw_state(NvkDraw *draw,HwColor *color,HwDepth *depth)
         draw->textures[i].w=VK_SAMPLER_ADDRESS_MODE_REPEAT;
         draw->textures[i].filter=tss[D3DTSS_MINFILTER]==D3DTEXF_LINEAR?VK_FILTER_LINEAR:VK_FILTER_NEAREST;
     }
+}
+static DWORD hw_polygon_fill_mode(void)
+{
+    if(s_hw_topology!=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST &&
+       s_hw_topology!=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ) return D3DFILL_SOLID;
+    uint32_t raster=nv2a_get_state()->pgraph.regs[NV_PGRAPH_SETUPRASTER];
+    unsigned front=GET_MASK(raster,NV_PGRAPH_SETUPRASTER_FRONTFACEMODE);
+    unsigned back=GET_MASK(raster,NV_PGRAPH_SETUPRASTER_BACKFACEMODE);
+    if(front!=back) {
+        unsigned cull=GET_MASK(raster,NV_PGRAPH_SETUPRASTER_CULLCTRL);
+        if((raster&NV_PGRAPH_SETUPRASTER_CULLENABLE) && cull==NV_PGRAPH_SETUPRASTER_CULLCTRL_FRONT) front=back;
+        else if(!((raster&NV_PGRAPH_SETUPRASTER_CULLENABLE) &&
+                  (cull==NV_PGRAPH_SETUPRASTER_CULLCTRL_BACK || cull==NV_PGRAPH_SETUPRASTER_CULLCTRL_FRONT_AND_BACK)))
+            hw_check(E_NOTIMPL,"different visible front/back polygon modes");
+    }
+    if(front!=NV_PGRAPH_SETUPRASTER_FRONTFACEMODE_FILL && front!=NV_PGRAPH_SETUPRASTER_FRONTFACEMODE_LINE)
+        hw_check(E_NOTIMPL,"polygon mode");
+    return front==NV_PGRAPH_SETUPRASTER_FRONTFACEMODE_LINE?D3DFILL_WIREFRAME:D3DFILL_SOLID;
 }
 static void hw_flush_batch(void)
 {
@@ -1506,6 +1539,8 @@ static void hw_flush_batch(void)
     IDirect3DDevice8 *device=d3d8_GetDevice();
     const IDirect3DDevice8Vtbl *v=device->lpVtbl;
     v->SetRenderState(device,D3DRS_CULLMODE,D3DCULL_NONE);
+    DWORD fill_mode=hw_polygon_fill_mode();
+    v->SetRenderState(device,D3DRS_FILLMODE,fill_mode);
     v->SetRenderState(device,D3DRS_ZENABLE,s_gpu.depth_test);
     v->SetRenderState(device,D3DRS_ZFUNC,s_gpu.depth_test?s_gpu.depth_func-0x1FF:D3DCMP_ALWAYS);
     v->SetRenderState(device,D3DRS_ZWRITEENABLE,s_gpu.depth_test && s_gpu.depth_mask);
@@ -1725,15 +1760,16 @@ static void hw_flush_batch(void)
     }
     uint32_t vertex_bytes=s_hw_program_vertex_count*vertex_stride;
     uint32_t bytes=s_hw_program_active ? vertex_bytes+s_hw_count*sizeof(uint32_t) : s_hw_count*sizeof *s_hw_vertices;
-    if(s_hw_program_active) memmove((uint8_t *)&s_hw_program_upload+vertex_bytes,s_hw_program_upload.indices,s_hw_count*sizeof(uint32_t));
+    /* Only the D3D upload API needs one contiguous vertex/index payload. */
+    if(s_hw_program_active && !d3d8_IsNativeVulkan()) memmove((uint8_t *)&s_hw_program_upload+vertex_bytes,s_hw_program_upload.indices,s_hw_count*sizeof(uint32_t));
     ID3D11Buffer *vertices_buffer=NULL;
     UINT offset=0;
     HwVertexBatch *entry=s_hw_program_active?s_hw_vertex_batch:NULL;
     uint32_t provoking=pg->regs[NV_PGRAPH_CONTROL_3]&NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX;
     if(d3d8_IsNativeVulkan()) {
-        native_draw.vertices=s_hw_program_active?(const void *)&s_hw_program_upload:(const void *)s_hw_vertices;
+        native_draw.vertices=s_hw_program_active?(entry?(const void *)(entry->data+entry->count*8):(const void *)&s_hw_program_upload):(const void *)s_hw_vertices;
         native_draw.vertex_bytes=s_hw_program_active?vertex_bytes:bytes;native_draw.stride=vertex_stride;native_draw.count=s_hw_count;
-        if(s_hw_program_active)native_draw.indices=(const uint32_t *)((const uint8_t *)&s_hw_program_upload+vertex_bytes);
+        if(s_hw_program_active)native_draw.indices=s_hw_program_upload.indices;
         if(entry && entry->valid) {
             if(entry->upload_primitive!=s_gpu.prim || entry->upload_provoking!=provoking || entry->upload_indices!=s_hw_count)
                 entry->upload_generation=0;
@@ -1782,6 +1818,13 @@ static void hw_flush_batch(void)
         HwQuery result={0};result.query=query;hw_append_query(result);
     }
     RECT bounds=s_hw_bounds;
+    if(fill_mode==D3DFILL_WIREFRAME) {
+        /* Edge coverage extends half a pixel beyond filled-triangle bounds. */
+        if(bounds.left>(LONG)s_gpu.clip_x)--bounds.left;
+        if(bounds.top>(LONG)s_gpu.clip_y)--bounds.top;
+        if(bounds.right<(LONG)(s_gpu.clip_x+s_gpu.clip_w))++bounds.right;
+        if(bounds.bottom<(LONG)(s_gpu.clip_y+s_gpu.clip_h))++bounds.bottom;
+    }
     if(bounds.right>(LONG)color->width) bounds.right=(LONG)color->width;
     if(bounds.bottom>(LONG)color->height) bounds.bottom=(LONG)color->height;
     hw_end_color_write(color,bounds);

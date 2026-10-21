@@ -299,7 +299,11 @@ static inline uint16_t recomp_fxam(double value) {
  * The unordered case is not a curiosity: `fucompp` of a value with itself
  * followed by `test ah, 0x44; jp` is how this era's CRT asks "is this a NaN",
  * and collapsing it to "equal" answers no every time. */
-#define RECOMP_FCMP(a, b)     (((a) != (a) || (b) != (b)) ? 2 : (a) < (b) ? -1 : (a) > (b) ? 1 : 0)
+static inline int recomp_fcmp(double a, double b) {
+    return (a != a || b != b) ? 2 : a < b ? -1 : a > b ? 1 : 0;
+}
+/* A lifted comparison reads each operand once, including volatile memory. */
+#define RECOMP_FCMP(a, b) recomp_fcmp((a), (b))
 /* x87 rounding to an integral value under the guest RC bits (control word
  * bits 10-11: 0 nearest-even, 1 down, 2 up, 3 toward zero). FRNDINT rounds
  * this way, and so does FIST before its store; neither may follow the HOST's

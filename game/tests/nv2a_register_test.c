@@ -72,6 +72,7 @@ void xbox_FramebufferWindowPresent(uint32_t address, uint32_t pitch) { (void)add
 void xbox_Nv2aFrameCounterFlip(void) {}
 extern int nv2a_pb_exec_method(uint32_t, uint32_t, uint32_t, uint8_t *);
 extern void nv2a_pb_publish(void);
+extern void nv2a_pb_checkpoint_publish(void);
 static uint32_t calls, methods[16], parameters[16];
 static void observe_pci_irq(void *opaque, int level)
 {
@@ -326,7 +327,7 @@ static int check_dialogue_panel(const char *texture_path)
     return 0;
 }
 
-static int check_movie_background(void)
+static int check_movie_background(int polygon_only)
 {
     const uint32_t bytes = 2u * 1024u * 1024u;
     uint8_t *ram = fixture_shared_ram(bytes), ramin[4096] = {0};
@@ -450,6 +451,8 @@ static int check_movie_background(void)
     pgraph_method(gpu,0,NV097_SET_CONTEXT_DMA_SEMAPHORE,0x100);
     pgraph_method(gpu,0,NV097_SET_SEMAPHORE_OFFSET,0x1F0000);
     pgraph_method(gpu,0,NV097_BACK_END_WRITE_SEMAPHORE_RELEASE,0x71A5C301);
+    /* The physical backend releases this output after actual GPU completion. */
+    nv2a_pb_checkpoint_publish();
     assert(ldl_le_p(ram+0x1F0000)==0x71A5C301);
     assert(ldl_le_p(s_fixture_tiled+0x1000+32*2560+22*4)==0xFF000000);
     assert(ldl_le_p(ram+0x1000+32*2560+22*4)==0xFF000000);
@@ -516,6 +519,33 @@ static int check_movie_background(void)
     for(unsigned i=0;i<2;i++) nv2a_vsh_set_instruction(i,s_passthrough_program+i*4);
     const float unit[4]={1,1,1,1},zero[4]={0};
     nv2a_vsh_set_constant(58,unit);nv2a_vsh_set_constant(59,zero);
+    /* Encoding effects switch a real mesh to wireframe, then restore fill.
+     * Exercise both original vertex paths and the cached host raster states. */
+    if(getenv("RECOMP_GPU_D3D11") && !strcmp(getenv("RECOMP_GPU_D3D11"),"1")) {
+    for(unsigned fixed_path=0;fixed_path<2;fixed_path++) {
+        pgraph_method(gpu,0,NV097_SET_TRANSFORM_EXECUTION_MODE,fixed_path?0:2);
+        vertices[0]=(struct vertex_fixture){20,20,0.5f,1,0xFFFF0000};
+        vertices[1]=(struct vertex_fixture){60,20,0.5f,1,0xFFFF0000};
+        vertices[2]=(struct vertex_fixture){20,60,0.5f,1,0xFFFF0000};
+        memcpy(ram+0x180000,vertices,sizeof vertices);
+        for(unsigned phase=0;phase<3;phase++) {
+            unsigned mode=phase==1?NV097_SET_FRONT_POLYGON_MODE_V_LINE:NV097_SET_FRONT_POLYGON_MODE_V_FILL;
+            pgraph_method(gpu,0,NV097_SET_FRONT_POLYGON_MODE,mode);
+            pgraph_method(gpu,0,NV097_SET_BACK_POLYGON_MODE,mode);
+            memset(ram+0x1000,0xA5,640u*480u*4u);
+            pgraph_method(gpu,0,NV097_SET_BEGIN_END,5);
+            pgraph_method(gpu,0,NV097_DRAW_ARRAYS,2u<<24);
+            pgraph_method(gpu,0,NV097_SET_BEGIN_END,0);nv2a_pb_publish();
+            assert(ldl_le_p(ram+0x1000+30*2560+30*4)==(phase==1?0xA5A5A5A5:0xFFFF0000));
+            unsigned edge=0;
+            for(unsigned y=19;y<=21;y++) edge+=ldl_le_p(ram+0x1000+y*2560+30*4)==0xFFFF0000;
+            assert(edge);
+        }
+    }
+    pgraph_method(gpu,0,NV097_SET_TRANSFORM_EXECUTION_MODE,2);
+    fprintf(stderr,"[POLYGON] program and fixed meshes preserve empty wireframe interiors, visible edges and restored fill\n");
+    if(polygon_only) return 0;
+    }
     vertices[0]=(struct vertex_fixture){20,20,0.5f,1,0xFFFF0000};
     vertices[1]=(struct vertex_fixture){60,20,0.5f,1,0xFF00FF00};
     vertices[2]=(struct vertex_fixture){20,60,0.5f,1,0xFF0000FF};
@@ -1321,7 +1351,11 @@ int main(int argc, char **argv)
     if(argc==2 && !strcmp(argv[1],"--reject-fixed-spot")) return check_point_geometry(1);
     if(argc==2 && !strcmp(argv[1],"--reject-fixed-specular-coefficients")) return check_point_geometry(2);
     if (argc == 2 && !strcmp(argv[1], "--movie-background"))
-        return check_movie_background();
+        return check_movie_background(0);
+    if(argc==2 && !strcmp(argv[1],"--polygon-mode")) {
+        assert(getenv("RECOMP_GPU_D3D11") && !strcmp(getenv("RECOMP_GPU_D3D11"),"1"));
+        return check_movie_background(1);
+    }
     if (argc == 3 && !strcmp(argv[1], "--dialogue-panel"))
         return check_dialogue_panel(argv[2]);
     uint8_t ram[4096] = {0}, ramin[4096] = {0};

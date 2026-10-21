@@ -215,7 +215,10 @@ DWORD xbox_checkpoint_wait(ULONG count,const HANDLE *handles,BOOL wait_all,
         DWORD result=count?WaitForMultipleObjectsEx(count,handles,wait_all,slice,alertable):
                            SleepEx(slice,alertable);
         if (!count && result==0) result=WAIT_TIMEOUT;
+        /* A final-slice timeout already completes the remaining interval.
+         * Do not repeat it while the coarser tick counter has not advanced. */
         if (!tracked || result!=WAIT_TIMEOUT ||
+            (milliseconds!=INFINITE && slice==remaining) ||
             (milliseconds!=INFINITE && GetTickCount64()-started>=milliseconds))
             return result;
     }

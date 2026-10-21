@@ -143,6 +143,17 @@ target_sources(${PROJECT_NAME} PRIVATE $<TARGET_OBJECTS:smt9_native_matrix>)
 # Link against the xboxrecomp umbrella target (all 6 runtime libraries)
 if(WIN32)
     target_sources(${PROJECT_NAME} PRIVATE src/app.rc)
+    set(SMT9_VULKAN_RUNTIME
+        "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/backends/vulkan/dxcompiler.dll"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/DXC_LICENSE_LLVM"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/DXC_LICENSE_MS")
+    set(SMT9_OPENGL_RUNTIME
+        "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/backends/opengl/d3d11.dll"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/backends/opengl/nogi.dll"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/backends/opengl/wined3d.dll"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/WINED3D_COPYING.LIB")
+    set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
+        ${SMT9_VULKAN_RUNTIME} ${SMT9_OPENGL_RUNTIME})
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/vulkan"
         COMMAND ${CMAKE_COMMAND} -E rm -f
@@ -150,16 +161,11 @@ if(WIN32)
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/vulkan/nvgi.dll"
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/vulkan/DXVK_LICENSE"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/backends/vulkan/dxcompiler.dll"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/DXC_LICENSE_LLVM"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/DXC_LICENSE_MS"
+            ${SMT9_VULKAN_RUNTIME}
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/vulkan"
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/opengl"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/backends/opengl/d3d11.dll"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/backends/opengl/nogi.dll"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/wined3d/wined3d.dll"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../reference/gpu_runtime/WINED3D_COPYING.LIB"
+            ${SMT9_OPENGL_RUNTIME}
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/backends/opengl")
 endif()
 

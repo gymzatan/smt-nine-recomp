@@ -13,7 +13,7 @@ def backend_probe(tmp_path_factory):
     assert compiler, 'requires the existing MSVC environment'
     work = tmp_path_factory.mktemp('backend-startup')
     source = (ROOT/'vendor/xboxrecomp/src/d3d/d3d8_backend.c').read_text()
-    body = source[source.index('static void release_opengl_timer('):source.index('static D3D8TextureAssetLookup')]
+    body = source[source.index('static void release_backend_timer('):source.index('static D3D8TextureAssetLookup')]
     (work/'probe.c').write_text(r'''
 #define COBJMACROS
 #include <windows.h>
@@ -70,13 +70,17 @@ int main(int argc,char **argv) {
     if(!strcmp(argv[1],"all"))results[3]=DXGI_ERROR_UNSUPPORTED;
     if(!strcmp(argv[1],"d3d12") || !strcmp(argv[1],"auto-d3d12"))results[2]=S_OK;
     if(!strncmp(argv[1],"gl",2))results[1]=S_OK;
-    timer_failure=!strcmp(argv[1],"gl-timer-fail");exit_failure=!strcmp(argv[1],"gl-exit-fail");
+    timer_failure=!strcmp(argv[1],"timer-fail");exit_failure=!strcmp(argv[1],"exit-fail");
     if(!strcmp(argv[1],"vulkan") || !strcmp(argv[1],"explicit-vulkan")) {
         results[0]=S_OK;
         if(!strcmp(argv[1],"explicit-vulkan"))_putenv_s("RECOMP_GPU_BACKEND","Vulkan");
     }
     HRESULT hr=d3d8_backend_create_device(&device,&context);
-    if(!strcmp(argv[1],"vulkan") || !strcmp(argv[1],"explicit-vulkan")) {
+    if(timer_failure || exit_failure) {
+        assert(hr==(timer_failure?E_FAIL:E_OUTOFMEMORY));
+        assert(!attempts && !loads && !releases && !native_shutdowns && !native_vulkan && !device && !context);
+    }
+    else if(!strcmp(argv[1],"vulkan") || !strcmp(argv[1],"explicit-vulkan")) {
         assert(SUCCEEDED(hr) && native_vulkan && attempts==1 && !loads && !releases && !native_shutdowns && !device && !context);
         assert(!strcmp(active_backend,"Vulkan"));
     }
@@ -90,10 +94,9 @@ int main(int argc,char **argv) {
         else if(!strcmp(argv[1],"gl")){assert(SUCCEEDED(hr) && attempts==2 && releases==0 && !strcmp(active_backend,"OpenGL"));}
         else {assert(SUCCEEDED(hr) && attempts==4 && releases==4 && !strcmp(active_backend,"D3D11"));}
     }
-    if(!strcmp(argv[1],"gl")){assert(timer_begins==1 && timer_ends==0 && timer_cleanup);timer_cleanup();assert(timer_ends==1);}
-    else if(timer_failure){assert(timer_begins==1 && timer_ends==0 && !timer_cleanup);}
+    if(timer_failure){assert(timer_begins==1 && timer_ends==0 && !timer_cleanup);}
     else if(exit_failure){assert(timer_begins==1 && timer_ends==1 && !timer_cleanup);}
-    else assert(!timer_begins && !timer_ends && !timer_cleanup);
+    else {assert(timer_begins==1 && timer_ends==0 && timer_cleanup);timer_cleanup();assert(timer_ends==1);}
     return 0;
 }
 ''',encoding='utf-8')
@@ -102,7 +105,7 @@ int main(int argc,char **argv) {
     return work/'probe.exe'
 
 
-@pytest.mark.parametrize('mode',['auto','explicit','load','all','gl','gl-timer-fail','gl-exit-fail','d3d12','auto-d3d12','vulkan','explicit-vulkan'])
+@pytest.mark.parametrize('mode',['auto','explicit','load','all','gl','timer-fail','exit-fail','d3d12','auto-d3d12','vulkan','explicit-vulkan'])
 def test_startup_failure_selection_and_cleanup(backend_probe,mode):
     result=subprocess.run([str(backend_probe),mode],capture_output=True,text=True,timeout=10)
     assert result.returncode==0,result.stdout+result.stderr

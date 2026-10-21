@@ -73,7 +73,7 @@ typedef struct NvkDraw {
     unsigned uniform_count;
     NvkUniform uniforms[12];
     NvkTexture textures[4];
-    VkBool32 depth_test,depth_write,blend,stencil;
+    VkBool32 depth_test,depth_write,blend,stencil,wireframe;
     VkCompareOp depth_compare;
     VkStencilOpState stencil_state;
     VkBlendFactor source_blend,destination_blend;

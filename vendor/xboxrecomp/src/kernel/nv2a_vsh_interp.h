@@ -52,7 +52,8 @@ typedef struct {
 } Nv2aVshOutput;
 
 void nv2a_vsh_set_load_slot(uint32_t slot);           /* _PROGRAM_LOAD      */
-void nv2a_vsh_program_word(uint32_t word);            /* _PROGRAM(i)        */
+void nv2a_vsh_program_word(uint32_t word);
+void nv2a_vsh_program_words(const uint32_t *words, uint32_t count);            /* _PROGRAM(i)        */
 void nv2a_vsh_set_start_slot(uint32_t slot);          /* _PROGRAM_START     */
 void nv2a_vsh_set_constant_load(uint32_t index);      /* _CONSTANT_LOAD     */
 void nv2a_vsh_constant_word(uint32_t word);           /* _CONSTANT(i)       */

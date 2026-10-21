@@ -30,6 +30,8 @@ def dll(marker=b'fixture', name_offset=0x280):
     raw[name_offset:name_offset+9]=b'dxgi.dll\0'
     struct.pack_into('<Q',raw,0x2a0,0x10c0);struct.pack_into('<Q',raw,0x2b0,0x10c0)
     raw[0x2c0:0x2c0+20]=b'\0\0CreateDXGIFactory\0\0'
+    raw[0x300:0x300+23]=b'NtAlertThreadByThreadId\0'
+    raw[0x330:0x330+24]=b'NtWaitForAlertByThreadId\0'
     raw[0x380:0x380+len(marker)]=marker
     return bytes(raw)
 
@@ -149,3 +151,27 @@ def test_native_vulkan_selects_x64_compiler_without_rewriting_its_imports(tmp_pa
     assert (tmp_path/'runtime/backends/vulkan/dxcompiler.dll').read_bytes() == native
     assert not (tmp_path/'runtime/backends/vulkan/d3d11.dll').exists()
     assert not (tmp_path/'runtime/backends/vulkan/nvgi.dll').exists()
+
+
+def test_wined3d_selects_existing_events_and_keeps_download_original(tmp_path,monkeypatch,dependency):
+    module,payload,entry=dependency
+    monkeypatch.setattr(module.urllib.request,'urlretrieve',lambda url,target:Path(target).write_bytes(payload))
+    module.prepare()
+    prepared=(tmp_path/'reference/gpu_runtime/wined3d/wined3d.dll').read_bytes()
+    original=dll(b'wined3d.dll')
+    assert len(prepared)==len(original)
+    assert [i for i,(a,b) in enumerate(zip(original,prepared)) if a!=b]==[0x300,0x330]
+    assert prepared[0x300]==prepared[0x330]==0
+    assert (tmp_path/'runtime/backends/opengl/wined3d.dll').read_bytes()==prepared
+    assert (tmp_path/'build/downloads/wined3d.zip').read_bytes()==payload
+    assert (tmp_path/'reference/gpu_runtime/wined3d/dxgi.dll').read_bytes()==dll(b'dxgi.dll')
+
+
+@pytest.mark.parametrize('failure',['missing','duplicate','executable'])
+def test_wined3d_rejects_ambiguous_alert_probe_layout(dependency,failure):
+    module,_,_=dependency
+    original=bytearray(dll(b'wined3d.dll'))
+    if failure=='missing':original[0x330]=0
+    elif failure=='duplicate':original[0x380:0x380+23]=b'NtAlertThreadByThreadId\0'
+    else:struct.pack_into('<I',original,0x98+240+36,0x60000040)
+    with pytest.raises(ValueError):module.use_wined3d_events(bytes(original))

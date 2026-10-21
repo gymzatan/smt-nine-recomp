@@ -96,6 +96,7 @@ struct Context {
     VkPhysicalDevice physical{};
     VkPhysicalDeviceProperties properties{};
     VkPhysicalDeviceMemoryProperties memory{};
+    VkBool32 fill_mode_non_solid{};
     VkDevice device{};
     VkQueue queue{};
     unsigned family{};
@@ -105,6 +106,7 @@ struct Context {
     VkPipelineLayout pipeline_layout{};
     VkPipelineCache pipeline_cache{};
     std::array<Chunk,chunk_count> chunks{};
+    Buffer readback;
     unsigned active{};
     bool recording{};
     NvkImage *render_color{},*render_depth{};
@@ -240,9 +242,15 @@ uint32_t upload_uniform(unsigned slot,const void *data,size_t bytes,VkDeviceSize
     return range.offset;
 }
 void reserve(size_t bytes) {
-    Chunk &current=begin();
-    if(current.used+bytes<=current.upload.size && current.sets<2048)return;
-    submit();
+    Chunk &current=context.chunks[context.active];
+    if(current.used+bytes<=current.upload.size) {
+        begin();
+        if(current.sets<2048)return;
+    }
+    /* Capacity alone does not create GPU work. An idle, full segment can
+     * advance without opening and submitting an empty command buffer. */
+    if(context.recording)submit();
+    else context.active=(context.active+1)%chunk_count;
     Chunk &next=begin();
     if(next.used+bytes>next.upload.size) {
         /* Only overwriting data waits for later submissions that reused its
@@ -405,7 +413,8 @@ int nvk_initialize(const wchar_t *compiler_path) {
         std::vector<VkQueueFamilyProperties> queues(families);vkGetPhysicalDeviceQueueFamilyProperties(device,&families,queues.data());
         unsigned score=props.deviceType==VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU?2:1;
         for(unsigned i=0;i<families;i++)if((queues[i].queueFlags&VK_QUEUE_GRAPHICS_BIT) && score>best) {
-            best=score;context.physical=device;context.family=i;context.properties=props;break;
+            best=score;context.physical=device;context.family=i;context.properties=props;
+            context.fill_mode_non_solid=features.features.fillModeNonSolid;break;
         }
     }
     require(context.physical!=VkPhysicalDevice{},"No Vulkan 1.3 graphics device with geometry shaders, timelines and dynamic rendering");
@@ -416,6 +425,7 @@ int nvk_initialize(const wchar_t *compiler_path) {
     VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};f13.dynamicRendering=VK_TRUE;
     VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};f12.pNext=&f13;f12.timelineSemaphore=f12.samplerMirrorClampToEdge=VK_TRUE;
     VkPhysicalDeviceFeatures features{};features.geometryShader=features.occlusionQueryPrecise=VK_TRUE;
+    features.fillModeNonSolid=context.fill_mode_non_solid;
     const char *device_extensions[]={"VK_KHR_swapchain"};
     VkDeviceCreateInfo info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};info.pNext=&f12;info.queueCreateInfoCount=1;info.pQueueCreateInfos=&queue;
     info.pEnabledFeatures=&features;info.enabledExtensionCount=1;info.ppEnabledExtensionNames=device_extensions;
@@ -499,7 +509,13 @@ int nvk_image_read(NvkImage *image,void *pixels,size_t pitch) {
     NVK_BEGIN
     require(image && pixels && image->format!=VK_FORMAT_D32_SFLOAT_S8_UINT && pitch>=image->width*4,"Invalid Vulkan color readback");
     size_t row=image->width*4,bytes=row*image->height*image->layers;
-    Buffer staging=buffer_create(bytes,VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    /* The original graphics lock serializes reads, and each read waits for
+     * its GPU copy before returning. Reuse storage, never pixel contents. */
+    Buffer &staging=context.readback;
+    if(staging.size<bytes) {
+        Buffer larger=buffer_create(bytes,VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        destroy(staging);staging=larger;
+    }
     try {
         transition(image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         VkBufferImageCopy copy{};copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,image->layers};copy.imageExtent={image->width,image->height,1};
@@ -507,7 +523,7 @@ int nvk_image_read(NvkImage *image,void *pixels,size_t pitch) {
         wait_serial(submit());host_memory(staging,true);
         for(unsigned y=0;y<image->height*image->layers;y++)
             std::memcpy(static_cast<char *>(pixels)+pitch*y,static_cast<char *>(staging.mapped)+row*y,row);
-        destroy(staging);return 1;
+        return 1;
     }catch(...){destroy(staging);throw;}
     NVK_END(0)
 }
@@ -679,6 +695,7 @@ VkPipeline pipeline(const NvkDraw &draw) {
     for(unsigned i=0;i<draw.attribute_count;i++)append(key,draw.attributes[i]);
     append(key,draw.depth_test);append(key,draw.depth_write);append(key,draw.depth_compare);
     append(key,draw.stencil);append(key,draw.stencil_state);append(key,draw.blend);
+    append(key,draw.wireframe);
     append(key,draw.source_blend);append(key,draw.destination_blend);append(key,draw.blend_op);append(key,draw.color_mask);
     auto found=pipelines.find(key);if(found!=pipelines.end())return found->second;
     require(pipelines.size()<8192,"Vulkan pipeline cache capacity exceeded");
@@ -694,7 +711,9 @@ VkPipeline pipeline(const NvkDraw &draw) {
     VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};assembly.topology=draw.topology;
     VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};viewport.viewportCount=viewport.scissorCount=1;
     VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-    raster.polygonMode=VK_POLYGON_MODE_FILL;raster.cullMode=VK_CULL_MODE_NONE;raster.frontFace=VK_FRONT_FACE_CLOCKWISE;raster.lineWidth=1;
+    require(!draw.wireframe || context.fill_mode_non_solid,"Vulkan device does not support wireframe polygons");
+    raster.polygonMode=draw.wireframe?VK_POLYGON_MODE_LINE:VK_POLYGON_MODE_FILL;
+    raster.cullMode=VK_CULL_MODE_NONE;raster.frontFace=VK_FRONT_FACE_CLOCKWISE;raster.lineWidth=1;
     VkPipelineMultisampleStateCreateInfo samples{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};samples.rasterizationSamples=VK_SAMPLE_COUNT_1_BIT;
     VkPipelineDepthStencilStateCreateInfo depth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
     depth.depthTestEnable=draw.depth_test;depth.depthWriteEnable=draw.depth_write;depth.depthCompareOp=draw.depth_compare;
@@ -940,6 +959,7 @@ void nvk_shutdown(void) {
             window_close();
             for(auto &p:pipelines)vkDestroyPipeline(context.device,p.second,nullptr);pipelines.clear();
             for(auto &s:samplers)vkDestroySampler(context.device,s.second,nullptr);samplers.clear();
+            destroy(context.readback);
             for(auto &chunk:context.chunks) {
                 destroy(chunk.upload);
                 if(chunk.descriptors)vkDestroyDescriptorPool(context.device,chunk.descriptors,nullptr);

@@ -10,6 +10,31 @@ import pefile
 from common import ROOT
 
 
+def use_wined3d_events(content):
+    """Select WineD3D's existing event wakeups on native Windows.
+
+    Direct thread alerts can interrupt an unrelated Windows critical-section
+    wait and leave its stack wait block queued. Disable both optional procedure
+    probes together so WineD3D creates and uses its own command-stream event.
+    """
+    with pefile.PE(data=content, fast_load=True) as pe:
+        locations = []
+        for name in (b'NtAlertThreadByThreadId\0', b'NtWaitForAlertByThreadId\0'):
+            if content.count(name) != 1:
+                raise ValueError('WineD3D native-alert procedure layout is unsupported')
+            offset = content.index(name)
+            section = next((part for part in pe.sections
+                            if part.PointerToRawData <= offset and
+                            offset + len(name) <= part.PointerToRawData + part.SizeOfRawData), None)
+            if section is None or not section.Characteristics & 0x40000000 or section.Characteristics & 0x20000000:
+                raise ValueError('WineD3D native-alert probe must be in readable data')
+            locations.append(offset)
+    prepared = bytearray(content)
+    for offset in locations:
+        prepared[offset] = 0
+    return bytes(prepared)
+
+
 def read_dependency(archive, entry):
     files = {}
     with zipfile.ZipFile(archive) as bundle:
@@ -39,6 +64,8 @@ def read_dependency(archive, entry):
                 if len(replacement)!=8 or content[offset:offset+9].lower()!=b'dxgi.dll\0':
                     raise ValueError('D3D11 import module cannot be renamed in place')
                 patched=content[:offset]+replacement+content[offset+8:]
+    if 'wined3d.dll' in files:
+        files['wined3d.dll'] = use_wined3d_events(files['wined3d.dll'])
     return files,patched
 
 
@@ -81,6 +108,7 @@ def prepare():
         if patched is not None:
             (output/'d3d11.dll').write_bytes(patched)
             shutil.copyfile(target/'dxgi.dll',output/entry['import_name'])
+            shutil.copyfile(target/'wined3d.dll',output/'wined3d.dll')
         else:
             for filename in entry['files']:shutil.copyfile(target/filename,output/filename)
     for name in ('DXC_LICENSE_LLVM', 'DXC_LICENSE_MS', 'WINED3D_COPYING.LIB'):

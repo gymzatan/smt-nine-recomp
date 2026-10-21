@@ -141,11 +141,15 @@ static HRESULT WINAPI create_d3d12(IDXGIAdapter *adapter,D3D_DRIVER_TYPE driver,
     if(native)ID3D12Device_Release(native);
     return hr;
 }
-static void release_opengl_timer(void) { timeEndPeriod(1); }
+static void release_backend_timer(void) { timeEndPeriod(1); }
 HRESULT d3d8_backend_create_device(ID3D11Device **device,ID3D11DeviceContext **context)
 {
     if(!device || !context)return E_POINTER;
     *device=NULL;*context=NULL;
+    /* Original game delays and backend completion waits need millisecond
+     * timer resolution with every backend. Keep the paired process lifetime. */
+    if(timeBeginPeriod(1)!=TIMERR_NOERROR)return E_FAIL;
+    if(atexit(release_backend_timer)!=0){timeEndPeriod(1);return E_OUTOFMEMORY;}
     const char *requested=getenv("RECOMP_GPU_BACKEND");
     if(!requested)requested="D3D11";
     int automatic=!strcmp(requested,"Auto");
@@ -189,13 +193,6 @@ HRESULT d3d8_backend_create_device(ID3D11Device **device,ID3D11DeviceContext **c
          * WineD3D may return E_FAIL or another HRESULT for an unusable
          * driver, not just DXGI_ERROR_UNSUPPORTED. */
         if(SUCCEEDED(hr) && index!=0)hr=create_hardware(factory_fn,device_fn,device,context);
-        /* WineD3D polls EVENT queries on its command thread. Its short waits
-         * otherwise round to the default Windows timer interval, stalling
-         * NINE's per-glyph completion fences. Pair this process request at exit. */
-        if(SUCCEEDED(hr) && index==1) {
-            if(timeBeginPeriod(1)!=TIMERR_NOERROR)hr=E_FAIL;
-            else if(atexit(release_opengl_timer)!=0){timeEndPeriod(1);hr=E_OUTOFMEMORY;}
-        }
         if(SUCCEEDED(hr)){fprintf(stderr,"[GPU] active backend %s\n",active_backend);last=hr;break;}
         if(*context){ID3D11DeviceContext_Release(*context);*context=NULL;}
         if(*device){ID3D11Device_Release(*device);*device=NULL;}

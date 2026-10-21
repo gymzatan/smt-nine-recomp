@@ -210898,7 +210898,22 @@
       "address": 3084448,
       "name": "sub_002F10A0",
       "file": "recomp_0087.c",
-      "edits": []
+      "edits": [
+        [
+          3460,
+          "",
+          "(ebx << 18) | ",
+          ", 0);\n\nloc_002F10F9: ;\n    MEM32(eax) = ",
+          "0x41E9C;\n    MEM32(eax + 4) = edi;\n    e"
+        ],
+        [
+          3462,
+          "41E9C",
+          "6000000Bu",
+          "0);\n\nloc_002F10F9: ;\n    MEM32(eax) = 0x",
+          ";\n    MEM32(eax + 4) = edi;\n    ecx = eb"
+        ]
+      ]
     },
     {
       "address": 3084720,

@@ -268,6 +268,10 @@ void nv2a_apply_checkpoint(const void *);
  * followed by that many pairs of 16-bit indices. */
 #define NV2A_NATIVE_INDEX_RANGE 0x60000007u
 #define NV2A_NATIVE_INDEX_COUNT_MASK 0x1FFC0000u
+/* Existing packed program resource: encoded word count in bits 18..28,
+ * original starting slot, then the resource's original upload blocks. */
+#define NV2A_NATIVE_PROGRAM_RESOURCE 0x6000000Bu
+#define NV2A_NATIVE_PROGRAM_COUNT_MASK 0x1FFC0000u
 void nv2a_fifo_run(NV2AState *d);
 /* Kick requires pfifo.lock; start/stop/idle must be called without it. */
 void nv2a_fifo_kick(NV2AState *d);

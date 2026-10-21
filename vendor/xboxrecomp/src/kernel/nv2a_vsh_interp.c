@@ -176,6 +176,12 @@ void nv2a_vsh_program_word(uint32_t word)
     }
 }
 
+/* Native resources share the exact scalar storage, dirty tracking and cursor. */
+void nv2a_vsh_program_words(const uint32_t *words, uint32_t count)
+{
+    for (uint32_t i=0;i<count;++i) nv2a_vsh_program_word(words[i]);
+}
+
 void nv2a_vsh_set_start_slot(uint32_t slot) { s_start_slot = slot; }
 void nv2a_vsh_set_cxt_write(uint32_t enable) { s_cxt_write = enable; }
 uint32_t nv2a_vsh_cxt_write(void) { return s_cxt_write; }

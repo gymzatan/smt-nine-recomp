@@ -325,10 +325,18 @@ static void verify_clean_texture_overlap(void) {
     hw_texture_bind(0);
     assert(unrelated->dirty && s_gpu.hardware_color_readbacks==readbacks);
     assert(s_hw_textures && !memcmp(s_hw_textures->raw,memory,128u*256u*4u));
+    /* An output elsewhere must not publish unrelated rendering just because
+     * this clean texture overlaps a retained colour identity. */
+    hw_defer_output((uint8_t *)(xbox_GetMemoryOffset()+0x80180000u),0x11223344);
+    hw_texture_bind(0);
+    assert(s_hw_query_count==1 && unrelated->dirty && s_gpu.hardware_color_readbacks==readbacks);
+    /* The existing physical texture-range query still collects relevant output,
+     * including earlier queued outputs, before reading the texture bytes. */
     hw_defer_output((uint8_t *)(xbox_GetMemoryOffset()+source_color->address),0xffabcdef);
     hw_texture_bind(0);
-    assert(!s_hw_query_count && memory[0]==0xffabcdef && !unrelated->dirty);
-    assert(s_gpu.hardware_color_readbacks==readbacks+1);
+    assert(!s_hw_query_count && memory[0]==0xffabcdef && unrelated->dirty);
+    assert(BRIDGE_MEM32(0x80180000u)==0x11223344);
+    assert(s_gpu.hardware_color_readbacks==readbacks);
     assert(!memcmp(s_hw_textures->raw,memory,128u*256u*4u));
     readbacks=s_gpu.hardware_color_readbacks;
     unrelated->dirty=1;
@@ -376,10 +384,25 @@ static void verify_texture_content_reuse(const char *snapshot,const char *memory
     for(unsigned view=0;view<entry->memory->views.view_count;view++) {
         volatile uint32_t *alias=(volatile uint32_t *)((uint8_t *)entry->memory->views.cpu_views[view]+entry->memory_offset);
         uint32_t expected=0xff446600+view;
+        uint32_t *unrelated=(uint32_t *)(xbox_GetMemoryOffset()+0x80180000u);
+        hw_defer_output((uint8_t *)unrelated,0x11223300+view);
+        assert(s_hw_query_count==1 && s_hw_queries[0].pending);
         alias[0]=expected;alias[1024]=expected+1;
+        /* A guarded texture write has no dependency on another physical page.
+         * Preserve the existing queued output until an actual consumer needs it. */
+        assert(s_hw_query_count==1 && s_hw_queries[0].pending);
         assert(!entry->content_valid);hw_texture_bind(0);
         assert(entry->content_valid && !memcmp(entry->raw,raw,entry->raw_size));
         assert(texture_first_pixel(entry)==expected);
+        assert(s_hw_query_count==1 && s_hw_queries[0].pending);
+        /* A write sharing an output page must still collect the original queue
+         * before making that page writable, including every earlier output. */
+        hw_defer_output((uint8_t *)(alias+2),0xffabcdef);
+        hw_defer_output((uint8_t *)alias,0xff654321);
+        alias[0]=expected;
+        assert(!s_hw_query_count && raw[0]==expected && raw[2]==0xffabcdef);
+        assert(*unrelated==0x11223300+view && !entry->content_valid);
+        hw_texture_bind(0);assert(texture_first_pixel(entry)==expected);
     }
     assert(texture_compare_calls>=entry->memory->views.view_count);
     source.width=32;source.pitch=128;s_gpu.texs[0]=source;hw_texture_bind(0);
@@ -396,7 +419,7 @@ static void verify_texture_content_reuse(const char *snapshot,const char *memory
     LARGE_INTEGER offset={0};XBOX_IO_STATUS_BLOCK ios={0};
     uint32_t *alias=(uint32_t *)((uint8_t *)entry->memory->views.cpu_views[1]+entry->memory_offset);
     assert(xbox_NtReadFile(file,NULL,NULL,NULL,&ios,alias,4,&offset)==STATUS_SUCCESS);
-    assert(ios.Information==4 && !entry->content_valid);hw_texture_bind(0);
+    assert(ios.Information==4 && !entry->content_valid && !overlap->content_valid);hw_texture_bind(0);
     assert(texture_first_pixel(entry)==file_pixel);
     xbox_MmSetAddressProtect(alias,4096,PAGE_READONLY);hw_texture_bind(0);
     assert(!nv2a_pb_handle_memory_fault((uintptr_t)alias,1));
@@ -536,8 +559,13 @@ static void verify_vertex_conversion_reuse(const char *snapshot,const char *memo
     draw_reused_vertex_payload();assert(s_gpu.hardware_vertex_stream_uploads==uploads+1);
     }
     uploads=s_gpu.hardware_vertex_stream_uploads;
+    /* Force a fresh upload from a cache hit while the unused staging rows
+     * contain different bytes. verify_vertex_bytes reads the actual GPU data. */
+    unsigned char untouched[128];memset(untouched,0xA5,sizeof untouched);
+    if(d3d8_IsNativeVulkan())memcpy(s_hw_program_upload.vertex,untouched,sizeof untouched);
     method(NV097_SET_PROVOKING_VERTEX,1);draw_reused_vertex_payload();
     assert(s_gpu.hardware_vertex_stream_uploads==uploads+1);
+    if(d3d8_IsNativeVulkan())assert(!memcmp(s_hw_program_upload.vertex,untouched,sizeof untouched));
     method(NV097_SET_PROVOKING_VERTEX,0);
 
     XboxSharedMemoryViews views;assert(xbox_GetSharedMemoryViews(raw,60,&views));
@@ -565,6 +593,18 @@ static void verify_vertex_conversion_reuse(const char *snapshot,const char *memo
     assert(raw[4]==0xffabcdef);hits=s_hw_vertex_cache_hits;
     draw_reused_vertex_payload();assert(s_hw_vertex_cache_hits==hits);
     draw_reused_vertex_payload();assert(s_hw_vertex_cache_hits==hits+1);
+    /* NINE's transition mesh disables diffuse arrays and supplies white
+     * through SET_VERTEX_DATA4F; later changes must invalidate packed rows. */
+    method(NV097_SET_DEPTH_TEST_ENABLE,0);
+    method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT+3*4,0x1402);
+    for(unsigned pass=0;pass<2;pass++) {
+        uint32_t expected=pass?0xff00ff00u:0xffffffffu;
+        const float rgba[4]={pass?0:1,1,pass?0:1,1};
+        for(unsigned c=0;c<4;c++){uint32_t bits;memcpy(&bits,&rgba[c],4);method(NV097_SET_VERTEX_DATA4F_M+3*16+c*4,bits);}
+        hits=s_hw_vertex_cache_hits;draw_reused_vertex_payload();assert(s_hw_vertex_cache_hits==hits);
+        draw_reused_vertex_payload();assert(s_hw_vertex_cache_hits==hits+1);
+        nv2a_pb_checkpoint_publish();assert(BRIDGE_MEM32(0x80020000u+(2*8+2)*4)==expected);
+    }
     nv2a_pb_release_memory_views();MEMORY_BASIC_INFORMATION page;
     assert(VirtualQuery(raw,&page,sizeof page) && page.Protect==PAGE_READWRITE);
     fprintf(stderr,"[VERTEX REUSE] actual GPU bytes after unchanged draws, both CPU views, native IO, GPU writes and checkpoint restoration\n");
@@ -1167,66 +1207,67 @@ static void verify_completed_output_work(void) {
     protection_test_inspect=1;
 }
 static void verify_attribute_offset_work(void) {
-    VertexAttr attr={0};float out[4],reference[4];
+    VertexAttr *attr=&s_gpu.attr[0];memset(attr,0,sizeof *attr);float out[4],reference[4];
     const float defaults[4]={0,0,0,1},payload[4]={-1.25f,0.5f,17,2};
+    memcpy(s_gpu.imm_attr[0],defaults,sizeof defaults);
     const uint32_t address=0x80070000u;
     unsigned invalid_calls=0,inline_calls=0,array_calls=0;
     int (*volatile read_attribute)(const VertexAttr *,uint32_t,float *)=fetch_attr;
     memcpy((void *)(xbox_GetMemoryOffset()+address),payload,sizeof payload);
     memcpy(s_gpu.inline_buf,payload,sizeof payload);
     attribute_offset_calls=0;
-    assert(!read_attribute(&attr,0,out) && !memcmp(out,defaults,sizeof out));
-    attr.size=4;
-    assert(!read_attribute(&attr,0,out) && !memcmp(out,defaults,sizeof out));
-    attr.type=2;attr.stride=16;s_gpu.inline_active=0;
-    assert(!read_attribute(&attr,0,out) && !memcmp(out,defaults,sizeof out));
+    assert(read_attribute(attr,0,out) && !memcmp(out,defaults,sizeof out));
+    attr->size=4;
+    assert(!read_attribute(attr,0,out) && !memcmp(out,defaults,sizeof out));
+    attr->type=2;attr->stride=16;s_gpu.inline_active=0;
+    assert(!read_attribute(attr,0,out) && !memcmp(out,defaults,sizeof out));
     s_gpu.inline_active=1;s_gpu.inline_count=4;
-    assert(!read_attribute(&attr,1,out) && !memcmp(out,defaults,sizeof out));
+    assert(!read_attribute(attr,1,out) && !memcmp(out,defaults,sizeof out));
     invalid_calls=attribute_offset_calls;
     attribute_offset_calls=0;
-    assert(read_attribute(&attr,0,out) && !memcmp(out,payload,sizeof out));
+    assert(read_attribute(attr,0,out) && !memcmp(out,payload,sizeof out));
     inline_calls=attribute_offset_calls;
-    s_gpu.inline_active=0;attr.offset=address;attribute_offset_calls=0;
-    assert(read_attribute(&attr,0,out) && !memcmp(out,payload,sizeof out));
+    s_gpu.inline_active=0;attr->offset=address;attribute_offset_calls=0;
+    assert(read_attribute(attr,0,out) && !memcmp(out,payload,sizeof out));
     array_calls=attribute_offset_calls;
     /* Both storage paths use the production decoder for every supported format
      * and component count, including signed and unknown-format payloads. */
     const uint32_t types[]={0,2,4,1,5,6,7};
     for(unsigned t=0;t<sizeof types/sizeof types[0];++t) {
         for(unsigned size=1;size<=4;++size) {
-            attr.type=types[t];attr.size=size;attr.offset=address;s_gpu.inline_active=0;
-            int expected=read_attribute(&attr,0,reference);
-            attr.offset=0;s_gpu.inline_active=1;
-            assert(read_attribute(&attr,0,out)==expected && !memcmp(out,reference,sizeof out));
+            attr->type=types[t];attr->size=size;attr->offset=address;s_gpu.inline_active=0;
+            int expected=read_attribute(attr,0,reference);
+            attr->offset=0;s_gpu.inline_active=1;
+            assert(read_attribute(attr,0,out)==expected && !memcmp(out,reference,sizeof out));
         }
     }
-    attr.type=2;attr.size=4;attr.offset=0;attr.stride=16;
+    attr->type=2;attr->size=4;attr->offset=0;attr->stride=16;
     LARGE_INTEGER frequency,start,end;assert(QueryPerformanceFrequency(&frequency));
     attribute_offset_calls=0;double checksum=0;
     QueryPerformanceCounter(&start);
-    for(unsigned i=0;i<1000000;++i) {assert(read_attribute(&attr,0,out));checksum+=out[0];}
+    for(unsigned i=0;i<1000000;++i) {assert(read_attribute(attr,0,out));checksum+=out[0];}
     QueryPerformanceCounter(&end);
     fprintf(stderr,"[ATTRIBUTE] invalid=%u inline=%u array=%u million_inline_queries=%u seconds=%.7f checksum=%.0f\n",
         invalid_calls,inline_calls,array_calls,attribute_offset_calls,
         (double)(end.QuadPart-start.QuadPart)/frequency.QuadPart,checksum);
     assert(checksum==-1250000 && invalid_calls==0 && inline_calls==0 && array_calls==0 && attribute_offset_calls==0);
-    s_gpu.inline_active=0;attr.offset=address;attribute_offset_calls=0;checksum=0;
+    s_gpu.inline_active=0;attr->offset=address;attribute_offset_calls=0;checksum=0;
     assert(g_xbox_mem_offset==xbox_GetMemoryOffset());
     QueryPerformanceCounter(&start);
-    for(unsigned i=0;i<1000000;++i) {assert(read_attribute(&attr,0,out));checksum+=out[0];}
+    for(unsigned i=0;i<1000000;++i) {assert(read_attribute(attr,0,out));checksum+=out[0];}
     QueryPerformanceCounter(&end);
     fprintf(stderr,"[ATTRIBUTE BASE] million_array_queries=%u seconds=%.7f checksum=%.0f\n",
         attribute_offset_calls,(double)(end.QuadPart-start.QuadPart)/frequency.QuadPart,checksum);
     assert(checksum==-1250000 && attribute_offset_calls==0);
     const unsigned measured_types[2]={2,0};
     for(unsigned t=0;t<2;++t) {
-        attr.type=measured_types[t];
+        attr->type=measured_types[t];
         for(unsigned round=0;round<5;++round) {
             checksum=0;QueryPerformanceCounter(&start);
-            for(unsigned i=0;i<4000000;++i) {assert(read_attribute(&attr,0,out));checksum+=out[0];}
+            for(unsigned i=0;i<4000000;++i) {assert(read_attribute(attr,0,out));checksum+=out[0];}
             QueryPerformanceCounter(&end);
             fprintf(stderr,"[ATTRIBUTE ALIAS] type=%u round=%u seconds=%.7f checksum=%.9f\n",
-                attr.type,round,(double)(end.QuadPart-start.QuadPart)/frequency.QuadPart,checksum);
+                attr->type,round,(double)(end.QuadPart-start.QuadPart)/frequency.QuadPart,checksum);
         }
     }
 }
@@ -1348,6 +1389,86 @@ static void verify_native_indices(const char *mode) {
     fprintf(stderr,"[NATIVE INDICES] %u complete FIFO/PGRAPH/renderer states, %u partial publications, zero count, inactive primitive, wrap, scalar tail and suspended work passed\n",trials,cuts);
 }
 
+
+typedef struct ProgramStateForTest {
+    IndexStateForTest base;
+    VshCheckpoint vsh;
+} ProgramStateForTest;
+static void capture_program_for_test(ProgramStateForTest *out) {
+    memset(out,0,sizeof *out);capture_indices_for_test(&out->base);
+    memcpy(out->vsh.program,s_program,sizeof s_program);memcpy(out->vsh.constants,s_const,sizeof s_const);
+    out->vsh.load_slot=s_load_slot;out->vsh.load_word=s_load_word;out->vsh.start_slot=s_start_slot;
+    out->vsh.const_load=s_const_load;out->vsh.const_word=s_const_word;out->vsh.cxt_write=s_cxt_write;
+}
+static void restore_program_for_test(const ProgramStateForTest *in) {
+    restore_indices_for_test(&in->base);nv2a_vsh_apply_checkpoint(&in->vsh);
+}
+static void verify_native_program(const char *mode) {
+    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+    NV2AState *gpu=nv2a_get_state();uint32_t *r=gpu->pfifo.regs,*words=index_fifo_for_test();
+    if(strcmp(mode,"native-program")) {
+        words[0]=NV2A_NATIVE_PROGRAM_RESOURCE|(5u<<18);words[1]=0;
+        words[2]=(4u<<18)|NV097_SET_TRANSFORM_PROGRAM;
+        for(unsigned i=0;i<4;i++)words[3+i]=0;
+        r[NV_PFIFO_CACHE1_DMA_PUT]=28;
+        if(!strcmp(mode,"reject-native-program-extent"))((uint32_t *)(gpu->ramin_ptr+0x400))[1]=15;
+        else if(!strcmp(mode,"reject-native-program-put"))r[NV_PFIFO_CACHE1_DMA_PUT]=27;
+        else if(!strcmp(mode,"reject-native-program-consumer"))gpu->pfifo.method_consumer=NULL;
+        else if(!strcmp(mode,"reject-native-program-class"))gpu->pgraph.regs[NV_PGRAPH_CTX_CACHE1]=NV_IMAGE_BLIT;
+        else if(!strcmp(mode,"reject-native-program-block-count"))words[2]=(33u<<18)|NV097_SET_TRANSFORM_PROGRAM;
+        else if(!strcmp(mode,"reject-native-program-block-method"))words[2]=(4u<<18)|NV097_SET_TRANSFORM_CONSTANT;
+        else if(!strcmp(mode,"reject-native-program-block-extent"))words[2]=(5u<<18)|NV097_SET_TRANSFORM_PROGRAM;
+        else assert(0);
+        nv2a_fifo_run(gpu);assert(!"invalid native program resource accepted");return;
+    }
+    ProgramStateForTest *initial=calloc(1,sizeof *initial),*expected=calloc(1,sizeof *expected);
+    ProgramStateForTest *actual=calloc(1,sizeof *actual),*pending=calloc(1,sizeof *pending);
+    assert(initial&&expected&&actual&&pending);capture_program_for_test(initial);
+    const unsigned counts[]={0,1,3,4,31,32,33,65,768};
+    const uint32_t loads[]={0,1,NV2A_VSH_SLOTS-1,NV2A_VSH_SLOTS,UINT32_MAX};
+    unsigned cases=0,cuts=0;
+    for(unsigned n=0;n<9;n++)for(unsigned load=0;load<5;load++)for(unsigned wrap=0;wrap<2;wrap++) {
+        unsigned count=counts[n],get=wrap?4096:0,encoded=count+(count+31)/32;
+        unsigned end=get+(encoded+2)*4,put=wrap?8:end;uint32_t *packet=words+get/4;
+        for(unsigned pass=0;pass<2;pass++) {
+            restore_program_for_test(initial);
+            r[NV_PFIFO_CACHE1_DMA_GET]=get;r[NV_PFIFO_CACHE1_DMA_PUT]=put;
+            packet[0]=pass?NV2A_NATIVE_PROGRAM_RESOURCE|(encoded<<18):(1u<<18)|NV097_SET_TRANSFORM_PROGRAM_LOAD;
+            packet[1]=loads[load];unsigned at=2;
+            for(unsigned i=0;i<count;) {
+                unsigned block=count-i>32?32:count-i;packet[at++]=(block<<18)|NV097_SET_TRANSFORM_PROGRAM;
+                for(unsigned j=0;j<block;j++,i++)packet[at++]=0x9e3779b9u*i^0x12345678u;
+            }
+            assert(at==encoded+2);
+            if(wrap){words[end/4]=1;words[0]=0x40100;words[1]=0;}
+            if(pass && !wrap) {
+                capture_program_for_test(pending);
+                for(unsigned cut=1;cut<encoded+2;cut++) {
+                    r[NV_PFIFO_CACHE1_DMA_PUT]=cut*4;nv2a_fifo_run(gpu);
+                    pending->base.regs[NV_PFIFO_CACHE1_DMA_PUT]=cut*4;capture_program_for_test(actual);
+                    assert(!memcmp(pending,actual,sizeof *actual));++cuts;
+                }
+                r[NV_PFIFO_CACHE1_DMA_PUT]=put;
+                for(unsigned stop=0;stop<3;stop++) {
+                    if(stop==0)r[NV_PFIFO_CACHE1_PULL0]=0;
+                    if(stop==1)gpu->pgraph.waiting_for_nop=true;
+                    if(stop==2)gpu->irq_in_service=true;
+                    nv2a_fifo_run(gpu);assert(r[NV_PFIFO_CACHE1_DMA_GET]==get);
+                    r[NV_PFIFO_CACHE1_PULL0]=1;gpu->pgraph.waiting_for_nop=false;gpu->irq_in_service=false;
+                }
+            }
+            nv2a_fifo_run(gpu);assert(r[NV_PFIFO_CACHE1_DMA_GET]==put);
+            for(unsigned tail=0;tail<5;tail++)nv2a_vsh_program_word(0x11223344u+tail);
+            capture_program_for_test(actual);
+            if(!pass)memcpy(expected,actual,sizeof *actual);
+            else assert(!memcmp(expected,actual,sizeof *actual));
+        }
+        ++cases;
+    }
+    restore_program_for_test(initial);free(initial);free(expected);free(actual);free(pending);
+    fprintf(stderr,"[NATIVE PROGRAM] %u complete FIFO/PGRAPH/renderer/program states and %u partial publications, wrap, boundary cursors, scalar tails and suspension passed\n",cases,cuts);
+}
+
 static void verify_batch_boundary(const char *producer) {
     seed();method(NV097_SET_BEGIN_END,5);
     if(!strcmp(producer,"inline")) {
@@ -1462,6 +1583,20 @@ static void verify_fifo_worker_checkpoint(int partial,int indices) {
         commands[33]=(1u<<18)|NV097_BACK_END_WRITE_SEMAPHORE_RELEASE;commands[34]=0x12345678;
         end=140;pending_get=100;partial_put=104;
     }
+    if(indices==2) {
+        uint32_t original_program[8];memcpy(original_program,s_program,sizeof original_program);
+        uint32_t invalid[4]={0};nv2a_vsh_set_instruction(0,invalid);
+        commands[23]=NV2A_NATIVE_PROGRAM_RESOURCE|(9u<<18);commands[24]=0;
+        commands[25]=(8u<<18)|NV097_SET_TRANSFORM_PROGRAM;
+        memcpy(commands+26,original_program,sizeof original_program);
+        commands[34]=(1u<<18)|NV097_SET_BEGIN_END;commands[35]=5;
+        commands[36]=NV2A_NATIVE_INDEX_RANGE|(1u<<18);commands[37]=0x10000;
+        commands[38]=(1u<<18)|NV097_ARRAY_ELEMENT32;commands[39]=2;
+        commands[40]=(1u<<18)|NV097_SET_BEGIN_END;commands[41]=0;
+        commands[42]=(1u<<18)|NV097_SET_SEMAPHORE_OFFSET;commands[43]=0x70000;
+        commands[44]=(1u<<18)|NV097_BACK_END_WRITE_SEMAPHORE_RELEASE;commands[45]=0x12345678;
+        end=184;pending_get=92;partial_put=100;
+    }
     method(NV097_SET_CONTEXT_DMA_SEMAPHORE,0x100);
     BRIDGE_MEM32(0x80070000u)=0;
     uint32_t *r=gpu->pfifo.regs;
@@ -1480,7 +1615,8 @@ static void verify_fifo_worker_checkpoint(int partial,int indices) {
         if(partial) {
             assert(r[NV_PFIFO_CACHE1_DMA_GET]==pending_get && BRIDGE_MEM32(0x80070000u)==0);
             if(indices) {
-                assert(s_gpu.prim==5 && s_gpu.idx_count==0);
+                if(indices==2)assert(s_gpu.prim==0 && memcmp(s_program,commands+26,8*4));
+                else assert(s_gpu.prim==5 && s_gpu.idx_count==0);
                 assert(!memcmp(nv2a_vsh_constant(17),commands+3,16*4));
                 if(!pass) {
                     assert(xbox_CheckpointBootstrapBegin());rewind(snapshot);
@@ -1497,6 +1633,7 @@ static void verify_fifo_worker_checkpoint(int partial,int indices) {
         assert(xbox_CheckpointBootstrapBegin());nv2a_pb_checkpoint_publish();
         assert(r[NV_PFIFO_CACHE1_DMA_GET]==end && BRIDGE_MEM32(0x80020000u)==(indices?0xffff0000u:0xff445566u));
         if(indices)assert(s_gpu.prim==0 && s_gpu.idx_count==3 && s_gpu.idx[0]==0 && s_gpu.idx[1]==1 && s_gpu.idx[2]==2);
+        if(indices==2)assert(!memcmp(s_program,commands+26,8*4));
         assert(!memcmp(nv2a_vsh_constant(17),commands+3,16*4));
         if(!pass) {
             BRIDGE_MEM32(0x80070000u)=0;rewind(snapshot);
@@ -1590,6 +1727,15 @@ static void verify_native_finished_frame(void) {
     uint32_t alias=(uint32_t)((uintptr_t)views->cpu_views[1]+color->memory_offset-xbox_GetMemoryOffset());
     hw_finish_native_frame(alias,color->pitch);assert(renderer->capture());
     for(unsigned i=0;i<width*height;i++)assert(((uint32_t *)readback_present_pixels)[i]==0xffaabbcc);
+    /* A larger swizzled menu target must not displace the scene at a flip. */
+    note_drawn();uint32_t scene_offset=s_gpu.drawn_offset;
+    uint32_t scene_color=s_gpu.color_offset,scene_format=s_gpu.format,scene_pitch=s_gpu.pitch;
+    uint32_t scene_w=s_gpu.clip_w,scene_h=s_gpu.clip_h;
+    s_gpu.format=0x090a0228;s_gpu.color_offset=0x300000;s_gpu.pitch=4096;s_gpu.clip_w=1024;s_gpu.clip_h=512;
+    note_drawn();assert(s_gpu.drawn_offset==scene_offset);
+    s_gpu.color_offset=scene_color;s_gpu.format=scene_format;s_gpu.pitch=scene_pitch;s_gpu.clip_w=scene_w;s_gpu.clip_h=scene_h;
+    method(NV097_FLIP_STALL,0);assert(renderer->capture());
+    for(unsigned i=0;i<width*height;i++)assert(((uint32_t *)readback_present_pixels)[i]==0xffaabbcc);
     /* A cold restore must present a saved surface before any new draw recreates it. */
     FILE *snapshot=tmpfile();assert(snapshot && nv2a_gpu_save_checkpoint(snapshot));
     hw_free_colors(s_hw_colors);s_hw_colors=NULL;
@@ -1620,7 +1766,10 @@ int main(int argc,char **argv) {
     if(!strncmp(argv[1],"fifo-worker",11))assert(nv2a_fifo_start(gpu, 1));
     assert(xbox_CheckpointBootstrapBegin());
     if(!strncmp(argv[1],"fifo-worker",11)) {
-        verify_fifo_worker_checkpoint(argc>6 && !strcmp(argv[6],"partial"),!strcmp(argv[1],"fifo-worker-index"));
+        verify_fifo_worker_checkpoint(argc>6 && !strcmp(argv[6],"partial"),
+            !strcmp(argv[1],"fifo-worker-program")?2:!strcmp(argv[1],"fifo-worker-index"));
+    } else if(!strcmp(argv[1],"native-program") || !strncmp(argv[1],"reject-native-program-",22)) {
+        verify_native_program(argv[1]);
     } else if(!strcmp(argv[1],"native-indices") || !strncmp(argv[1],"reject-native-index-",20)) {
         verify_native_indices(argv[1]);
     } else if(!strncmp(argv[1],"boundary-",9)) {
@@ -1769,7 +1918,7 @@ def test_original_swizzled_colour_upload_and_dirty_region(native_gpu,tmp_path,ba
     assert '[SWIZZLE REGION]' in result.stderr
 
 
-@pytest.mark.parametrize('backend,scale',[('D3D11',1),('D3D11',2),('Vulkan',1),('Vulkan',2),('OpenGL',1),('OpenGL',2)])
+@pytest.mark.parametrize('backend,scale',[('D3D11',1),('D3D11',2),('D3D12',1),('D3D12',2),('Vulkan',1),('Vulkan',2),('OpenGL',1),('OpenGL',2)])
 def test_clean_texture_overlap_keeps_unrelated_colour_deferred(native_gpu,tmp_path,backend,scale):
     executable,xbe=native_gpu
     result=subprocess.run([str(executable),'clean-overlap',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
@@ -1981,6 +2130,24 @@ def test_batch_capacity_boundary_is_explicit(native_gpu,tmp_path,producer):
     assert 'batch exceeds NV2A capacity:' in result.stderr
 
 
+def test_native_program_resource_preserves_state_and_partial_publication(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'native-program',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[NATIVE PROGRAM]' in result.stderr
+    print(next(line for line in result.stderr.splitlines() if line.startswith('[NATIVE PROGRAM]')))
+
+
+@pytest.mark.parametrize('invalid',['extent','put','consumer','class','block-count','block-method','block-extent'])
+def test_native_program_resource_rejects_invalid_submission(native_gpu,tmp_path,invalid):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'reject-native-program-'+invalid,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
+        capture_output=True,text=True,errors='replace',timeout=30)
+    assert result.returncode==5,result.stdout+result.stderr
+    assert '[STOP] PFIFO native program' in result.stderr
+
+
 def test_native_index_range_preserves_complete_state_and_pending_publication(native_gpu,tmp_path):
     executable,xbe=native_gpu
     result=subprocess.run([str(executable),'native-indices',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
@@ -2002,10 +2169,10 @@ def test_native_index_range_rejects_invalid_submission(native_gpu,tmp_path,inval
 
 @pytest.mark.parametrize('backend',['D3D11','D3D12','Vulkan','OpenGL'])
 @pytest.mark.parametrize('partial',[False,True])
-@pytest.mark.parametrize('operation',['constant','index'])
+@pytest.mark.parametrize('operation',['constant','index','program'])
 def test_fifo_worker_preserves_pending_checkpoint_and_gpu_completion(native_gpu,tmp_path,backend,partial,operation):
     executable,xbe=native_gpu
-    result=subprocess.run([str(executable),'fifo-worker-index' if operation=='index' else 'fifo-worker',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1','partial' if partial else 'complete'],
+    result=subprocess.run([str(executable),'fifo-worker' if operation=='constant' else 'fifo-worker-'+operation,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1','partial' if partial else 'complete'],
         env={**os.environ,'RECOMP_GPU_BACKEND':backend,'DXVK_LOG_PATH':str(tmp_path)},
         capture_output=True,text=True,errors='replace',timeout=30)
     assert result.returncode==0,result.stdout+result.stderr
