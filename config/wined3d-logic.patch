@@ -1,0 +1,207 @@
+diff --git a/dlls/d3d11/device.c b/dlls/d3d11/device.c
+index 10ef8c3..64e7e4c 100644
+--- a/dlls/d3d11/device.c
++++ b/dlls/d3d11/device.c
+@@ -4888,7 +4888,12 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CheckFeatureSupport(ID3D11Device5
+             }
+ 
+             FIXME("Returning fake Options support data.\n");
+-            options->OutputMergerLogicOp = FALSE;
++            wined3d_mutex_lock();
++            hr = wined3d_device_get_device_caps(device->wined3d_device, &wined3d_caps);
++            wined3d_mutex_unlock();
++            if (FAILED(hr))
++                return hr;
++            options->OutputMergerLogicOp = wined3d_caps.output_merger_logic_op;
+             options->UAVOnlyRenderingForcedSampleCount = FALSE;
+             options->DiscardAPIsSeenByDriver = FALSE;
+             options->FlagsForUpdateAndCopySeenByDriver = FALSE;
+diff --git a/dlls/d3d11/state.c b/dlls/d3d11/state.c
+index d86ff72..1962f03 100644
+--- a/dlls/d3d11/state.c
++++ b/dlls/d3d11/state.c
+@@ -346,7 +346,7 @@ static enum wined3d_blend_op wined3d_blend_op_from_d3d11(D3D11_BLEND_OP op)
+ HRESULT d3d_blend_state_create(struct d3d_device *device, const D3D11_BLEND_DESC1 *desc,
+         struct d3d_blend_state **state)
+ {
+-    struct wined3d_blend_state_desc wined3d_desc;
++    struct wined3d_blend_state_desc wined3d_desc = {0};
+     struct d3d_blend_state *object;
+     struct wine_rb_entry *entry;
+     D3D11_BLEND_DESC1 tmp_desc;
+@@ -356,6 +356,21 @@ HRESULT d3d_blend_state_create(struct d3d_device *device, const D3D11_BLEND_DESC
+     if (!desc)
+         return E_INVALIDARG;
+ 
++    if (desc->RenderTarget[0].LogicOpEnable)
++    {
++        struct wined3d_caps caps;
++        if (desc->IndependentBlendEnable || desc->RenderTarget[0].BlendEnable
++                || (unsigned int)desc->RenderTarget[0].LogicOp > D3D11_LOGIC_OP_OR_INVERTED)
++            return E_INVALIDARG;
++        wined3d_mutex_lock();
++        hr = wined3d_device_get_device_caps(device->wined3d_device, &caps);
++        wined3d_mutex_unlock();
++        if (FAILED(hr))
++            return hr;
++        if (!caps.output_merger_logic_op)
++            return E_INVALIDARG;
++    }
++
+     /* D3D11_RENDER_TARGET_BLEND_DESC1 has a hole, which is a problem because we use
+      * D3D11_BLEND_DESC1 as a key in the rbtree. */
+     memset(&tmp_desc, 0, sizeof(tmp_desc));
+@@ -441,8 +456,8 @@ HRESULT d3d_blend_state_create(struct d3d_device *device, const D3D11_BLEND_DESC
+         wined3d_desc.rt[i].writemask = desc->RenderTarget[i].RenderTargetWriteMask;
+     }
+ 
+-    if (desc->RenderTarget[0].LogicOpEnable && desc->RenderTarget[0].LogicOp != D3D11_LOGIC_OP_NOOP)
+-        FIXME("Ignoring logic op %#x.\n", desc->RenderTarget[0].LogicOp);
++    wined3d_desc.logic_op_enable = desc->RenderTarget[0].LogicOpEnable;
++    wined3d_desc.logic_op = (enum wined3d_logic_op)tmp_desc.RenderTarget[0].LogicOp;
+ 
+     /* We cannot fail after creating a wined3d_blend_state object. It
+      * would lead to double free. */
+diff --git a/dlls/wined3d/adapter_gl.c b/dlls/wined3d/adapter_gl.c
+index 75c5daf..601476a 100644
+--- a/dlls/wined3d/adapter_gl.c
++++ b/dlls/wined3d/adapter_gl.c
+@@ -4136,6 +4136,7 @@ static void adapter_gl_get_wined3d_caps(const struct wined3d_adapter *adapter, s
+     const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl_const(adapter)->gl_info;
+     const struct wined3d_d3d_info *d3d_info = &adapter->d3d_info;
+ 
++    caps->output_merger_logic_op = true;
+     caps->ddraw_caps.dds_caps |= WINEDDSCAPS_BACKBUFFER
+             | WINEDDSCAPS_COMPLEX
+             | WINEDDSCAPS_FRONTBUFFER
+diff --git a/dlls/wined3d/context_gl.c b/dlls/wined3d/context_gl.c
+index e5b41ff..2d14a9c 100644
+--- a/dlls/wined3d/context_gl.c
++++ b/dlls/wined3d/context_gl.c
+@@ -3155,6 +3155,7 @@ void wined3d_context_gl_apply_blit_state(struct wined3d_context_gl *context_gl,
+         context_invalidate_state(context, STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL));
+     }
+     gl_info->gl_ops.gl.p_glDisable(GL_BLEND);
++    gl_info->gl_ops.gl.p_glDisable(GL_COLOR_LOGIC_OP);
+     gl_info->gl_ops.gl.p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+     context_invalidate_state(context, STATE_BLEND);
+     gl_info->gl_ops.gl.p_glDisable(GL_CULL_FACE);
+@@ -3299,6 +3300,7 @@ BOOL wined3d_context_gl_apply_clear_state(struct wined3d_context_gl *context_gl,
+      * driver show that disabling blending when clearing improves the clearing
+      * performance incredibly. */
+     gl_info->gl_ops.gl.p_glDisable(GL_BLEND);
++    gl_info->gl_ops.gl.p_glDisable(GL_COLOR_LOGIC_OP);
+     gl_info->gl_ops.gl.p_glEnable(GL_SCISSOR_TEST);
+     if (rt_count && gl_info->supported[ARB_FRAMEBUFFER_SRGB])
+     {
+diff --git a/dlls/wined3d/directx.c b/dlls/wined3d/directx.c
+index 8b0f340..2fee0f0 100644
+--- a/dlls/wined3d/directx.c
++++ b/dlls/wined3d/directx.c
+@@ -2775,6 +2775,7 @@ HRESULT CDECL wined3d_get_device_caps(const struct wined3d_adapter *adapter,
+     caps->stencil_export = d3d_info->stencil_export;
+     caps->simple_instancing = d3d_info->simple_instancing;
+     caps->min_max_filtering = d3d_info->min_max_filtering;
++    caps->output_merger_logic_op = false;
+ 
+     caps->max_feature_level = d3d_info->feature_level;
+ 
+diff --git a/dlls/wined3d/ffp_gl.c b/dlls/wined3d/ffp_gl.c
+index 8bba21c..ce6f439 100644
+--- a/dlls/wined3d/ffp_gl.c
++++ b/dlls/wined3d/ffp_gl.c
+@@ -325,6 +325,24 @@ static void state_blend_factor(struct wined3d_context *context, const struct win
+     checkGLcall("glBlendColor");
+ }
+ 
++static void colour_logic_op(const struct wined3d_gl_info *gl_info,
++        const struct wined3d_blend_state *state)
++{
++    static const GLenum operations[] = {
++        GL_CLEAR, GL_SET, GL_COPY, GL_COPY_INVERTED, GL_NOOP, GL_INVERT,
++        GL_AND, GL_NAND, GL_OR, GL_NOR, GL_XOR, GL_EQUIV,
++        GL_AND_REVERSE, GL_AND_INVERTED, GL_OR_REVERSE, GL_OR_INVERTED,
++    };
++    if (state && state->desc.logic_op_enable)
++    {
++        gl_info->gl_ops.gl.p_glLogicOp(operations[state->desc.logic_op]);
++        gl_info->gl_ops.gl.p_glEnable(GL_COLOR_LOGIC_OP);
++    }
++    else
++        gl_info->gl_ops.gl.p_glDisable(GL_COLOR_LOGIC_OP);
++    checkGLcall("colour logic operation");
++}
++
+ static BOOL is_blend_enabled(struct wined3d_context *context, const struct wined3d_state *state, UINT index)
+ {
+     const struct wined3d_blend_state *b = state->blend_state;
+@@ -332,7 +350,7 @@ static BOOL is_blend_enabled(struct wined3d_context *context, const struct wined
+     if (!state->fb.render_targets[index])
+         return FALSE;
+ 
+-    if (!b->desc.rt[index].enable)
++    if (b->desc.logic_op_enable || !b->desc.rt[index].enable)
+         return FALSE;
+ 
+     /* Disable blending in all cases even without pixel shaders.
+@@ -352,6 +370,7 @@ static void blend(struct wined3d_context *context, const struct wined3d_state *s
+     GLenum src_blend, dst_blend;
+     unsigned int mask;
+ 
++    colour_logic_op(gl_info, b);
+     if (gl_info->supported[ARB_MULTISAMPLE])
+     {
+         if (b && b->desc.alpha_to_coverage)
+@@ -449,6 +468,7 @@ static void blend_db2(struct wined3d_context *context, const struct wined3d_stat
+         blend(context, state, state_id);
+         return;
+     }
++    colour_logic_op(gl_info, b);
+ 
+     rt_format = state->fb.render_targets[0]->format;
+     gl_blend_from_d3d(&src_blend, &dst_blend, b->desc.rt[0].src, b->desc.rt[0].dst, rt_format);
+@@ -510,6 +530,7 @@ static void blend_dbb(struct wined3d_context *context, const struct wined3d_stat
+         blend(context, state, state_id);
+         return;
+     }
++    colour_logic_op(gl_info, b);
+ 
+     for (i = 0; i < WINED3D_MAX_RENDER_TARGETS; ++i)
+     {
+diff --git a/include/wine/wined3d.h b/include/wine/wined3d.h
+index 6f25086..e343cb9 100644
+--- a/include/wine/wined3d.h
++++ b/include/wine/wined3d.h
+@@ -2031,6 +2031,7 @@ struct wined3d_caps
+     bool stencil_export;
+     bool simple_instancing;
+     bool min_max_filtering;
++    bool output_merger_logic_op;
+ 
+     enum wined3d_feature_level max_feature_level;
+ };
+@@ -2061,10 +2062,24 @@ struct wined3d_buffer_desc
+     unsigned int structure_byte_stride;
+ };
+ 
++enum wined3d_logic_op
++{
++    WINED3D_LOGIC_OP_CLEAR, WINED3D_LOGIC_OP_SET,
++    WINED3D_LOGIC_OP_COPY, WINED3D_LOGIC_OP_COPY_INVERTED,
++    WINED3D_LOGIC_OP_NOOP, WINED3D_LOGIC_OP_INVERT,
++    WINED3D_LOGIC_OP_AND, WINED3D_LOGIC_OP_NAND,
++    WINED3D_LOGIC_OP_OR, WINED3D_LOGIC_OP_NOR,
++    WINED3D_LOGIC_OP_XOR, WINED3D_LOGIC_OP_EQUIV,
++    WINED3D_LOGIC_OP_AND_REVERSE, WINED3D_LOGIC_OP_AND_INVERTED,
++    WINED3D_LOGIC_OP_OR_REVERSE, WINED3D_LOGIC_OP_OR_INVERTED,
++};
++
+ struct wined3d_blend_state_desc
+ {
+     BOOL alpha_to_coverage;
+     BOOL independent;
++    BOOL logic_op_enable;
++    enum wined3d_logic_op logic_op;
+     struct wined3d_rendertarget_blend_state_desc
+     {
+         BOOL enable;

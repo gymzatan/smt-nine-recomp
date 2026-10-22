@@ -1,0 +1,22 @@
+name: WineD3D dependency
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/wined3d-logic]
+    paths: ['config/wined3d-logic.patch', 'tools/build_wined3d.sh', '.github/workflows/wined3d.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install cross compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 bison flex libvulkan-dev libgl-dev zip
+      - name: Build existing OpenGL dependency
+        run: bash tools/build_wined3d.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: wined3d-native-opengl
+          path: build/wined3d/wined3d.zip
+          if-no-files-found: error
