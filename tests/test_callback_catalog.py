@@ -10,7 +10,8 @@ def test_resource_callback_preserves_both_paths_and_caller_stack():
     sys.path.insert(0, str(ROOT / 'vendor/xboxrecomp'))
     from tools.recomp import config
     from tools.recomp.translator import FunctionTranslator
-    from tools.recomp.test_icall_caller_cleans import _build_and_run
+    from tools.recomp.test_lifter_pushal import _build_and_run
+    from tools.recomp.test_lifter_architectural_flags import PRELUDE
 
     start = 0x1BFF0
     image = bytes.fromhex('807c2408007411681ca85400e8b2defffff7d81bc05940c3ff742404b91ca85400e8c2e5ffffc3')
@@ -27,11 +28,20 @@ def test_resource_callback_preserves_both_paths_and_caller_stack():
     body = FunctionTranslator(image, db).translate_function(start, db[start])
     assert 'sub_00019EB3' in body and 'sub_0001A5D8' in body
     assert 'sub_0001C000' not in body
-    source = r'''
+    source = PRELUDE + r'''
+/* Keep the original architectural flag helpers; only guest RAM/call plumbing
+ * is local to this callback fixture. */
+#undef MEM8
+#undef MEM32
+#undef PUSH32
+#undef POP32
+#undef CMP_EQ
+#undef RECOMP_ABI_CALL
 #include <stdint.h>
 #include <assert.h>
 static unsigned char ram[0x2000];
-static uint32_t eax,ecx,esp,g_ebp,g_seh_ebp;
+static uint32_t eax,ecx,esp;
+RECOMP_TLS uint32_t g_ebp,g_seh_ebp;
 static int initialized,loaded,init_result;
 #define MEM8(a) (*(uint8_t *)(ram+(a)))
 #define MEM32(a) (*(uint32_t *)(ram+(a)))

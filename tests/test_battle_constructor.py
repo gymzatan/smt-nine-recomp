@@ -8,9 +8,21 @@ import generate
 def test_effect_constructor_uses_completed_callback_handles(tmp_path):
     base=(ROOT/'game/tests/data/battle_constructor_base.c').read_text()
     row=next(r for r in json.loads((ROOT/'config/codegen.json').read_text())['functions'] if r['name']=='sub_00086D7C')
-    offset=7070
-    edits=[(at-offset,removed,inserted,before,after) for at,removed,inserted,before,after in row['edits'] if offset <= at < offset+len(base)]
-    assert len(edits)==5
+    # The fixture is the original constructor slice, not the whole generated
+    # function. Bind its edits by their unique original text, independently of
+    # flags/continuation text inserted earlier in the current recipe.
+    edits=[]
+    for _,removed,inserted,_,_ in row['edits']:
+        if removed and removed in base:
+            assert base.count(removed)==1
+            at=base.index(removed);end=at+len(removed)
+            edits.append((at,removed,inserted,base[max(0,at-80):at],base[end:end+80]))
+    edits.sort()
+    assert len(edits)==2
+    assert {inserted.splitlines()[-1] for _,_,inserted,_,_ in edits}=={
+        '    _fa = (uint32_t)(MEM32(esp + 0x94)) & 0xFFFFFFFFu; _fb = (uint32_t)(edi) & 0xFFFFFFFFu;',
+        '    _fa = (uint32_t)(MEM32(esp + 0x98)) & 0xFFFFFFFFu; _fb = (uint32_t)(edi) & 0xFFFFFFFFu;',
+    }
     fixed=generate.apply_project_edits(base,dict(row,edits=edits))
     compiler=shutil.which('cl');assert compiler
     fixture=r"""

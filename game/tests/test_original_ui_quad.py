@@ -315,7 +315,9 @@ def test_fusion_disc_anchor(tmp_path):
     recipe = json.loads((root / 'config/codegen.json').read_text())
     row = next(item for item in recipe['functions'] if item['address'] == 0x368F3)
     edit = next(item for item in row['edits'] if 'disc anchors' in item[2])
-    production = edit[2][:edit[2].index('    g_ebp = ebp;')]
+    # The current recipe stores the complete inserted anchor consumer separately
+    # from the following call-frame context (edit[4]). Execute that exact insert.
+    production = edit[2]
     source = r'''
 #include <stdint.h>
 #include <string.h>
