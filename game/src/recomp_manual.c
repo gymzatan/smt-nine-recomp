@@ -113,9 +113,11 @@ static void prepare_original_ui_quad(void)
     if(caller==0x000F559Cu || caller==0x001452C5u){
         /* EF1B0's original 80x30 backdrop grid shares EEF90's source and pan.
          * 1450CF rebuilds 22 vertices for a sprite's entry/exit animation.
-         * Both meshes use the existing UI X mapping on every vertex. */
+         * Portrait strips and the grid use the existing UI X mapping. */
         if(caller==0x001452C5u){
             if(MEM32(g_esp+4)!=9 || MEM32(g_esp+8)!=0 || MEM32(g_esp+12)!=22){fprintf(stderr,"[STOP] original sprite strip contract\n");exit(5);}
+            /* 1450CF retains the same original sprite manager as 145A39. */
+            if(MEM32(MEM32(g_ebp-0x30)+4)==0x003B2480u)return;
             buffer=MEM32(MEM32(g_ebp-12)+4)|0x80000000u;
         }else buffer=MEM32(MEM32(g_esi+8)+4)|0x80000000u;
         vertices=MEM32(g_esp+12);
@@ -190,9 +192,13 @@ static void prepare_original_ui_quad(void)
     }
     /* These exact callers are the original font, panel and icon producers.
      * Full-screen fills cover the selected aspect; other UI keeps its shape. */
-    /* 145A39 also draws standing portraits as full-height, narrow quads.
-     * Only its screen-wide artwork takes the full-screen exception. */
+    /* 145A39 also draws standing portraits as full-height, narrow quads. */
     int fullscreen=ymax-ymin>=480 && (!texel_endpoints || xmax-xmin>=640);
+    /* 112B74 registers its two backdrop sprites with list base 3B2480.
+     * 145A39 saves that original manager at draw-stack +5C, even when
+     * 1463D7 queues an inline sprite copy. Keep both background tiles wide;
+     * the character list remains proportional, including shared atlases. */
+    if(texel_endpoints && MEM32(MEM32(g_esp+0x5C)+4)==0x003B2480u)fullscreen=1;
     /* Keep 145A39's tiled full-screen backdrop exactly as requested.
      * Only its panels, portraits and icons need atlas edge correction. */
     if(texel_endpoints && !fullscreen){

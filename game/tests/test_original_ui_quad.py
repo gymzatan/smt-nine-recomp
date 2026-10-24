@@ -117,6 +117,7 @@ static void check_menu_color(uint32_t caller,unsigned primitive,unsigned count,u
 }
 static void check_portrait_strip(float left,float top,float height) {
     memset(ram,0,sizeof ram);MEM32(g_esp)=0x001452C5;
+    MEM32(g_ebp-0x30)=0x6000;MEM32(0x6004)=0x003B21E8;
     MEM32(g_esp+4)=9;MEM32(g_esp+8)=0;MEM32(g_esp+12)=22;
     MEM32(g_ebp-12)=0x3000;MEM32(0x3004)=0x4000;
     for(unsigned i=0;i<22;i++) {
@@ -133,8 +134,24 @@ static void check_portrait_strip(float left,float top,float height) {
     }
     if(aspect==4.0f/3.0f)assert(!memcmp(before,ram+0x4000,sizeof before));
 }
+static void check_original_backdrop_strip(void) {
+    for(unsigned tile=0;tile<2;tile++) {
+        memset(ram,0,sizeof ram);MEM32(g_esp)=0x001452C5;
+        MEM32(g_ebp-0x30)=0x6000;MEM32(0x6004)=0x003B2480;
+        MEM32(g_esp+4)=9;MEM32(g_esp+8)=0;MEM32(g_esp+12)=22;
+        MEM32(g_ebp-12)=0x3000;MEM32(0x3004)=0x4000;
+        for(unsigned i=0;i<22;i++) {
+            unsigned v=0x4000+i*28;
+            MEMF(v)=(tile?512:0)+(i&1?(tile?128:512):0);MEMF(v+4)=(i/2)*48;
+            for(unsigned offset=8;offset<28;offset+=4)MEM32(v+offset)=0x3f000000+i+offset;
+        }
+        unsigned char before[22*28];memcpy(before,ram+0x4000,sizeof before);
+        prepare_original_ui_quad();assert(!memcmp(before,ram+0x4000,sizeof before));
+    }
+}
 static void check_settled_portrait(float width,float height,int fullscreen) {
     memset(ram,0,sizeof ram);g_esi=0x2000;
+    MEM32(g_esp+0x5c)=0x6000;MEM32(0x6004)=0x003B21E8;
     MEM32(g_esp)=0x0014617A;MEM32(g_esp+4)=7;MEM32(g_esp+8)=4;
     MEM32(g_esp+12)=0x4000;MEM32(g_esp+16)=28;
     MEM32(g_esp+0x13c)=512;MEM32(g_esp+0x140)=512;
@@ -162,6 +179,55 @@ static void check_settled_portrait(float width,float height,int fullscreen) {
         }
     }
     if(!fullscreen)assert(fabsf((MEMF(0x401c)-MEMF(0x4000))*aspect-width*(4.0f/3.0f))<0.0001f);
+}
+static void check_original_backdrop_tiles(void) {
+    /* 112B74 registers the original two-sprite background list at 3B2480.
+     * 1463D7 can queue its original record or the inline draw-state copy.
+     * The saved 145A39 manager identifies both without inspecting pixels. */
+    for(unsigned copied=0;copied<2;copied++)for(unsigned tile=0;tile<2;tile++)for(unsigned padded=0;padded<2;padded++) {
+        memset(ram,0,sizeof ram);g_esi=copied?0x00552F54:0x003B2480+tile*0x3c;
+        MEM32(g_esp)=0x0014617A;MEM32(g_esp+4)=7;MEM32(g_esp+8)=4;
+        MEM32(g_esp+12)=0x4000;MEM32(g_esp+16)=28;
+        MEM32(g_esp+0x5c)=0x6000;MEM32(0x6004)=0x003B2480;
+        unsigned texture_width=tile && !padded?128:512;
+        MEM32(g_esp+0x13c)=texture_width;MEM32(g_esp+0x140)=512;
+        float left=tile?512:0,width=tile?128:512;
+        for(unsigned i=0;i<4;i++) {
+            unsigned v=0x4000+i*28;
+            MEMF(v)=left+(i&1?width:0);MEMF(v+4)=i&2?480:0;
+            MEM32(v+8)=0x3f000000+i;MEM32(v+12)=0x3f800000;MEM32(v+16)=0xff123400+i;
+            MEMF(v+20)=i&1?(width-1)/(texture_width-1):0;MEMF(v+24)=i&2?479.0f/511:0;
+        }
+        unsigned char before[112];memcpy(before,ram+0x4000,sizeof before);
+        prepare_original_ui_quad();
+        /* Each original tile must keep its screen extent and UVs so the
+         * complete background reaches both selected-aspect screen edges. */
+        assert(!memcmp(before,ram+0x4000,sizeof before));
+    }
+    g_esi=0x2000;
+}
+static void check_original_endchar_portrait(void) {
+    /* Original 3358EC: texture0, sourceX128,Y0,W360,H512. */
+    memset(ram,0,sizeof ram);g_esi=0x003B21E8;
+    MEM32(g_esp)=0x0014617A;MEM32(g_esp+4)=7;MEM32(g_esp+8)=4;
+    MEM32(g_esp+12)=0x4000;MEM32(g_esp+16)=28;
+    MEM32(g_esp+0x5c)=0x6000;MEM32(0x6004)=0x003B21E8;
+    MEM32(g_esp+0x13c)=512;MEM32(g_esp+0x140)=512;
+    for(unsigned i=0;i<4;i++) {
+        unsigned v=0x4000+i*28;MEMF(v)=140+(i&1?360:0);MEMF(v+4)=-32+(i&2?512:0);
+        MEM32(v+8)=0x3f000000+i;MEM32(v+12)=0x3f800000;MEM32(v+16)=0xff123400+i;
+        MEMF(v+20)=(i&1?487.0f:128.0f)/511;MEMF(v+24)=i&2?1:0;
+    }
+    unsigned char before[112];memcpy(before,ram+0x4000,sizeof before);
+    prepare_original_ui_quad();
+    assert(fabsf((MEMF(0x401c)-MEMF(0x4000))*aspect-360*(4.0f/3.0f))<0.0001f);
+    for(unsigned i=0;i<4;i++) {
+        unsigned v=0x4000+i*28;
+        assert(!memcmp(before+i*28+4,ram+v+4,16));
+        assert(fabsf(MEMF(v+20)-(i&1?486.5f:128.5f)/512)<0.0000001f);
+        assert(fabsf(MEMF(v+24)-(i&2?510.5f:0.5f)/512)<0.0000001f);
+    }
+    g_esi=0x2000;
 }
 static void check_preview(uint32_t caller,int active) {
     memset(ram,0,sizeof ram);MEM32(g_esp)=caller;MEM32(g_esp+4)=0x4000;
@@ -322,6 +388,9 @@ int main(int argc,char **argv) {
     check_portrait_strip(352,164,272);check_portrait_strip(171,217,216);check_portrait_strip(202,163,80);
     check_settled_portrait(320,480,0);check_settled_portrait(512,512,0);
     check_settled_portrait(320,479,0);check_settled_portrait(640,480,1);
+    check_settled_portrait(360,512,0);check_original_backdrop_tiles();
+    check_original_backdrop_strip();
+    check_original_endchar_portrait();
     check_dialogue_connector();check_speech_anchor();
     check_item_icons();check_font_up();
     check_window_transition();check_sword_preview();check_status_preview();
