@@ -41,7 +41,7 @@ $copies = @()
 $seen = @{}
 foreach ($entry in $manifest.files) {
     $name = [string]$entry.path
-    if ($name -notmatch '^(smt9_recomp\.exe|Config\.exe|Updater\.exe|LICENSE|THIRD_PARTY\.md|CONTROLS\.zh-CN\.md|backends/[^/]+/[^/]+\.dll|backends/opengl/WINED3D_COPYING\.LIB|LICENSES/[^/]+|runtime/(native_game(_jp)?\.xbe|title_layers\.bin|fonts/font[234]\.bin))$') { throw "Not a program update file: $name" }
+    if ($name -notmatch '^(smt9_recomp\.exe|Config\.exe|Updater\.exe|LICENSE|THIRD_PARTY\.md|CONTROLS\.zh-CN\.md|backends/[^/]+/[^/]+\.dll|backends/opengl/WINED3D_COPYING\.LIB|backends/vulkan/DXC_LICENSE_(LLVM|MS)|LICENSES/[^/]+|runtime/(native_game(_jp)?\.xbe|title_layers\.bin|fonts/font[234]\.bin))$') { throw "Not a program update file: $name" }
     if ($seen.ContainsKey($name)) { throw "Repeated update path: $name" }
     $seen[$name] = $true
     $source = Resolve-SafeFile $bundle ('payload/' + $name)
