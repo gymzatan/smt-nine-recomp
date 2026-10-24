@@ -105,6 +105,8 @@ def build(iso, jobs, resume=False, with_chinese=False, update=False):
          '-DCMAKE_RUNTIME_OUTPUT_DIRECTORY='+str(ROOT)],env=environment)
     # CMake/Ninja owns the dependency graph. Translation units and Cargo crates
     # have separate outputs; preparation and code generation remain sequential.
+    print('Final native build: link-time optimization can remain at "Linking C executable" for more than 10 minutes. '
+          'The step count does not show linker progress. Wait for "Build complete" before opening the game.',flush=True)
     run([cmake,'--build',ROOT/'build/native','--target','smt9_recomp','Config','Updater','--parallel',jobs],env=environment)
     if update:
         for registration in sorted((ROOT/'runtime/languages').glob('*.ini')):

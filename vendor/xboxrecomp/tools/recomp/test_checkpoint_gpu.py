@@ -123,7 +123,14 @@ static HRESULT pixel_state_map_for_test(ID3D11DeviceContext *,ID3D11Resource *,U
 #define ID3D11DeviceContext_Map pixel_state_map_for_test
 #define d3d8_GetD3D11Context query_context_for_test
 #define memcmp texture_compare_for_test
+#include "nv2a/nv2a_state.h"
+static unsigned progress_kick_calls;
+static void progress_kick_for_test(NV2AState *gpu) {
+    ++progress_kick_calls;nv2a_fifo_kick(gpu);
+}
+#define nv2a_fifo_kick progress_kick_for_test
 #include "kernel/nv2a_pb_exec.c"
+#undef nv2a_fifo_kick
 #undef memcmp
 #undef d3d8_upload_vertices
 #undef d3d8_reuse_vertex_upload
@@ -1814,6 +1821,21 @@ static void verify_large_batch(const char *producer) {
 static void verify_fifo_worker_checkpoint(int partial,int indices) {
     NV2AState *gpu=nv2a_get_state();
     seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+    /* The original checkpoint barrier holds the real worker before it can
+     * consume a posted request. Use an actual deferred output, not a fake
+     * query count, to exercise repeated main-thread progress requests. */
+    assert(!ReadAcquire(&gpu->pfifo.fifo_kick) && !ReadAcquire64(&s_hw_query_count));
+    hw_defer_output((uint8_t *)XBOX_TO_NATIVE(0x80070000u),0);
+    assert(ReadAcquire64(&s_hw_query_count)==1);
+    unsigned kicks=progress_kick_calls;
+    nv2a_pb_request_progress();
+    assert(progress_kick_calls==kicks+1 && ReadAcquire(&gpu->pfifo.fifo_kick)==1);
+    for(unsigned repeat=0;repeat<4096;repeat++)nv2a_pb_request_progress();
+    fprintf(stderr,"[PROGRESS REQUEST] repeated4096 extra_kicks=%u\n",progress_kick_calls-kicks-1);
+    assert(progress_kick_calls==kicks+1 && ReadAcquire64(&s_hw_query_count)==1);
+    hw_collect_queries(1);
+    assert(!ReadAcquire64(&s_hw_query_count) && BRIDGE_MEM32(0x80070000u)==0);
+    nv2a_pb_request_progress();assert(progress_kick_calls==kicks+1);
     gpu->vram_ptr=(uint8_t *)(xbox_GetMemoryOffset()+0x80000000u);
     uint32_t *object=(uint32_t *)(gpu->ramin_ptr+0x400);
     object[0]=2;object[1]=4095;object[2]=0x80000;
@@ -2948,7 +2970,7 @@ static void verify_polygon_raster_consumers(void) {
         method(NV097_SET_BLEND_ENABLE,0);raster_mode_for_test(0,0);
         /* Aliased width is nearest integer; the major axis selects contiguous
          * native unit lines. Compare actual wide output with those original lines. */
-        const unsigned widths[]={0,1,4,7,8,9,11,12,16,24,56,504};
+        const unsigned widths[]={0,1,4,7,8,9,11,12,16,24,56,248,256,264,504};
         const float lines[][4]={{8,32,56,32},{32,8,32,56},{8,16,56,36},{16,8,36,56}};
         for(unsigned line=0;line<4;line++)for(unsigned w=0;w<sizeof widths/sizeof *widths;w++) {
             unsigned width=(widths[w]+4)/8;if(!width)width=1;

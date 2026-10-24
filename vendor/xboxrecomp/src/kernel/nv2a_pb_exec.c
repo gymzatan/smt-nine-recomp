@@ -4704,8 +4704,12 @@ void nv2a_pb_request_progress(void)
 #if defined(_WIN32)
     if (ReadAcquire64(&s_hw_query_count)) {
         NV2AState *d=nv2a_get_state();
-        if (d && d->pfifo.thread.thread) nv2a_fifo_kick(d);
-        else if (hw_enabled()) hw_collect_queries(0);
+        if (d && d->pfifo.thread.thread) {
+            /* Progress publishes no commands. A posted request already owns
+             * the next collection pass; running alone still needs a request.
+             * Keep PUT publication on the unchanged generic kick path. */
+            if (!(ReadAcquire(&d->pfifo.fifo_kick) & 1)) nv2a_fifo_kick(d);
+        } else if (hw_enabled()) hw_collect_queries(0);
     }
 #endif
 }

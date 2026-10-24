@@ -30,6 +30,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <math.h>
+#include <errno.h>
 
 /* xboxrecomp runtime headers */
 #include <xbox/xboxrecomp.h>
@@ -37,7 +38,7 @@
 #include "game_paths.h"
 #include "config.h"
 #include "font_assets.h"
-static NineConfig s_display;
+static NineConfig s_display={.interface_language=SMT9_DEFAULT_UI_LANGUAGE_W};
 int smt9_is_japanese(void){return !wcscmp(s_display.language,L"Japanese");}
 int smt9_is_chinese(void){return !wcscmp(s_display.language,L"Chinese");}
 static NineLanguage s_language;
@@ -441,9 +442,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
 
     wchar_t config_error[256];char backend[16];
-    if(!nine_config_read(&s_display,config_error,256)) {
-        MessageBoxW(NULL,config_error,L"NINE",MB_OK|MB_ICONERROR);return 1;
-    }
     extern BOOL xbox_InputConfigure(const XboxInputBindings *bindings);
     if(!xbox_InputConfigure(&s_display.controls))return 1;
     if(!nine_language_resolve(s_display.language,&s_language,config_error,256)) {
@@ -684,18 +682,46 @@ static BOOL load_xbe(const char *path, void **out_data, size_t *out_size)
 }
 
 /* Console entry point (for debugging -- lets you see printf output) */
+typedef enum StartupMessage { STARTUP_ROOT,STARTUP_LOG_PATH,STARTUP_LOG_OPEN,STARTUP_ENV,STARTUP_FAILED } StartupMessage;
+static const wchar_t *startup_text(StartupMessage message)
+{
+    static const wchar_t *const messages[][3]={
+        {L"无法确定程序所在目录。",L"プログラムのフォルダーを確認できません。",L"Cannot resolve the executable directory."},
+        {L"启动日志路径过长。",L"起動ログのパスが長すぎます。",L"The startup log path is too long."},
+        {L"无法打开启动日志：\n%s\n\nWindows 错误：%lu\nC 运行库错误：%d",L"起動ログを開けません：\n%s\n\nWindows エラー：%lu\nC ランタイムエラー：%d",L"Cannot open the startup log:\n%s\n\nWindows error: %lu\nC runtime error: %d"},
+        {L"无法初始化启动诊断。\nC 运行库错误：%d",L"起動診断を初期化できません。\nC ランタイムエラー：%d",L"Cannot initialize startup diagnostics.\nC runtime error: %d"},
+        {L"游戏启动失败，详细信息见 runtime/startup.log。",L"ゲームを起動できません。詳細は runtime/startup.log を確認してください。",L"Startup failed. See runtime/startup.log."}
+    };
+    unsigned language=!wcscmp(s_display.interface_language,L"Japanese")?1:!wcscmp(s_display.interface_language,L"English")?2:0;
+    return messages[message][language];
+}
 int main(int argc, char **argv)
 {
     if(!nine_paths_init()) {
-        MessageBoxW(NULL,L"无法确定程序所在目录。 / Cannot resolve the executable directory.",L"NINE",MB_OK|MB_ICONERROR);return 1;
+        MessageBoxW(NULL,startup_text(STARTUP_ROOT),L"NINE",MB_OK|MB_ICONERROR);return 1;
+    }
+    wchar_t config_error[256];
+    if(!nine_config_read(&s_display,config_error,256)) {
+        MessageBoxW(NULL,config_error,L"NINE",MB_OK|MB_ICONERROR);return 1;
     }
     int gui_startup=GetFileType(GetStdHandle(STD_ERROR_HANDLE))==FILE_TYPE_UNKNOWN;
     if(gui_startup) {
         wchar_t path[MAX_PATH];FILE *stream=NULL;
-        if(swprintf_s(path,MAX_PATH,L"%s/startup.log",nine_paths.runtime_w)<0 ||
-           _wfreopen_s(&stream,path,L"w",stderr)!=0 ||
-           _putenv_s("RECOMP_GPU_ERROR_DIALOG","1")!=0) {
-            MessageBoxW(NULL,L"无法写入 runtime/startup.log，请检查游戏目录的写入权限。 / Cannot write runtime/startup.log.",L"NINE",MB_OK|MB_ICONERROR);return 1;
+        if(swprintf_s(path,MAX_PATH,L"%s/startup.log",nine_paths.runtime_w)<0) {
+            MessageBoxW(NULL,startup_text(STARTUP_LOG_PATH),L"NINE",MB_OK|MB_ICONERROR);return 1;
+        }
+        _set_doserrno(0);
+        errno_t log_error=_wfreopen_s(&stream,path,L"w",stderr);
+        if(log_error) {
+            unsigned long system_error=0;wchar_t message[1024];
+            _get_doserrno(&system_error);
+            swprintf_s(message,1024,startup_text(STARTUP_LOG_OPEN),path,system_error,log_error);
+            MessageBoxW(NULL,message,L"NINE",MB_OK|MB_ICONERROR);return 1;
+        }
+        errno_t environment_error=_putenv_s("RECOMP_GPU_ERROR_DIALOG","1");
+        if(environment_error) {
+            wchar_t message[256];swprintf_s(message,256,startup_text(STARTUP_ENV),environment_error);
+            MessageBoxW(NULL,message,L"NINE",MB_OK|MB_ICONERROR);return 1;
         }
         setvbuf(stderr,NULL,_IONBF,0);
     }
@@ -712,6 +738,6 @@ int main(int argc, char **argv)
     (void)argv;
 #endif
     int result=WinMain(GetModuleHandle(NULL), NULL, GetCommandLineA(), SW_SHOW);
-    if(result && gui_startup)MessageBoxW(NULL,L"游戏启动失败，详细信息见 runtime/startup.log。 / Startup failed. See runtime/startup.log.",L"NINE",MB_OK|MB_ICONERROR);
+    if(result && gui_startup)MessageBoxW(NULL,startup_text(STARTUP_FAILED),L"NINE",MB_OK|MB_ICONERROR);
     return result;
 }

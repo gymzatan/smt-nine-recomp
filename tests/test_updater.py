@@ -67,6 +67,9 @@ def test_online_update(tmp_path,variant,case):
         (target/'runtime/fonts').mkdir()
         (target/'runtime/fonts/font2.bin').write_bytes(b'Chinese font')
     payload={'smt9_recomp.exe':b'new game','Config.exe':b'new config','Updater.exe':b'new updater'}
+    payload.update({'LICENSES/WINED3D_COPYING.LIB':b'WineD3D license',
+                    'LICENSES/DXC_LICENSE_LLVM':b'LLVM license',
+                    'LICENSES/DXC_LICENSE_MS':b'Microsoft license'})
     if variant=='japanese-chinese':payload['runtime/native_game.xbe']=b'Updated Chinese text'
     rows=[{'path':n,'sha256':sha(data)} for n,data in payload.items()]
     manifest={'format':'smt-nine-program-update','source_commit':'a'*40,'required_files':identities,'files':rows,
@@ -111,6 +114,9 @@ if ($again.ChangedFiles -ne 0) {{ throw 'Not current after update' }}
     assert (target/'data/save.bin').read_bytes()==b'keep save'
     assert (target/'save/ordinary.sav').read_bytes()==b'keep shared save'
     assert (target/'save/states/Japanese/instant.slot1.state').read_bytes()==b'keep new checkpoint'
+    for name in ('LICENSES/WINED3D_COPYING.LIB', 'LICENSES/DXC_LICENSE_LLVM', 'LICENSES/DXC_LICENSE_MS'):
+        if case=='valid':assert (target/name).read_bytes()==payload[name]
+        else:assert not (target/name).exists()
     if variant=='japanese-chinese':
         assert (target/'runtime/native_game.xbe').read_bytes()==(b'Updated Chinese text' if case=='valid' else b'Chinese')
         assert (target/'runtime/fonts/font2.bin').read_bytes()==b'Chinese font'
