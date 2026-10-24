@@ -24,7 +24,7 @@ def test_update_preserves_data_and_checks_entire_payload(tmp_path):
     before={p:(p.read_bytes(),p.stat().st_mtime_ns) for p in protected}
     identity=write(target,'runtime/native_game_jp.xbe',b'compatible game')
     rows=[]
-    for name,data in [('smt9_recomp.exe',b'new program'),('Config.exe',b'new config program'),('Updater.exe',b'new updater')]:
+    for name,data in [('smt9_recomp.exe',b'new program'),('Config.exe',b'new config program'),('Updater.exe',b'new updater'),('backends/opengl/WINED3D_COPYING.LIB',b'WineD3D license')]:
         write(bundle/'payload',name,data)
         rows.append({'path':name,'sha256':hashlib.sha256(data).hexdigest()})
     manifest={'format':'smt-nine-program-update','required_files':[{'path':'runtime/native_game_jp.xbe','sha256':hashlib.sha256(identity.read_bytes()).hexdigest()}],'files':rows}
@@ -54,6 +54,7 @@ def test_update_preserves_data_and_checks_entire_payload(tmp_path):
     assert not (target/'Updater.exe').exists()
     assert run().returncode==0
     assert (target/'smt9_recomp.exe').read_bytes()==b'new program'
+    assert (target/'backends/opengl/WINED3D_COPYING.LIB').read_bytes()==b'WineD3D license'
     stamps={p:p.stat().st_mtime_ns for p in (target/'smt9_recomp.exe',target/'Config.exe')}
     assert run().returncode==0
     assert all(p.stat().st_mtime_ns==stamp for p,stamp in stamps.items())
