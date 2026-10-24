@@ -584,37 +584,55 @@ HANDLE CreateEventW(LPSECURITY_ATTRIBUTES sa, BOOL manualReset, BOOL initialStat
     return CreateEventA(sa, manualReset, initialState, NULL);
 }
 
-BOOL SetEvent(HANDLE h)
+NTSTATUS NTAPI NtSetEvent(HANDLE h, PLONG previous)
 {
     w32_object *o = (w32_object *)h;
-    if (!o || o->kind != K_EVENT) return FALSE;
+    if (!o || o->kind != K_EVENT) return (NTSTATUS)0xC0000008u;
     pthread_mutex_lock(&o->lock);
+    if (previous) *previous = o->signaled;
     o->signaled = 1;
     pthread_cond_broadcast(&o->cond);
     pthread_mutex_unlock(&o->lock);
-    return TRUE;
+    return 0;
+}
+
+BOOL SetEvent(HANDLE h)
+{
+    return NtSetEvent(h, NULL) >= 0;
+}
+
+NTSTATUS NTAPI NtResetEvent(HANDLE h, PLONG previous)
+{
+    w32_object *o = (w32_object *)h;
+    if (!o || o->kind != K_EVENT) return (NTSTATUS)0xC0000008u;
+    pthread_mutex_lock(&o->lock);
+    if (previous) *previous = o->signaled;
+    o->signaled = 0;
+    pthread_mutex_unlock(&o->lock);
+    return 0;
 }
 
 BOOL ResetEvent(HANDLE h)
 {
-    w32_object *o = (w32_object *)h;
-    if (!o || o->kind != K_EVENT) return FALSE;
-    pthread_mutex_lock(&o->lock);
-    o->signaled = 0;
-    pthread_mutex_unlock(&o->lock);
-    return TRUE;
+    return NtResetEvent(h, NULL) >= 0;
 }
 
-BOOL PulseEvent(HANDLE h)
+NTSTATUS NTAPI NtPulseEvent(HANDLE h, PLONG previous)
 {
     w32_object *o = (w32_object *)h;
-    if (!o || o->kind != K_EVENT) return FALSE;
+    if (!o || o->kind != K_EVENT) return (NTSTATUS)0xC0000008u;
     pthread_mutex_lock(&o->lock);
+    if (previous) *previous = o->signaled;
     o->signaled = 1;
     pthread_cond_broadcast(&o->cond);
     o->signaled = 0;
     pthread_mutex_unlock(&o->lock);
-    return TRUE;
+    return 0;
+}
+
+BOOL PulseEvent(HANDLE h)
+{
+    return NtPulseEvent(h, NULL) >= 0;
 }
 
 /* ===================================================================== */

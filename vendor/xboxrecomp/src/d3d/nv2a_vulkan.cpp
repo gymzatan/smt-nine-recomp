@@ -18,7 +18,7 @@
 #define NVK_INSTANCE_FUNCTIONS(X) \
  X(DestroyInstance) X(EnumeratePhysicalDevices) X(GetPhysicalDeviceProperties) \
  X(GetPhysicalDeviceFeatures2) X(GetPhysicalDeviceQueueFamilyProperties) \
- X(GetPhysicalDeviceMemoryProperties) X(GetPhysicalDeviceFormatProperties) \
+ X(GetPhysicalDeviceMemoryProperties) X(GetPhysicalDeviceFormatProperties) X(EnumerateDeviceExtensionProperties) \
  X(CreateDevice) X(GetDeviceProcAddr) X(CreateWin32SurfaceKHR) X(DestroySurfaceKHR) \
  X(GetPhysicalDeviceSurfaceSupportKHR) X(GetPhysicalDeviceSurfaceCapabilitiesKHR) \
  X(GetPhysicalDeviceSurfaceFormatsKHR) X(GetPhysicalDeviceSurfacePresentModesKHR)
@@ -96,7 +96,9 @@ struct Context {
     VkPhysicalDevice physical{};
     VkPhysicalDeviceProperties properties{};
     VkPhysicalDeviceMemoryProperties memory{};
+    VkBool32 logic_op;
     VkBool32 fill_mode_non_solid{};
+    VkBool32 custom_border_colors{};
     VkDevice device{};
     VkQueue queue{};
     unsigned family{};
@@ -149,7 +151,8 @@ Buffer buffer_create(VkDeviceSize size,VkBufferUsageFlags usage) {
         CHECK(vkCreateBuffer(context.device,&info,nullptr,&b.buffer));
         VkMemoryRequirements req;vkGetBufferMemoryRequirements(context.device,b.buffer,&req);
         unsigned index=memory_type(req.memoryTypeBits,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-            (usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)?VK_MEMORY_PROPERTY_HOST_CACHED_BIT:0);
+            (usage&VK_BUFFER_USAGE_TRANSFER_DST_BIT)?VK_MEMORY_PROPERTY_HOST_CACHED_BIT:
+            (usage&(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT|VK_BUFFER_USAGE_INDEX_BUFFER_BIT|VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT))?VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT:0);
         VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};alloc.allocationSize=req.size;alloc.memoryTypeIndex=index;
         CHECK(vkAllocateMemory(context.device,&alloc,nullptr,&b.memory));
         CHECK(vkBindBufferMemory(context.device,b.buffer,b.memory,0));
@@ -157,6 +160,14 @@ Buffer buffer_create(VkDeviceSize size,VkBufferUsageFlags usage) {
         b.coherent=(context.memory.memoryTypes[index].propertyFlags&VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)!=0;
         return b;
     } catch(...) {destroy(b);throw;}
+}
+Buffer &readback_storage(VkDeviceSize bytes) {
+    Buffer &staging=context.readback;
+    if(staging.size<bytes) {
+        Buffer larger=buffer_create(bytes,VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        destroy(staging);staging=larger;
+    }
+    return staging;
 }
 void host_memory(Buffer &b,bool read) {
     if(b.coherent)return;
@@ -303,9 +314,19 @@ template<size_t Capacity> struct StateKey {
     }
 };
 using PipelineKey=StateKey<512>;
-using SamplerKey=StateKey<32>;
+using SamplerKey=StateKey<64>;
 std::map<PipelineKey,VkPipeline> pipelines;
 std::map<SamplerKey,VkSampler> samplers;
+void retire_pipelines(VkShaderModule module={}) {
+    bool waited=false;
+    for(auto it=pipelines.begin();it!=pipelines.end();) {
+        VkShaderModule modules[3];std::memcpy(modules,it->first.data.data(),sizeof modules);
+        if(!module || modules[0]==module || modules[1]==module || modules[2]==module) {
+            if(!waited){wait_serial(submit());waited=true;}
+            vkDestroyPipeline(context.device,it->second,nullptr);it=pipelines.erase(it);
+        } else ++it;
+    }
+}
 template<size_t Capacity,class T> void append(StateKey<Capacity> &key,const T &value) {
     require(key.size+sizeof value<=Capacity,"Native Vulkan state key capacity exceeded");
     std::memcpy(key.data.data()+key.size,&value,sizeof value);key.size+=sizeof value;
@@ -314,7 +335,7 @@ template<size_t Capacity,class T> void append(StateKey<Capacity> &key,const T &v
 
 struct NvkImage {
     VkImage image{};VkDeviceMemory memory{};VkImageView view{};
-    VkFormat format{};unsigned width{},height{},layers{};
+    VkFormat format{};unsigned width{},height{},layers{},depth{};bool volume{};
     VkImageLayout layout{VK_IMAGE_LAYOUT_UNDEFINED};
 };
 struct NvkShader {
@@ -338,19 +359,20 @@ void image_destroy(NvkImage *image) {
     if(image->memory)vkFreeMemory(context.device,image->memory,nullptr);
     delete image;
 }
-NvkImage *image_create(unsigned width,unsigned height,unsigned layers,VkFormat format,bool cube) {
-    require(width && height && (cube?layers==6:layers==1),"Invalid Vulkan image dimensions");
-    auto *image=new NvkImage{};image->width=width;image->height=height;image->layers=layers;image->format=format;
+NvkImage *image_create(unsigned width,unsigned height,unsigned layers,unsigned depth,VkFormat format,bool cube,bool volume) {
+    require(width && height && depth && (cube?layers==6:layers==1) && (volume?!cube && layers==1:depth==1),"Invalid Vulkan image dimensions");
+    require(!volume || aspects(format)==VK_IMAGE_ASPECT_COLOR_BIT,"Volume image must be a color texture");
+    auto *image=new NvkImage{};image->width=width;image->height=height;image->layers=layers;image->depth=depth;image->volume=volume;image->format=format;
     try {
         VkFormatProperties properties;vkGetPhysicalDeviceFormatProperties(context.physical,format,&properties);
-        VkFormatFeatureFlags required=aspects(format)==VK_IMAGE_ASPECT_COLOR_BIT?VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT|VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT:VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        VkFormatFeatureFlags required=aspects(format)==VK_IMAGE_ASPECT_COLOR_BIT?VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT|(volume?0:VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT):VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
         require((properties.optimalTilingFeatures&required)==required,"Unsupported Vulkan image format");
         VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-        info.flags=cube?VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT:0;info.imageType=VK_IMAGE_TYPE_2D;
-        info.format=format;info.extent={width,height,1};info.mipLevels=1;info.arrayLayers=layers;
+        info.flags=cube?VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT:0;info.imageType=volume?VK_IMAGE_TYPE_3D:VK_IMAGE_TYPE_2D;
+        info.format=format;info.extent={width,height,depth};info.mipLevels=1;info.arrayLayers=layers;
         info.samples=VK_SAMPLE_COUNT_1_BIT;info.tiling=VK_IMAGE_TILING_OPTIMAL;
         info.usage=VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        if(aspects(format)==VK_IMAGE_ASPECT_COLOR_BIT)info.usage|=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_SAMPLED_BIT;
+        if(aspects(format)==VK_IMAGE_ASPECT_COLOR_BIT)info.usage|=VK_IMAGE_USAGE_SAMPLED_BIT|(volume?0:VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
         else info.usage|=VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
         CHECK(vkCreateImage(context.device,&info,nullptr,&image->image));
         VkMemoryRequirements req;vkGetImageMemoryRequirements(context.device,image->image,&req);
@@ -359,7 +381,7 @@ NvkImage *image_create(unsigned width,unsigned height,unsigned layers,VkFormat f
         CHECK(vkAllocateMemory(context.device,&alloc,nullptr,&image->memory));
         CHECK(vkBindImageMemory(context.device,image->image,image->memory,0));
         VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};view.image=image->image;view.format=format;
-        view.viewType=cube?VK_IMAGE_VIEW_TYPE_CUBE:VK_IMAGE_VIEW_TYPE_2D;
+        view.viewType=volume?VK_IMAGE_VIEW_TYPE_3D:cube?VK_IMAGE_VIEW_TYPE_CUBE:VK_IMAGE_VIEW_TYPE_2D;
         view.subresourceRange={aspects(format),0,1,0,layers};
         CHECK(vkCreateImageView(context.device,&view,nullptr,&image->view));
         return image;
@@ -414,7 +436,8 @@ int nvk_initialize(const wchar_t *compiler_path) {
         unsigned score=props.deviceType==VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU?2:1;
         for(unsigned i=0;i<families;i++)if((queues[i].queueFlags&VK_QUEUE_GRAPHICS_BIT) && score>best) {
             best=score;context.physical=device;context.family=i;context.properties=props;
-            context.fill_mode_non_solid=features.features.fillModeNonSolid;break;
+            context.fill_mode_non_solid=features.features.fillModeNonSolid;
+            context.logic_op=features.features.logicOp;break;
         }
     }
     require(context.physical!=VkPhysicalDevice{},"No Vulkan 1.3 graphics device with geometry shaders, timelines and dynamic rendering");
@@ -425,10 +448,25 @@ int nvk_initialize(const wchar_t *compiler_path) {
     VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};f13.dynamicRendering=VK_TRUE;
     VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};f12.pNext=&f13;f12.timelineSemaphore=f12.samplerMirrorClampToEdge=VK_TRUE;
     VkPhysicalDeviceFeatures features{};features.geometryShader=features.occlusionQueryPrecise=VK_TRUE;
-    features.fillModeNonSolid=context.fill_mode_non_solid;
-    const char *device_extensions[]={"VK_KHR_swapchain"};
+    features.fillModeNonSolid=context.fill_mode_non_solid;features.logicOp=context.logic_op;
+    unsigned extension_count=0;
+    CHECK(vkEnumerateDeviceExtensionProperties(context.physical,nullptr,&extension_count,nullptr));
+    std::vector<VkExtensionProperties> available_extensions(extension_count);
+    CHECK(vkEnumerateDeviceExtensionProperties(context.physical,nullptr,&extension_count,available_extensions.data()));
+    bool border_extension=false;
+    for(const auto &extension:available_extensions)
+        if(!std::strcmp(extension.extensionName,VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME))border_extension=true;
+    VkPhysicalDeviceCustomBorderColorFeaturesEXT border_features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT};
+    if(border_extension) {
+        VkPhysicalDeviceFeatures2 supported{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};supported.pNext=&border_features;
+        vkGetPhysicalDeviceFeatures2(context.physical,&supported);
+        context.custom_border_colors=border_features.customBorderColors;
+    }
+    border_features.customBorderColorWithoutFormat=VK_FALSE;
+    if(context.custom_border_colors)f13.pNext=&border_features;
+    const char *device_extensions[]={"VK_KHR_swapchain",VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME};
     VkDeviceCreateInfo info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};info.pNext=&f12;info.queueCreateInfoCount=1;info.pQueueCreateInfos=&queue;
-    info.pEnabledFeatures=&features;info.enabledExtensionCount=1;info.ppEnabledExtensionNames=device_extensions;
+    info.pEnabledFeatures=&features;info.enabledExtensionCount=context.custom_border_colors?2:1;info.ppEnabledExtensionNames=device_extensions;
     CHECK(vkCreateDevice(context.physical,&info,nullptr,&context.device));
 #define LOAD_DEVICE(name) vk##name=reinterpret_cast<PFN_vk##name>(vkGetDeviceProcAddr(context.device,"vk" #name));require(vk##name!=nullptr,"Missing vk" #name);
     NVK_DEVICE_FUNCTIONS(LOAD_DEVICE)
@@ -485,7 +523,10 @@ int nvk_completed(uint64_t serial) {
     NVK_END(-1)
 }
 NvkImage *nvk_image_create(unsigned w,unsigned h,unsigned layers,VkFormat format,int cube) {
-    NVK_BEGIN return image_create(w,h,layers,format,cube!=0);NVK_END(nullptr)
+    NVK_BEGIN return image_create(w,h,layers,1,format,cube!=0,false);NVK_END(nullptr)
+}
+NvkImage *nvk_image_create_volume(unsigned w,unsigned h,unsigned depth,VkFormat format) {
+    NVK_BEGIN return image_create(w,h,1,depth,format,false,true);NVK_END(nullptr)
 }
 void nvk_image_destroy(NvkImage *image) {
     try {if(image){wait_serial(submit());image_destroy(image);}}catch(const std::exception &e){error=e.what();}
@@ -493,35 +534,33 @@ void nvk_image_destroy(NvkImage *image) {
 int nvk_image_upload(NvkImage *image,const void *pixels,size_t pitch) {
     NVK_BEGIN
     require(image && pixels && image->format!=VK_FORMAT_D32_SFLOAT_S8_UINT && pitch>=image->width*4,"Invalid Vulkan color upload");
-    size_t row=image->width*4,bytes=row*image->height*image->layers;
-    Buffer staging=buffer_create(bytes,VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-    try {
-        for(unsigned y=0;y<image->height*image->layers;y++)
-            std::memcpy(static_cast<char *>(staging.mapped)+row*y,static_cast<const char *>(pixels)+pitch*y,row);
-        host_memory(staging,false);transition(image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        VkBufferImageCopy copy{};copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,image->layers};copy.imageExtent={image->width,image->height,1};
-        vkCmdCopyBufferToImage(begin().commands,staging.buffer,image->image,image->layout,1,&copy);
-        wait_serial(submit());destroy(staging);return 1;
-    }catch(...){destroy(staging);throw;}
+    size_t row=image->width*4,bytes=row*image->height*image->layers*image->depth;
+    reserve(bytes+3);
+    auto &chunk=begin();VkDeviceSize offset=0;
+    for(size_t y=0;y<(size_t)image->height*image->layers*image->depth;y++) {
+        VkDeviceSize current=upload(static_cast<const char *>(pixels)+pitch*y,row,4);
+        if(!y)offset=current;
+    }
+    transition(image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    VkBufferImageCopy copy{};copy.bufferOffset=offset;
+    copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,image->layers};copy.imageExtent={image->width,image->height,image->depth};
+    vkCmdCopyBufferToImage(chunk.commands,chunk.upload.buffer,image->image,image->layout,1,&copy);
+    return 1;
     NVK_END(0)
 }
 int nvk_image_read(NvkImage *image,void *pixels,size_t pitch) {
     NVK_BEGIN
     require(image && pixels && image->format!=VK_FORMAT_D32_SFLOAT_S8_UINT && pitch>=image->width*4,"Invalid Vulkan color readback");
-    size_t row=image->width*4,bytes=row*image->height*image->layers;
+    size_t row=image->width*4,bytes=row*image->height*image->layers*image->depth;
     /* The original graphics lock serializes reads, and each read waits for
      * its GPU copy before returning. Reuse storage, never pixel contents. */
-    Buffer &staging=context.readback;
-    if(staging.size<bytes) {
-        Buffer larger=buffer_create(bytes,VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-        destroy(staging);staging=larger;
-    }
+    Buffer &staging=readback_storage(bytes);
     try {
         transition(image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-        VkBufferImageCopy copy{};copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,image->layers};copy.imageExtent={image->width,image->height,1};
+        VkBufferImageCopy copy{};copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,image->layers};copy.imageExtent={image->width,image->height,image->depth};
         vkCmdCopyImageToBuffer(begin().commands,image->image,image->layout,staging.buffer,1,&copy);
         wait_serial(submit());host_memory(staging,true);
-        for(unsigned y=0;y<image->height*image->layers;y++)
+        for(size_t y=0;y<(size_t)image->height*image->layers*image->depth;y++)
             std::memcpy(static_cast<char *>(pixels)+pitch*y,static_cast<char *>(staging.mapped)+row*y,row);
         return 1;
     }catch(...){destroy(staging);throw;}
@@ -538,9 +577,11 @@ int nvk_image_clear(NvkImage *image,const float rgba[4]) {
 }
 int nvk_depth_transfer(NvkImage *image,void *pixels,int writing) {
     NVK_BEGIN
-    require(image && pixels && image->format==VK_FORMAT_D32_SFLOAT_S8_UINT && image->layers==1,"Invalid Vulkan depth transfer");
+    require(image && pixels && !image->volume && image->format==VK_FORMAT_D32_SFLOAT_S8_UINT && image->layers==1,"Invalid Vulkan depth transfer");
     size_t count=(size_t)image->width*image->height;
-    Buffer staging=buffer_create(count*5,writing?VK_BUFFER_USAGE_TRANSFER_SRC_BIT:VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    Buffer upload{};
+    Buffer &staging=writing?upload:readback_storage(count*5);
+    if(writing)staging=buffer_create(count*5,VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
     try {
         if(writing) {
             for(size_t i=0;i<count;i++) {
@@ -565,13 +606,13 @@ int nvk_depth_transfer(NvkImage *image,void *pixels,int writing) {
                 static_cast<char *>(pixels)[i*8+4]=static_cast<char *>(staging.mapped)[count*4+i];
             }
         }
-        destroy(staging);return 1;
+        if(writing)destroy(staging);return 1;
     }catch(...){destroy(staging);throw;}
     NVK_END(0)
 }
 int nvk_depth_clear(NvkImage *image,VkImageAspectFlags mask,float depth,unsigned stencil,const int32_t bounds[4]) {
     NVK_BEGIN
-    require(image && image->format==VK_FORMAT_D32_SFLOAT_S8_UINT && mask && !(mask&~aspects(image->format)),"Invalid Vulkan depth clear");
+    require(image && !image->volume && image->format==VK_FORMAT_D32_SFLOAT_S8_UINT && mask && !(mask&~aspects(image->format)),"Invalid Vulkan depth clear");
     if(!bounds) {
         transition(image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
         VkImageSubresourceRange range{mask,0,1,0,1};VkClearDepthStencilValue value{depth,stencil};
@@ -595,7 +636,7 @@ int nvk_image_copy(NvkImage *src,NvkImage *dst,const int32_t bounds[4],int linea
 }
 int nvk_image_copy_rect(NvkImage *src,NvkImage *dst,const int32_t source_bounds[4],const int32_t bounds[4],int linear) {
     NVK_BEGIN
-    require(src && dst && src!=dst && src->layers==1 && dst->layers==1 && src->format!=VK_FORMAT_D32_SFLOAT_S8_UINT && dst->format!=VK_FORMAT_D32_SFLOAT_S8_UINT,"Invalid Vulkan image copy");
+    require(src && dst && !src->volume && !dst->volume && src!=dst && src->layers==1 && dst->layers==1 && src->format!=VK_FORMAT_D32_SFLOAT_S8_UINT && dst->format!=VK_FORMAT_D32_SFLOAT_S8_UINT,"Invalid Vulkan image copy");
     int32_t full[4]={0,0,(int32_t)dst->width,(int32_t)dst->height};if(!bounds)bounds=full;
     int32_t source_full[4]={0,0,(int32_t)src->width,(int32_t)src->height};if(!source_bounds)source_bounds=source_full;
     require(bounds[0]>=0 && bounds[1]>=0 && bounds[2]>bounds[0] && bounds[3]>bounds[1] && bounds[2]<=(int)dst->width && bounds[3]<=(int)dst->height,"Invalid Vulkan copy bounds");
@@ -640,7 +681,7 @@ NvkShader *nvk_shader_create(const char *source,const char *entry,VkShaderStageF
 }
 void nvk_shader_destroy(NvkShader *shader) {
     if(!shader)return;
-    try {wait_serial(submit());for(auto &p:pipelines)vkDestroyPipeline(context.device,p.second,nullptr);pipelines.clear();
+    try {retire_pipelines(shader->module);
         vkDestroyShaderModule(context.device,shader->module,nullptr);delete shader;
     }catch(const std::exception &e){error=e.what();}
 }
@@ -675,14 +716,20 @@ VkSampler sampler(const NvkTexture &texture) {
     VkSamplerCreateInfo info{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
     info.magFilter=info.minFilter=texture.filter;info.mipmapMode=VK_SAMPLER_MIPMAP_MODE_NEAREST;
     info.addressModeU=texture.u;info.addressModeV=texture.v;info.addressModeW=texture.w;
+    VkSamplerCustomBorderColorCreateInfoEXT custom{VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT};
     const float black[4]={0,0,0,0},opaque[4]={0,0,0,1},white[4]={1,1,1,1};
     if(!std::memcmp(texture.border,black,16))info.borderColor=VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
     else if(!std::memcmp(texture.border,opaque,16))info.borderColor=VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
     else if(!std::memcmp(texture.border,white,16))info.borderColor=VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-    else require(texture.u!=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER && texture.v!=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER &&
-        texture.w!=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,"Custom Vulkan texture border color is not connected");
+    else if(texture.u==VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER || texture.v==VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER ||
+            texture.w==VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER) {
+        require(context.custom_border_colors,"Vulkan device lacks custom texture border colors");
+        std::memcpy(custom.customBorderColor.float32,texture.border,16);custom.format=texture.image->format;
+        info.pNext=&custom;info.borderColor=VK_BORDER_COLOR_FLOAT_CUSTOM_EXT;
+    }
     SamplerKey key;append(key,info.magFilter);append(key,info.addressModeU);
     append(key,info.addressModeV);append(key,info.addressModeW);append(key,info.borderColor);
+    if(info.pNext) {append(key,custom.customBorderColor);append(key,custom.format);}
     auto found=samplers.find(key);if(found!=samplers.end())return found->second;
     VkSampler result;CHECK(vkCreateSampler(context.device,&info,nullptr,&result));samplers.emplace(key,result);return result;
 }
@@ -693,12 +740,16 @@ VkPipeline pipeline(const NvkDraw &draw) {
     append(key,draw.color->format);VkFormat depth_format=draw.depth?draw.depth->format:VK_FORMAT_UNDEFINED;append(key,depth_format);
     append(key,draw.attribute_count);
     for(unsigned i=0;i<draw.attribute_count;i++)append(key,draw.attributes[i]);
-    append(key,draw.depth_test);append(key,draw.depth_write);append(key,draw.depth_compare);
-    append(key,draw.stencil);append(key,draw.stencil_state);append(key,draw.blend);
+    append(key,draw.depth_test);
+    if(draw.depth_test){append(key,draw.depth_write);append(key,draw.depth_compare);}
+    append(key,draw.stencil);if(draw.stencil)append(key,draw.stencil_state);
+    append(key,draw.blend);
+    append(key,draw.logic);if(draw.logic)append(key,draw.logic_op);
     append(key,draw.wireframe);
-    append(key,draw.source_blend);append(key,draw.destination_blend);append(key,draw.blend_op);append(key,draw.color_mask);
+    if(draw.blend){append(key,draw.source_blend);append(key,draw.destination_blend);append(key,draw.blend_op);}
+    append(key,draw.color_mask);
     auto found=pipelines.find(key);if(found!=pipelines.end())return found->second;
-    require(pipelines.size()<8192,"Vulkan pipeline cache capacity exceeded");
+    if(pipelines.size()>=8192)retire_pipelines();
     VkPipelineShaderStageCreateInfo stages[3]{};unsigned count=0;
     for(NvkShader *shader:{draw.vertex,draw.geometry,draw.pixel})if(shader) {
         auto &stage=stages[count++];stage.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -722,7 +773,9 @@ VkPipeline pipeline(const NvkDraw &draw) {
     blend.srcColorBlendFactor=blend.srcAlphaBlendFactor=draw.source_blend;
     blend.dstColorBlendFactor=blend.dstAlphaBlendFactor=draw.destination_blend;
     blend.colorBlendOp=blend.alphaBlendOp=draw.blend_op;
+    require(!draw.logic || context.logic_op,"Vulkan device has no colour logic operations");
     VkPipelineColorBlendStateCreateInfo blends{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};blends.attachmentCount=1;blends.pAttachments=&blend;
+    blends.logicOpEnable=draw.logic;blends.logicOp=draw.logic_op;
     VkDynamicState states[]={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};dynamic.dynamicStateCount=2;dynamic.pDynamicStates=states;
     VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
@@ -739,11 +792,20 @@ VkPipeline pipeline(const NvkDraw &draw) {
 
 int nvk_draw(NvkDraw *input) {
     NVK_BEGIN
-    require(input && input->color && input->vertex && input->pixel && input->count && input->vertices &&
-        input->attribute_count<=16 && input->uniform_count<=8,"Incomplete Vulkan draw");
+    require(input && input->color && !input->color->volume && (!input->depth || !input->depth->volume) && input->vertex && input->pixel && input->count && input->vertices &&
+        input->attribute_count<=16 && input->uniform_count<=8 && input->draw_count &&
+        input->draw_first<=input->count && input->draw_count<=input->count-input->draw_first,"Incomplete Vulkan draw");
     const auto &draw=*input;size_t bytes=draw.vertex_bytes+(draw.indices?draw.count*4:0)+32;
     VkDeviceSize align=std::max<VkDeviceSize>(16,context.properties.limits.minUniformBufferOffsetAlignment);
-    for(unsigned i=0;i<draw.uniform_count;i++)bytes+=draw.uniforms[i].bytes+align;
+    unsigned shared_uniform[8]{};
+    for(unsigned i=0;i<draw.uniform_count;i++) {
+        const auto &uniform=draw.uniforms[i];shared_uniform[i]=i;
+        for(unsigned j=0;j<i;j++)if(draw.uniforms[j].data==uniform.data && draw.uniforms[j].bytes==uniform.bytes){shared_uniform[i]=j;break;}
+        if(shared_uniform[i]==i)bytes+=uniform.bytes+align;
+    }
+    /* Pipeline retirement may submit and rotate chunks. Select before this
+     * draw reserves or captures any upload, descriptor or command ownership. */
+    VkPipeline selected_pipeline=pipeline(draw);
     reserve(bytes);
     auto &chunk=begin();
     VkBuffer vertex_buffer{};VkDeviceSize vertex_offset=0,index_offset=0;
@@ -772,8 +834,7 @@ int nvk_draw(NvkDraw *input) {
     for(unsigned i=0;i<draw.uniform_count;i++) {
         const auto &uniform=draw.uniforms[i];
         require(uniform.data && uniform.bytes && uniform.bytes<=context.properties.limits.maxUniformBufferRange,"Invalid Vulkan uniform range");
-        unsigned slot=uniform_slot(uniform.binding),shared=i;
-        for(unsigned j=0;j<i;j++)if(draw.uniforms[j].data==uniform.data && draw.uniforms[j].bytes==uniform.bytes){shared=j;break;}
+        unsigned slot=uniform_slot(uniform.binding),shared=shared_uniform[i];
         uniform_offsets[i]=shared<i?uniform_offsets[shared]:upload_uniform(slot,uniform.data,uniform.bytes,align);
         dynamic_offsets[slot]=uniform_offsets[i];descriptor_key[slot]=uniform.bytes;
     }
@@ -823,7 +884,6 @@ int nvk_draw(NvkDraw *input) {
     VkRenderingInfo render{VK_STRUCTURE_TYPE_RENDERING_INFO};render.renderArea.extent={draw.color->width,draw.color->height};
     render.layerCount=1;render.colorAttachmentCount=1;render.pColorAttachments=&color;
     if(draw.depth)render.pDepthAttachment=render.pStencilAttachment=&depth;
-    VkPipeline selected_pipeline=pipeline(draw);
     if(!context.render_color) {
         vkCmdBeginRendering(chunk.commands,&render);
         context.render_color=draw.color;context.render_depth=draw.depth;
@@ -843,8 +903,8 @@ int nvk_draw(NvkDraw *input) {
     if(draw.query)vkCmdBeginQuery(chunk.commands,draw.query->pool,0,VK_QUERY_CONTROL_PRECISE_BIT);
     if(draw.indices) {
         vkCmdBindIndexBuffer(chunk.commands,vertex_buffer,index_offset,VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(chunk.commands,draw.count,1,0,0,0);
-    } else vkCmdDraw(chunk.commands,draw.count,1,0,0);
+        vkCmdDrawIndexed(chunk.commands,draw.draw_count,1,draw.draw_first,0,0);
+    } else vkCmdDraw(chunk.commands,draw.draw_count,1,draw.draw_first,0);
     if(draw.query){vkCmdEndQuery(chunk.commands,draw.query->pool,0);draw.query->serial=context.submitted+1;}
     return 1;
     NVK_END(0)
@@ -871,6 +931,10 @@ int nvk_query_result(NvkQuery *query,uint64_t *samples,int wait) {
     require(query && query->serial && samples,"Invalid Vulkan visibility query");
     if(query->serial>context.submitted)submit();
     if(wait)wait_serial(query->serial);
+    else {
+        int completed=nvk_completed(query->serial);
+        if(completed<=0)return completed;
+    }
     VkResult result=vkGetQueryPoolResults(context.device,query->pool,0,1,sizeof *samples,samples,sizeof *samples,VK_QUERY_RESULT_64_BIT);
     if(result==VK_NOT_READY)return 0;check(result,"vkGetQueryPoolResults");return 1;
     NVK_END(-1)
@@ -885,7 +949,7 @@ void nvk_query_destroy(NvkQuery *query) {
 int nvk_window_present(void *window,NvkImage *image,unsigned width,unsigned height,const int32_t bounds[4],int vsync) {
     NVK_BEGIN
     if(!width || !height)return 1;
-    require(window && image && bounds,"Invalid Vulkan display image/window");
+    require(window && image && !image->volume && bounds,"Invalid Vulkan display image/window");
     if(context.window && context.window!=(HWND)window)throw Failure("Vulkan display window changed without closing");
     const VkPresentModeKHR mode=vsync?VK_PRESENT_MODE_FIFO_KHR:VK_PRESENT_MODE_IMMEDIATE_KHR;
     if(context.swapchain && (context.window_width!=width || context.window_height!=height || context.window_mode!=mode))window_close();

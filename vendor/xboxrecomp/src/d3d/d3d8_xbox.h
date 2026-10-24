@@ -345,6 +345,8 @@ typedef enum D3DRENDERSTATETYPE {
     D3DRS_MULTISAMPLEMASK          = 162,
     D3DRS_COLORWRITEENABLE         = 168,
     D3DRS_BLENDOP                  = 171,
+    /* Native NV2A bridge state: zero disables; 0x1500..0x150f selects ROP. */
+    D3DRS_NV2ALOGICOP              = 199,
     /* Xbox-specific render states (200+) */
     D3DRS_PSALPHAINPUTS0           = 200,
     D3DRS_PSALPHAINPUTS1           = 201,
@@ -429,6 +431,7 @@ typedef enum D3DTEXTURESTAGESTATETYPE {
     D3DTSS_COLORARG0    = 26,
     D3DTSS_ALPHAARG0    = 27,
     D3DTSS_RESULTARG    = 28,
+    D3DTSS_NV2AADDRESSW = 29, /* Host bridge slot; Xbox COLORSIGN occupies standard ADDRESSW. */
 } D3DTEXTURESTAGESTATETYPE;
 
 typedef enum D3DTEXTUREOP {

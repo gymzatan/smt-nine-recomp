@@ -144,6 +144,9 @@ ULONG_PTR xbox_resolve_ordinal(ULONG ordinal)
     case 360: return (ULONG_PTR)xbox_HalInitiateShutdown;
 
     /* ---- I/O manager ---- */
+    case  59: return (ULONG_PTR)xbox_IoAllocateIrp;
+    case  60: return (ULONG_PTR)xbox_IoBuildAsynchronousFsdRequest;
+    case  72: return (ULONG_PTR)xbox_IoFreeIrp;
     case  61: return (ULONG_PTR)xbox_IoBuildDeviceIoControlRequest;
     case  62: return (ULONG_PTR)xbox_IoBuildSynchronousFsdRequest;
     case  64: return (ULONG_PTR)&xbox_IoCompletionObjectType;
@@ -156,6 +159,7 @@ ULONG_PTR xbox_resolve_ordinal(ULONG ordinal)
     case  71: return (ULONG_PTR)xbox_IoFileObjectType;
     case  73: return (ULONG_PTR)xbox_IoInitializeIrp;
     case  74: return (ULONG_PTR)xbox_IoInvalidDeviceRequest;
+    case  77: return (ULONG_PTR)xbox_IoQueueThreadIrp;
     case  79: return (ULONG_PTR)xbox_IoSetIoCompletion;
     case  81: return (ULONG_PTR)xbox_IoStartNextPacket;
     case  82: return (ULONG_PTR)xbox_IoStartNextPacketByKey;

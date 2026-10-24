@@ -53,10 +53,15 @@ static void readback_present_for_test(const void *pixels,unsigned pitch,unsigned
     xbox_FramebufferWindowPresentHost(pixels,pitch,width,height);
 }
 #define xbox_FramebufferWindowPresentHost readback_present_for_test
+static uintptr_t depth_guard_watch;
+static unsigned depth_guard_test_calls,depth_transfer_test_reads;
+static int depth_transfer_for_test(NvkImage *image,void *pixels,int upload) {if(!upload)++depth_transfer_test_reads;return nvk_depth_transfer(image,pixels,upload);}
+#define nvk_depth_transfer depth_transfer_for_test
 static unsigned protection_test_calls,protection_test_identical,protection_test_inspect=1;
 static BOOL protection_for_test(void *address,SIZE_T bytes,DWORD protection,DWORD *previous) {
     MEMORY_BASIC_INFORMATION region;
     ++protection_test_calls;
+    if(depth_guard_watch && (uintptr_t)address<=depth_guard_watch && depth_guard_watch-(uintptr_t)address<bytes)++depth_guard_test_calls;
     if(protection_test_inspect && VirtualQuery(address,&region,sizeof region) && region.Protect==protection &&
        bytes<=region.RegionSize-((uintptr_t)address-(uintptr_t)region.BaseAddress)) ++protection_test_identical;
     return VirtualProtect(address,bytes,protection,previous);
@@ -128,6 +133,7 @@ static HRESULT pixel_state_map_for_test(ID3D11DeviceContext *,ID3D11Resource *,U
 #undef ID3D11DeviceContext_GetData
 static HRESULT pixel_state_map_for_test(ID3D11DeviceContext *ctx,ID3D11Resource *resource,UINT subresource,D3D11_MAP type,UINT flags,D3D11_MAPPED_SUBRESOURCE *mapped) {
     if(resource==(ID3D11Resource *)s_hw_ps_cb)++pixel_state_maps;
+    if(type==D3D11_MAP_READ){D3D11_RESOURCE_DIMENSION dimension;ID3D11Resource_GetType(resource,&dimension);if(dimension==D3D11_RESOURCE_DIMENSION_TEXTURE2D){D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc((ID3D11Texture2D *)resource,&desc);if(desc.Format==DXGI_FORMAT_R32G8X24_TYPELESS)++depth_transfer_test_reads;}}
     return ID3D11DeviceContext_Map(ctx,resource,subresource,type,flags,mapped);
 }
 #undef xbox_GetMemoryOffset
@@ -158,7 +164,7 @@ static void seed(void) {
     ramin[0x100/4]=2;ramin[0x104/4]=0x03ffffff;ramin[0x108/4]=0;
     ramin[0x200/4]=NV_KELVIN_PRIMITIVE;method(0,0x200);
     method(NV097_SET_CONTEXT_DMA_COLOR,0x100);method(NV097_SET_CONTEXT_DMA_ZETA,0x100);
-    method(NV097_SET_SURFACE_FORMAT,8|(2<<4));method(NV097_SET_SURFACE_PITCH,32);
+    method(NV097_SET_SURFACE_FORMAT,8|(2<<4));method(NV097_SET_SURFACE_PITCH,32u|(32u<<16));
     method(NV097_SET_SURFACE_COLOR_OFFSET,0x20000);method(NV097_SET_SURFACE_ZETA_OFFSET,0x30000);
     method(NV097_SET_SURFACE_CLIP_HORIZONTAL,8<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,8<<16);
     method(NV097_SET_COLOR_CLEAR_VALUE,0xff334455);method(NV097_SET_ZSTENCIL_CLEAR_VALUE,0x7f0000a5);
@@ -200,10 +206,10 @@ static void verify(void) {
         assert(fread(&count,4,1,dump)==1 && count==1 && fread(&header,sizeof header,1,dump)==1);
         assert(header.address==0x80030000 && header.width==8 && header.height==8);
         assert(fread(&depth,4,1,dump)==1 && fread(&stencil,4,1,dump)==1 && (stencil&255)==0xa5);
-        assert(fabsf(depth-(float)0x7f0000/16777215.0f)<1e-6f);fclose(dump);
+        assert(fabsf(depth-(float)0x7f0000/(float)header.normalization)<1e-6f);fclose(dump);
     } else {
-        ZetaBuffer *zeta=zbuf_current(0);assert(zeta && zeta->offset==0x80030000);
-        assert(zeta->z[0]==(float)0x7f0000 && zeta->stencil[0]==0xa5);
+        ZetaSurface zeta=zeta_surface();assert(zeta.address==0x80030000);
+        assert(*(const uint32_t *)zeta.memory==0x7f0000a5);
     }
 }
 static void verify_consumers(void) {
@@ -348,6 +354,46 @@ static void verify_clean_texture_overlap(void) {
     assert(memory[0]==0xffff0000 && !memcmp(s_hw_textures->raw,memory,128u*256u*4u));
     fprintf(stderr,"[CLEAN OVERLAP] clean texture avoids unrelated colour readback; dirty texture still publishes original pixels\n");
 }
+static void verify_host_write_scope(const char *path) {
+    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+    struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
+    pg->regs[NV_PGRAPH_CLEARRECTX]=pg->regs[NV_PGRAPH_CLEARRECTY]=7u<<16;
+    method(NV097_SET_COLOR_CLEAR_VALUE,0xff334455);method(NV097_SET_ZSTENCIL_CLEAR_VALUE,0x2468ac7b);
+    method(NV097_CLEAR_SURFACE,0xf3);
+    HwColor *color=hw_color(0);HwDepth *depth=hw_depth();assert(color->dirty && depth->dirty);
+    uint64_t reads=s_gpu.hardware_color_readbacks;
+    uint32_t *unrelated=(uint32_t *)(xbox_GetMemoryOffset()+0x80180000u);
+    hw_defer_output((uint8_t *)unrelated,0x11223344);assert(s_hw_query_count==1);
+    HANDLE file=CreateFileA(path,GENERIC_READ|GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);assert(file!=INVALID_HANDLE_VALUE);
+    uint32_t word=0xff123456;DWORD written=0;assert(WriteFile(file,&word,4,&written,NULL) && written==4);
+    LARGE_INTEGER offset={0};XBOX_IO_STATUS_BLOCK ios={0};
+    uint32_t *disjoint=(uint32_t *)(xbox_GetMemoryOffset()+0x80200000u);disjoint[1]=0xaabbccdd;
+    assert(xbox_NtReadFile(file,NULL,NULL,NULL,&ios,disjoint,8,&offset)==STATUS_SUCCESS);
+    assert(ios.Information==4 && disjoint[0]==word && disjoint[1]==0xaabbccdd);
+    assert(color->dirty && depth->dirty && s_gpu.hardware_color_readbacks==reads && s_hw_query_count==1);
+    assert(xbox_NtReadFile(INVALID_HANDLE_VALUE,NULL,NULL,NULL,&ios,disjoint,8,&offset)<0);
+    assert(color->dirty && depth->dirty && s_gpu.hardware_color_readbacks==reads && s_hw_query_count==1);
+    /* Query on the destination page but outside the bytes must finish first,
+     * including preceding unrelated FIFO entries. */
+    uint32_t *c=(uint32_t *)((uint8_t *)color->memory->views.cpu_views[1]+color->memory_offset);
+    hw_defer_output((uint8_t *)c+1024,0x55667788);
+    assert(xbox_NtReadFile(file,NULL,NULL,NULL,&ios,c+1,8,&offset)==STATUS_SUCCESS);
+    const uint32_t *cm=(const uint32_t *)(color->memory->host_view+color->memory_offset);
+    assert(ios.Information==4 && cm[0]==0xff334455 && cm[1]==word && cm[2]==0xff334455);
+    assert(!color->dirty && color->upload_needed && depth->dirty && s_gpu.hardware_color_readbacks==reads+1);
+    assert(!s_hw_query_count && *unrelated==0x11223344 && cm[256]==0x55667788);
+    uint32_t *d=(uint32_t *)((uint8_t *)depth->memory->views.cpu_views[1]+depth->memory_offset);
+    assert(xbox_NtReadFile(file,NULL,NULL,NULL,&ios,d+1,8,&offset)==STATUS_SUCCESS);
+    const uint32_t *dm=(const uint32_t *)(depth->memory->host_view+depth->memory_offset);
+    assert(ios.Information==4 && dm[0]==0x2468ac7b && dm[1]==word && dm[2]==0x2468ac7b);
+    assert(!depth->dirty && depth->upload_needed);
+    method(NV097_SET_ZSTENCIL_CLEAR_VALUE,0x12345659);method(NV097_CLEAR_SURFACE,3);assert(depth->dirty);
+    assert(xbox_NtReadFile(INVALID_HANDLE_VALUE,NULL,NULL,NULL,&ios,d+1,8,&offset)<0);
+    assert(!depth->dirty && depth->upload_needed && dm[0]==0x12345659 && dm[1]==0x12345659 && dm[2]==0x12345659);
+    CloseHandle(file);
+    fprintf(stderr,"[HOST WRITE SCOPE] disjoint no publication, relevant FIFO, alias short/failed read preserves color/depth and untouched bytes passed\n");
+}
+
 static LONG CALLBACK observe_output_fault(PEXCEPTION_POINTERS e) {
     if(e->ExceptionRecord->ExceptionCode==EXCEPTION_ACCESS_VIOLATION && e->ExceptionRecord->ExceptionInformation[0]<=1) {
         SetEvent(fault_observed);
@@ -786,7 +832,7 @@ static void protection_pages_for_test(HwMemory *memory,size_t offset,unsigned pa
 static void verify_colour_protection_work(void) {
     seed();hw_flush_batch();(void)hw_color(0);hw_publish_all();assert(s_hw_colors && !s_hw_colors->dirty);
     method(NV097_SET_SURFACE_COLOR_OFFSET,0x200000);
-    method(NV097_SET_SURFACE_PITCH,640*4);
+    method(NV097_SET_SURFACE_PITCH,(640u*4)|((640u*4)<<16));
     method(NV097_SET_SURFACE_CLIP_HORIZONTAL,640u<<16);
     method(NV097_SET_SURFACE_CLIP_VERTICAL,480u<<16);
     (void)hw_color(0);hw_publish_all();
@@ -874,14 +920,14 @@ static void verify_readback_publication(void) {
     assert(SUCCEEDED(color->host_surface->lpVtbl->UnlockRect(color->host_surface)));
     fprintf(stderr,"[READBACK] original C-M-C-M becomes C-C-M-M; both pixel outputs identical,queued snapshot and ordinary writable region preserved\n");
 }
-static void pixel_state_bytes(uint32_t bytes[28]) {
-    if(d3d8_IsNativeVulkan()) {assert(native_uniform_sizes[17]==112);memcpy(bytes,native_uniform_bytes[17],112);return;}
-    D3D11_BUFFER_DESC desc;ID3D11Buffer_GetDesc(s_hw_ps_cb,&desc);assert(desc.ByteWidth==112);
+static void pixel_state_bytes(uint32_t bytes[32]) {
+    if(d3d8_IsNativeVulkan()) {assert(native_uniform_sizes[17]==128);memcpy(bytes,native_uniform_bytes[17],128);return;}
+    D3D11_BUFFER_DESC desc;ID3D11Buffer_GetDesc(s_hw_ps_cb,&desc);assert(desc.ByteWidth==128);
     desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;desc.MiscFlags=0;
     ID3D11Buffer *staging=NULL;assert(SUCCEEDED(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&desc,NULL,&staging)));
     ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();ID3D11DeviceContext_CopyResource(ctx,(ID3D11Resource *)staging,(ID3D11Resource *)s_hw_ps_cb);
     D3D11_MAPPED_SUBRESOURCE mapped;assert(SUCCEEDED(ID3D11DeviceContext_Map(ctx,(ID3D11Resource *)staging,0,D3D11_MAP_READ,0,&mapped)));
-    memcpy(bytes,mapped.pData,112);ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource *)staging,0);ID3D11Buffer_Release(staging);
+    memcpy(bytes,mapped.pData,128);ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource *)staging,0);ID3D11Buffer_Release(staging);
 }
 static void pixel_state_draw(void) {
     method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
@@ -936,7 +982,7 @@ static void verify_combiner_uploads(void) {
 }
 static void verify_pixel_state_uploads(void) {
     pixel_state_maps=0;seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
-    uint32_t first[28],current[28],initial_value[28];pixel_state_bytes(first);memcpy(initial_value,first,sizeof first);unsigned initial=pixel_state_maps;assert(initial==(d3d8_IsNativeVulkan()?0:1));
+    uint32_t first[32],current[32],initial_value[32];pixel_state_bytes(first);memcpy(initial_value,first,sizeof first);unsigned initial=pixel_state_maps;assert(initial==(d3d8_IsNativeVulkan()?0:1));
     for(unsigned i=0;i<64;++i)pixel_state_draw();
     pixel_state_bytes(current);assert(!memcmp(first,current,sizeof first));unsigned repeated=pixel_state_maps-initial;assert(repeated==0);
     FILE *checkpoint=tmpfile();assert(checkpoint && nv2a_gpu_save_checkpoint(checkpoint));
@@ -950,7 +996,7 @@ static void verify_pixel_state_uploads(void) {
         unsigned committed=pixel_state_maps;pixel_state_draw();pixel_state_bytes(first);assert(!memcmp(first,current,sizeof first));assert(pixel_state_maps==committed);
     }
     if(!d3d8_IsNativeVulkan()) {
-    D3D11_BUFFER_DESC desc={0};desc.ByteWidth=112;desc.Usage=D3D11_USAGE_DEFAULT;desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+    D3D11_BUFFER_DESC desc={0};desc.ByteWidth=128;desc.Usage=D3D11_USAGE_DEFAULT;desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
     ID3D11Buffer *other=NULL,*bound=NULL;assert(SUCCEEDED(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&desc,NULL,&other)));
     unsigned before_rebind=pixel_state_maps;
     ID3D11DeviceContext_PSSetConstantBuffers(d3d8_GetD3D11Context(),1,1,&other);pixel_state_draw();assert(pixel_state_maps==before_rebind);
@@ -960,7 +1006,7 @@ static void verify_pixel_state_uploads(void) {
     rewind(checkpoint);assert(nv2a_gpu_load_checkpoint(checkpoint));fclose(checkpoint);
     unsigned before_restore_draw=pixel_state_maps;
     pixel_state_draw();pixel_state_bytes(current);assert(!memcmp(current,initial_value,sizeof current));assert(pixel_state_maps==before_restore_draw+(d3d8_IsNativeVulkan()?0:1));
-    fprintf(stderr,"[PIXEL STATE] initial_maps=%u equal64_maps=%u bytes112_equal;changed_clip,raw_depth_bits,rebind,hot_restore passed\n",initial,repeated);
+    fprintf(stderr,"[PIXEL STATE] initial_maps=%u equal64_maps=%u bytes128_equal;changed_clip,raw_depth_bits,rebind,hot_restore passed\n",initial,repeated);
 }
 static void verify_method_dispatch_work(void) {
     const uint32_t words[4]={0x3fa00000u,0xc0200000u,0x40700000u,0x40800000u};
@@ -1113,7 +1159,7 @@ static void verify_clear_address_work(void) {
     for(unsigned layout=0;layout<2;++layout)for(unsigned kind=0;kind<3;++kind) {
         unsigned bpp=kind==2?2:4,pitch=32*bpp+(layout?0:16);
         method(NV097_SET_SURFACE_FORMAT,(layout?0x04050220:0x120)|formats[kind]);
-        method(NV097_SET_SURFACE_PITCH,pitch);
+        method(NV097_SET_SURFACE_PITCH,pitch|(pitch<<16));
         method(NV097_SET_SURFACE_CLIP_HORIZONTAL,(27u<<16)|2);
         method(NV097_SET_SURFACE_CLIP_VERTICAL,(13u<<16)|1);
         struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
@@ -1137,7 +1183,7 @@ static void verify_clear_address_work(void) {
             if(!layout)for(unsigned y=0;y<16;++y)for(unsigned x=32*bpp;x<pitch;++x)assert(memory[y*pitch+x]==0xcd);
         }
     }
-    method(NV097_SET_SURFACE_FORMAT,0x128);method(NV097_SET_SURFACE_PITCH,640*4);
+    method(NV097_SET_SURFACE_FORMAT,0x128);method(NV097_SET_SURFACE_PITCH,(640u*4)|((640u*4)<<16));
     method(NV097_SET_SURFACE_CLIP_HORIZONTAL,640u<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,480u<<16);
     struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
     pg->regs[NV_PGRAPH_CLEARRECTX]=639u<<16;pg->regs[NV_PGRAPH_CLEARRECTY]=479u<<16;
@@ -1309,6 +1355,57 @@ static void verify_fixed_texgen_route(void) {
     fprintf(stderr,"[FIXED TEXGEN] original methods route XYZRHW through fixed vertex consumer; all stage/component and matrix bindings exact; pixels preserved\n");
 }
 
+
+static void verify_normal_reflection_texgen(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);
+    method(NV097_SET_CONTEXT_DMA_A,0x100);
+    const uint32_t colors[4]={0xff112233,0xff446688,0xff7799aa,0xffbbccdd};
+    memcpy((void *)(xbox_GetMemoryOffset()+0x80080000u),colors,16);
+    for(unsigned row=0;row<24;row++){float value[4]={0};value[row%4]=1;nv2a_vsh_set_constant(row,value);}
+    vertices(1.0f/16777215.0f);
+    unsigned checks=0;
+    for(unsigned stage=0;stage<4;stage++) {
+        for(unsigned st=0;st<4;st++){method(NV097_SET_TEXTURE_CONTROL0+st*64,0);for(unsigned j=0;j<4;j++)method(NV097_SET_TEXGEN_S+st*16+j*4,0);method(NV097_SET_TEXTURE_MATRIX_ENABLE+st*4,0);}
+        method(NV097_SET_TEXTURE_OFFSET+stage*64,0x80000);method(NV097_SET_TEXTURE_FORMAT+stage*64,(0x12<<8)|(1<<16));
+        method(NV097_SET_TEXTURE_CONTROL1+stage*64,8<<16);method(NV097_SET_TEXTURE_IMAGE_RECT+stage*64,(2<<16)|2);
+        method(NV097_SET_TEXTURE_CONTROL0+stage*64,NV_PGRAPH_TEXCTL0_0_ENABLE);method(NV097_SET_TEXTURE_FILTER+stage*64,0x01010000);method(NV097_SET_TEXTURE_ADDRESS+stage*64,3|(3<<8));
+        method(NV097_SET_SHADER_STAGE_PROGRAM,1u<<(stage*5));method(NV097_SET_COMBINER_COLOR_ICW,0x08200000|(stage<<24));method(NV097_SET_COMBINER_ALPHA_ICW,0x18200000|(stage<<24));
+        method(NV097_SET_VERTEX_DATA_ARRAY_OFFSET+(9+stage)*4,0x50000);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT+(9+stage)*4,0x1042);
+        for(unsigned mapping=0;mapping<3;mapping++)for(unsigned viewer=0;viewer<2;viewer++)for(unsigned norm=0;norm<2;norm++)for(unsigned matrix=0;matrix<2;matrix++)for(unsigned skin=0;skin<2;skin++) {
+            float n[4]={.3f,.1f,.1f,0};
+            method(NV097_SET_SKIN_MODE,skin);
+            float weight=.25f;uint32_t weight_bits;memcpy(&weight_bits,&weight,4);method(NV097_SET_VERTEX_DATA4F_M+16,weight_bits);
+            for(unsigned bone=0;bone<2;bone++)for(unsigned row=0;row<4;row++){float value[4]={0};value[row]=row<3?(float)(row+2+bone):1;nv2a_vsh_set_constant(12+bone*8+row,value);}
+            for(unsigned j=0;j<4;j++){uint32_t bits;memcpy(&bits,n+j,4);method(NV097_SET_VERTEX_DATA4F_M+2*16+j*4,bits);}
+            for(unsigned j=0;j<3;j++)n[j]*=(float)(j+2)+(skin?.75f:0);
+            method(NV097_SET_NORMALIZATION_ENABLE,norm);if(norm){float len=sqrtf(n[0]*n[0]+n[1]*n[1]+n[2]*n[2]);for(unsigned j=0;j<3;j++)n[j]/=len;}
+            float coords[3][4];const float pos[3][3]={{0,0,1},{8,0,1},{0,8,1}};
+            for(unsigned v=0;v<3;v++) {
+                float u[3]={0,0,1};if(!viewer){float len=sqrtf(pos[v][0]*pos[v][0]+pos[v][1]*pos[v][1]+1);for(unsigned j=0;j<3;j++)u[j]=pos[v][j]/len;}
+                float dot=u[0]*n[0]+u[1]*n[1]+u[2]*n[2];for(unsigned j=0;j<3;j++)coords[v][j]=mapping?u[j]-2*dot*n[j]:n[j];coords[v][3]=1;
+                if(mapping==2){float z=coords[v][2]+1;float m=2*sqrtf(coords[v][0]*coords[v][0]+coords[v][1]*coords[v][1]+z*z);coords[v][0]=coords[v][0]/m+.5f;coords[v][1]=coords[v][1]/m+.5f;}
+                if(matrix){float a=coords[v][0],b=coords[v][1],c=coords[v][2];coords[v][0]=1.25f*a+.5f*c+.375f;coords[v][1]=.75f*b-.5f*c+.875f;}
+            }
+            float rows[4][4]={{1.25f,0,.5f,.375f},{0,.75f,-.5f,.875f},{0,0,1,0},{0,0,0,1}};
+            for(unsigned row=0;row<4;row++)nv2a_vsh_set_constant(68+stage*8+row,rows[row]);
+            uint32_t pixels[3][64];
+            const uint32_t program[12]={0,(1u<<21)|0x1b,2u<<26,(15u<<12)|(1u<<11),0,(1u<<21)|(3u<<9)|0x1b,2u<<26,(15u<<12)|(1u<<11)|(3u<<3),0,(1u<<21)|((9+stage)<<9)|0x1b,2u<<26,(15u<<12)|(1u<<11)|((9+stage)<<3)|1};
+            for(unsigned ins=0;ins<3;ins++)nv2a_vsh_set_instruction(ins,program+ins*4);
+            for(unsigned pass=0;pass<3;pass++) {
+                method(NV097_SET_TRANSFORM_EXECUTION_MODE,pass==2?2:0);
+                for(unsigned j=0;j<3;j++)method(NV097_SET_TEXGEN_S+stage*16+j*4,pass?((mapping==2 && j==2)?0:mapping==2?0x2402:mapping?0x8512:0x8511):0);
+                method(NV097_SET_TEXGEN_VIEW_MODEL,viewer);method(NV097_SET_TEXTURE_MATRIX_ENABLE+stage*4,pass&&matrix);
+                memcpy((void *)(xbox_GetMemoryOffset()+0x80050000u),coords,sizeof coords);
+                method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+                memcpy(pixels[pass],(void *)(xbox_GetMemoryOffset()+s_gpu.color_base),sizeof pixels[pass]);
+            }
+            if(memcmp(pixels[0],pixels[1],sizeof pixels[0])){fprintf(stderr,"texgen mismatch stage=%u map=%u viewer=%u norm=%u matrix=%u reference=%08x actual=%08x\n",stage,mapping,viewer,norm,matrix,pixels[0][0],pixels[1][0]);assert(0);}
+            assert(!memcmp(pixels[0],pixels[2],sizeof pixels[0]));assert(pixels[0][0]!=0);checks++;
+        }
+    }
+    fprintf(stderr,"[NORMAL REFLECTION TEXGEN] %u original-method cases match independently computed textured outputs\n",checks);
+}
+
 static uint32_t *index_fifo_for_test(void) {
     NV2AState *gpu=nv2a_get_state();uint32_t *r=gpu->pfifo.regs;
     gpu->vram_ptr=(uint8_t *)(xbox_GetMemoryOffset()+0x80000000u);
@@ -1320,6 +1417,147 @@ static uint32_t *index_fifo_for_test(void) {
     gpu->pgraph.waiting_for_nop=false;gpu->pgraph.regs[NV_PGRAPH_FIFO]=1;
     return (uint32_t *)(gpu->vram_ptr+0x80000);
 }
+
+
+static void verify_m2mf_old_gpu_layout(void) {
+    typedef struct Nv2aDiskForTest {uint32_t state_bytes;uint64_t clock;NV2AState state;} Nv2aDiskForTest;
+    const size_t old_state_bytes=103000; /* measured from the frozen upstream header */
+    assert(sizeof(NV2AState)==old_state_bytes+48);
+    FILE *current=tmpfile(),*old=tmpfile();assert(current && old && nv2a_gpu_save_checkpoint(current));
+    assert(!_fseeki64(current,0,SEEK_END));size_t bytes=(size_t)_ftelli64(current);rewind(current);
+    uint8_t *data=malloc(bytes);assert(data && fread(data,bytes,1,current)==1);fclose(current);
+    size_t registers=6+sizeof(PbCheckpoint);assert(!memcmp(data,"XBGPUR",6) && !memcmp(data+registers,"XBNV2A",6));
+    size_t disk=registers+6;stl_le_p(data+disk,(uint32_t)old_state_bytes);
+    size_t removed=disk+offsetof(Nv2aDiskForTest,state)+offsetof(NV2AState,pgraph.memory_to_memory.offset_in);
+    assert(removed+48<bytes);assert(fwrite(data,removed,1,old)==1 && fwrite(data+removed+48,bytes-removed-48,1,old)==1);free(data);rewind(old);
+    NV2AState *gpu=nv2a_get_state();gpu->pgraph.pending_interrupts=0x13572468;gpu->pgraph.memory_to_memory.offset_in=0x87654321;
+    s_gpu.clear_color=0x89674523;const float current_constant[4]={.125f,.375f,.625f,.875f};nv2a_vsh_set_constant(17,current_constant);
+    uint8_t *ram=(uint8_t *)(xbox_GetMemoryOffset()+0x800d0000u);memset(ram,0x5a,64);
+    struct PGRAPHState *before=malloc(sizeof *before);assert(before);memcpy(before,&gpu->pgraph,sizeof *before);PbState *pb=malloc(sizeof *pb);assert(pb);memcpy(pb,&s_gpu,sizeof *pb);
+    assert(!nv2a_gpu_load_checkpoint(old));fclose(old);
+    assert(!memcmp(before,&gpu->pgraph,sizeof *before) && !memcmp(pb,&s_gpu,sizeof *pb));
+    assert(!memcmp(nv2a_vsh_constant(17),current_constant,16));for(unsigned i=0;i<64;i++)assert(ram[i]==0x5a);free(before);free(pb);
+    fprintf(stderr,"[M2MF OLD GPU LAYOUT] original103000-byte register state inside XBGPUR rejected before register/VSH/pixel/RAM apply\n");
+}
+
+typedef struct M2mfObserver {volatile LONG *completion;const uint8_t *destination,*expected,*record;size_t bytes;int observed;} M2mfObserver;
+static DWORD WINAPI m2mf_observe(void *opaque) {
+    M2mfObserver *o=opaque;DWORD deadline=GetTickCount()+5000;
+    while(ReadAcquire(o->completion)!=0){assert((LONG)(GetTickCount()-deadline)<0);SwitchToThread();}
+    assert(!memcmp(o->destination,o->expected,o->bytes));assert(ldl_le_p(o->record+8)==0);
+    o->observed=1;return 0;
+}
+
+
+static void verify_m2mf_increment_state(const char *mode) {
+    NV2AState *gpu=nv2a_get_state();uint32_t *ramin=(uint32_t *)gpu->ramin_ptr,*words=index_fifo_for_test(),*regs=gpu->pfifo.regs;
+    regs[NV_PFIFO_RAMHT]=0x10;ramin[0x600/4]=NV_MEMORY_TO_MEMORY_FORMAT;ramin[0x1070/4]=0xe;ramin[0x1074/4]=NV_RAMHT_STATUS|NV_RAMHT_ENGINE_GRAPHICS|0x60;
+    words[0]=(1u<<18)|(1u<<13);words[1]=0xe;
+    const unsigned increments[]={1,2,4};unsigned at=2;uint8_t *guard=gpu->vram_ptr+0xd0000;memset(guard,0x6a,64);
+    for(unsigned input=0;input<3;input++)for(unsigned output=0;output<3;output++) {
+        unsigned format=increments[input]|(increments[output]<<8);
+        words[at++]=(1u<<18)|(1u<<13)|0x324;words[at++]=format;regs[NV_PFIFO_CACHE1_DMA_PUT]=at*4;nv2a_fifo_run(gpu);
+        assert(gpu->pgraph.memory_to_memory.format==format && (gpu->pgraph.memory_to_memory.valid&512));
+        for(unsigned j=0;j<64;j++)assert(guard[j]==0x6a);
+        assert(!gpu->pgraph.pending_interrupts && !gpu->pgraph.memory_to_memory.notify_pending);
+    }
+    if(strcmp(mode,"m2mf-increment-legal")) {
+        unsigned bad=!strcmp(mode,"m2mf-increment-zero")?0:!strcmp(mode,"m2mf-increment-three")?0x303:!strcmp(mode,"m2mf-increment-reserved-low")?0x109:!strcmp(mode,"m2mf-increment-reserved-high")?0x10001:0x801;
+        words[at++]=(1u<<18)|(1u<<13)|0x324;words[at++]=bad;regs[NV_PFIFO_CACHE1_DMA_PUT]=at*4;nv2a_fifo_run(gpu);assert(0);
+    }
+    fprintf(stderr,"[M2MF INCREMENT STATE] nine original1/2/4 setup combinations retained; no copy/notification synthesized\n");
+}
+
+typedef struct M2mfOrdinaryIrq {NV2AState *gpu;uint8_t *record;unsigned calls;} M2mfOrdinaryIrq;
+static void m2mf_ordinary_irq(void *opaque,int level) {
+    M2mfOrdinaryIrq *o=opaque;
+    if(level){assert(ldl_le_p(o->record+8)==0 && ldl_le_p(o->record+12)==0);assert(o->gpu->pgraph.pending_interrupts&NV_PGRAPH_INTR_NOTIFY);assert(!(o->gpu->pgraph.pending_interrupts&NV_PGRAPH_INTR_BUFFER_NOTIFY));o->calls++;}
+}
+static void verify_m2mf_ordinary(const char *mode) {
+    NV2AState *gpu=nv2a_get_state();uint32_t *ramin=(uint32_t *)gpu->ramin_ptr;
+    void (*prior_irq)(void *,int)=gpu->parent_obj.irq_notify;void *prior_opaque=gpu->parent_obj.irq_opaque;
+    unsigned trials=!strcmp(mode,"m2mf-ordinary-copy")?2:1;
+    for(unsigned awaken=0;awaken<trials;awaken++) {
+        uint32_t *words=index_fifo_for_test(),*regs=gpu->pfifo.regs;regs[NV_PFIFO_RAMHT]=0x10;
+        ramin[0x600/4]=NV_MEMORY_TO_MEMORY_FORMAT;ramin[0xb00/4]=2;ramin[0xb04/4]=0xff;ramin[0xb08/4]=0xc0000;
+        ramin[0x1070/4]=0xe;ramin[0x1074/4]=NV_RAMHT_STATUS|NV_RAMHT_ENGINE_GRAPHICS|0x60;
+        ramin[(0x1000+0x92*8)/4]=0x92;ramin[(0x1004+0x92*8)/4]=NV_RAMHT_STATUS|NV_RAMHT_ENGINE_GRAPHICS|0xb0;
+        uint8_t *record=gpu->vram_ptr+0xc0000;memset(record,0xcc,16);memset(record+16,0xbb,16);
+        M2mfOrdinaryIrq irq={gpu,record,0};gpu->parent_obj.irq_notify=m2mf_ordinary_irq;gpu->parent_obj.irq_opaque=&irq;gpu->parent_obj.irq_level=0;
+        gpu->pgraph.pending_interrupts=0;gpu->pgraph.enabled_interrupts=NV_PGRAPH_INTR_NOTIFY;gpu->pmc.enabled_interrupts=1;
+        words[0]=(1u<<18)|(1u<<13);words[1]=0xe;
+        words[2]=(1u<<18)|(1u<<13)|0x180;words[3]=0x92;
+        words[4]=(1u<<18)|(1u<<13)|0x104;words[5]=!strcmp(mode,"m2mf-ordinary-parameter")?2:awaken;
+        regs[NV_PFIFO_CACHE1_DMA_PUT]=24;nv2a_fifo_run(gpu);
+        assert(gpu->pgraph.memory_to_memory.notify_pending && gpu->pgraph.memory_to_memory.notify_type==awaken);
+        for(unsigned i=0;i<16;i++)assert(record[i]==0xcc);assert(irq.calls==0);
+        FILE *snapshot=tmpfile();assert(snapshot && nv2a_save_checkpoint(snapshot));rewind(snapshot);void *loaded=nv2a_prepare_checkpoint(snapshot);assert(loaded);gpu->pgraph.memory_to_memory.notify_pending=0;nv2a_apply_checkpoint(loaded);free(loaded);fclose(snapshot);
+        assert(gpu->pgraph.memory_to_memory.notify_pending && gpu->pgraph.memory_to_memory.notify_instance==0x600);
+        uint32_t method=0x100,param=0,subchannel=1;
+        if(!strcmp(mode,"m2mf-ordinary-double"))method=0x104;
+        if(!strcmp(mode,"m2mf-ordinary-dma")){method=0x180;param=0x92;}
+        if(!strcmp(mode,"m2mf-ordinary-bind")){method=0;param=0xe;}
+        if(!strcmp(mode,"m2mf-ordinary-subchannel"))subchannel=2;
+        if(!strcmp(mode,"m2mf-ordinary-negative-pitch")){method=0x314;param=0xfffffff0;}
+        words[6]=(1u<<18)|(subchannel<<13)|method;words[7]=param;
+        uint64_t before=ptimer_get_clock(gpu)<<5;regs[NV_PFIFO_CACHE1_DMA_PUT]=32;nv2a_fifo_run(gpu);uint64_t after=ptimer_get_clock(gpu)<<5;
+        uint64_t timestamp=(uint64_t)ldl_le_p(record)|((uint64_t)ldl_le_p(record+4)<<32);
+        assert(timestamp>=before && timestamp<=after && !ldl_le_p(record+8) && !ldl_le_p(record+12));
+        for(unsigned i=16;i<32;i++)assert(record[i]==0xbb);
+        assert(!gpu->pgraph.memory_to_memory.notify_pending && irq.calls==awaken);
+        assert(gpu->pgraph.pending_interrupts==(awaken?NV_PGRAPH_INTR_NOTIFY:0));
+    }
+    gpu->parent_obj.irq_notify=prior_irq;gpu->parent_obj.irq_opaque=prior_opaque;
+    fprintf(stderr,"[M2MF ORDINARY] original104 waits next-method, checkpoint retains request, slot0 and IRQ after record match; buffer slot unchanged\n");
+}
+
+static void verify_m2mf_copy(const char *mode) {
+    NV2AState *gpu=nv2a_get_state();uint32_t *ramin=(uint32_t *)gpu->ramin_ptr;
+    unsigned trials=!strcmp(mode,"m2mf-copy")?4:1;
+    for(unsigned test=0;test<trials;test++) {
+        uint32_t *words=index_fifo_for_test(),*regs=gpu->pfifo.regs;
+        ramin[0x600/4]=NV_MEMORY_TO_MEMORY_FORMAT;
+        const unsigned handles[]={0xe,0x90,0x91,0x92},instances[]={0x600,0x900,0xa00,0xb00};
+        regs[NV_PFIFO_RAMHT]=0x10;
+        for(unsigned i=0;i<4;i++){ramin[(0x1000+handles[i]*8)/4]=handles[i];ramin[(0x1004+handles[i]*8)/4]=NV_RAMHT_STATUS|NV_RAMHT_ENGINE_GRAPHICS|(instances[i]>>4);}
+        const unsigned frames[]={0xa0000,0xb0000,test==1?0xa0000:0xc0000};
+        for(unsigned i=0;i<3;i++){ramin[instances[i+1]/4]=2;ramin[(instances[i+1]+4)/4]=0xffff;ramin[(instances[i+1]+8)/4]=frames[i];}
+        unsigned source_offset=test==1?0x10:test==3?0xfff0:0,destination_offset=test==3?0x8000:0;
+        unsigned length=test==0?17:test==1?37:16,rows=test==0?3:test==1?2:test==2?2047:1;
+        unsigned source_pitch=test==0?32:test==1?64:16,destination_pitch=test==0?40:test==1?64:16;
+        uint8_t *source=gpu->vram_ptr+0xa0000+source_offset,*destination=gpu->vram_ptr+0xb0000+destination_offset,*record=gpu->vram_ptr+frames[2]+0x10;
+        size_t bytes=(rows-1)*destination_pitch+length;
+        memset(gpu->vram_ptr+0xa0000,0x4b,0x10000);memset(gpu->vram_ptr+0xb0000,0xa5,0x10000);memset(gpu->vram_ptr+0xc0000,0x6d,0x100);
+        for(unsigned row=0;row<rows;row++)for(unsigned x=0;x<length;x++)source[row*source_pitch+x]=(uint8_t)(row*19+x*7+test);
+        memset(record,0xcc,16);((uint32_t *)record)[3]=0x80000000;
+        uint8_t guard_before=destination[-1],guard_after=destination[bytes];
+        uint8_t *expected=malloc(bytes);assert(expected);memcpy(expected,destination,bytes);
+        for(unsigned row=0;row<rows;row++)memcpy(expected+row*destination_pitch,source+row*source_pitch,length);
+        words[0]=(1u<<18)|(1u<<13);words[1]=0xe;
+        words[2]=(3u<<18)|(1u<<13)|0x180;words[3]=0x92;words[4]=0x90;words[5]=0x91;
+        words[6]=(7u<<18)|(1u<<13)|0x30c;
+        const uint32_t fields[]={source_offset,destination_offset,source_pitch,destination_pitch,length,rows,!strcmp(mode,"m2mf-format")?0x202:0x101};
+        memcpy(words+7,fields,sizeof fields);regs[NV_PFIFO_CACHE1_DMA_PUT]=14*4;
+        nv2a_fifo_run(gpu);assert(regs[NV_PFIFO_CACHE1_DMA_GET]==14*4 && ((uint32_t *)record)[3]==0x80000000);
+        assert(gpu->pgraph.memory_to_memory.valid==0x3ff && gpu->pgraph.memory_to_memory.dma_in==0x900 && gpu->pgraph.memory_to_memory.dma_out==0xa00);
+        FILE *snapshot=tmpfile();assert(snapshot && nv2a_save_checkpoint(snapshot));rewind(snapshot);void *loaded=nv2a_prepare_checkpoint(snapshot);assert(loaded);gpu->pgraph.memory_to_memory.valid=0;gpu->pgraph.memory_to_memory.line_length=0;nv2a_apply_checkpoint(loaded);free(loaded);fclose(snapshot);
+        assert(gpu->pgraph.memory_to_memory.valid==0x3ff && gpu->pgraph.memory_to_memory.line_length==length);
+        if(!strcmp(mode,"m2mf-overlap")){pgraph_method(gpu,1,0x188,0x900);pgraph_method(gpu,1,0x310,source_offset);}
+        words[14]=(1u<<18)|(1u<<13)|0x328;words[15]=!strcmp(mode,"m2mf-awaken")?1:0;
+        unsigned interrupts=gpu->pgraph.pending_interrupts;
+        uint64_t before=ptimer_get_clock(gpu)<<5;
+        M2mfObserver observed={(volatile LONG *)(record+12),destination,expected,record,bytes,0};
+        HANDLE observer=CreateThread(NULL,0,m2mf_observe,&observed,0,NULL);assert(observer);
+        regs[NV_PFIFO_CACHE1_DMA_PUT]=16*4;nv2a_fifo_run(gpu);
+        assert(WaitForSingleObject(observer,5000)==WAIT_OBJECT_0);CloseHandle(observer);assert(observed.observed);
+        uint64_t after=ptimer_get_clock(gpu)<<5,timestamp=(uint64_t)ldl_le_p(record)|((uint64_t)ldl_le_p(record+4)<<32);
+        assert(timestamp>=before && timestamp<=after && ldl_le_p(record+8)==0 && ldl_le_p(record+12)==0);
+        assert(gpu->pgraph.pending_interrupts==interrupts && regs[NV_PFIFO_CACHE1_DMA_GET]==64);
+        assert(!memcmp(destination,expected,bytes));assert(destination[-1]==guard_before && destination[bytes]==guard_after);free(expected);
+    }
+    fprintf(stderr,"[M2MF COPY] RAMHT/class39 DMA contexts, bounded format101 rows, checkpoint state, ordered record publication and PTIMER bytes passed\n");
+}
+
 static void index_sequence_for_test(unsigned first,unsigned count) {
     NV2AState *gpu=nv2a_get_state();uint32_t *words=index_fifo_for_test();
     assert(!(count&1) && count<=4094);
@@ -1713,7 +1951,7 @@ static void verify_clear_page_ownership(void) {
 
 static void verify_native_finished_frame(void) {
     seed();method(NV097_SET_BEGIN_END,0);
-    method(NV097_SET_SURFACE_PITCH,2560);
+    method(NV097_SET_SURFACE_PITCH,2560u|(2560u<<16));
     method(NV097_SET_SURFACE_CLIP_HORIZONTAL,640<<16);
     method(NV097_SET_SURFACE_CLIP_VERTICAL,480<<16);
     nv2a_get_state()->pgraph.regs[NV_PGRAPH_CLEARRECTX]=639u<<16;
@@ -1766,6 +2004,1516 @@ static void verify_native_finished_frame(void) {
     fprintf(stderr,"[NATIVE DISPLAY] no flip readback, finished image isolation, physical alias, capture and restoration bytes passed\n");
 }
 
+
+static uint32_t stencil_sample(float *z) {
+    nv2a_pb_checkpoint_publish();
+    if(!hw_enabled()) {ZetaSurface depth=zeta_surface();uint32_t raw;memcpy(&raw,depth.memory,4);*z=(float)(raw>>8);return raw&255;}
+    FILE *dump=tmpfile();assert(dump && hw_save_depths(dump));rewind(dump);
+    uint32_t count,value;HwDepthCheckpoint header;float depth;
+    assert(fread(&count,4,1,dump)==1 && count==1);
+    assert(fread(&header,sizeof header,1,dump)==1 && header.address==0x80030000u);
+    assert(fread(&depth,4,1,dump)==1 && fread(&value,4,1,dump)==1);fclose(dump);
+    *z=depth*(float)header.normalization;return value&255;
+}
+static void verify_stencil_operations(void) {
+    seed();method(NV097_SET_BEGIN_END,0);vertices(0.25f);
+    method(NV097_SET_STENCIL_TEST_ENABLE,1);
+    method(NV097_SET_STENCIL_FUNC_REF,0xa7);method(NV097_SET_STENCIL_FUNC_MASK,255);
+    const unsigned ops[]={0x1e00,0,0x1e01,0x1e02,0x1e03,0x150a,0x8507,0x8508};
+    const unsigned initial[]={0,0x3c,255};
+    const unsigned results[8][3]={{0,60,255},{0,0,0},{167,167,167},{1,61,255},
+        {0,59,254},{255,195,0},{1,61,0},{255,59,254}};
+    for(unsigned op=0;op<8;op++)for(unsigned outcome=0;outcome<3;outcome++)
+    for(unsigned start=0;start<3;start++)for(unsigned mode=0;mode<5;mode++) {
+        unsigned mask=mode==1?15:mode==2?0:255;
+        method(NV097_SET_CONTROL0,mode==3?0:NV097_SET_CONTROL0_STENCIL_WRITE_ENABLE);
+        method(NV097_SET_STENCIL_MASK,mask);
+        method(NV097_SET_STENCIL_FUNC,outcome==0?0x200:0x207);
+        method(NV097_SET_DEPTH_FUNC,outcome==1?0x200:0x207);
+        method(NV097_SET_STENCIL_OP_FAIL,outcome==0?ops[op]:0x1e00);
+        method(NV097_SET_STENCIL_OP_ZFAIL,outcome==1?ops[op]:0x1e00);
+        method(NV097_SET_STENCIL_OP_ZPASS,outcome==2?ops[op]:0x1e00);
+        method(NV097_SET_ALPHA_TEST_ENABLE,mode==4);method(NV097_SET_ALPHA_FUNC,0x200);
+        method(NV097_SET_ZSTENCIL_CLEAR_VALUE,0x7f000000|initial[start]);method(NV097_CLEAR_SURFACE,0xf3);
+        method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
+        unsigned write_mask=mode>=3?0:mask;
+        unsigned expected=(initial[start]&~write_mask)|(results[op][start]&write_mask);
+        float depth;unsigned actual=stencil_sample(&depth);
+        if(actual!=expected)fprintf(stderr,"stencil mismatch op=%x outcome=%u initial=%u mode=%u actual=%u expected=%u\n",ops[op],outcome,initial[start],mode,actual,expected);
+        assert(actual==expected);
+        int passed=outcome==2 && mode!=4;
+        assert(BRIDGE_MEM32(s_gpu.color_base)==(passed?0xffff0000u:0xff334455u));
+        assert(fabsf(depth-(passed?16777215.0f*0.25f:0x7f0000))<2);
+    }
+    /* Stencil remains active with Z testing disabled; read masks also apply
+     * to the reference, and accepted stencil pixels must retain Z. */
+    method(NV097_SET_ALPHA_TEST_ENABLE,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);
+    method(NV097_SET_CONTROL0,NV097_SET_CONTROL0_STENCIL_WRITE_ENABLE);
+    method(NV097_SET_STENCIL_MASK,255);method(NV097_SET_STENCIL_FUNC,0x202);
+    method(NV097_SET_STENCIL_FUNC_MASK,15);method(NV097_SET_STENCIL_FUNC_REF,0xa7);
+    method(NV097_SET_STENCIL_OP_ZPASS,0x1e01);method(NV097_SET_ZSTENCIL_CLEAR_VALUE,0x7f000037);
+    method(NV097_CLEAR_SURFACE,0xf3);
+    method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
+    float depth;assert(stencil_sample(&depth)==0xa7 && fabsf(depth-0x7f0000)<2);
+    assert(BRIDGE_MEM32(s_gpu.color_base)==0xffff0000u);
+    fprintf(stderr,"[STENCIL] eight operations, three outcomes, saturation/wrap endpoints, write/read masks, write enable, alpha rejection, disabled Z and colour/depth preservation passed\n");
+}
+
+
+static void verify_colour_logic(void) {
+    seed();method(NV097_SET_BEGIN_END,0);vertices(0.25f);
+    method(NV097_SET_DEPTH_FUNC,0x207);
+    for(unsigned i=0;i<3;i++)BRIDGE_MEM32(0x80040010u+i*20)=0x9669cc33u;
+    method(NV097_SET_COLOR_CLEAR_VALUE,0x3cc3f00fu);
+    const uint32_t results[]={0x0u,0x1441c003u,0x82280c30u,0x9669cc33u,0x2882300cu,0x3cc3f00fu,0xaaaa3c3cu,0xbeebfc3fu,0x411403c0u,0x5555c3c3u,0xc33c0ff0u,0xd77dcff3u,0x699633ccu,0x7dd7f3cfu,0xebbe3ffcu,0xffffffffu};
+    const uint32_t masks[]={0x01010101,0x00010001,0x01000000,0};
+    const uint32_t bits[]={0xffffffffu,0x00ff00ff,0xff000000,0};
+    method(NV097_SET_BLEND_FUNC_SFACTOR,0);method(NV097_SET_BLEND_FUNC_DFACTOR,0);
+    for(unsigned route=0;route<2;route++) {
+        method(NV097_SET_TRANSFORM_EXECUTION_MODE,route*2);
+        for(unsigned op=0;op<16;op++)for(unsigned mask=0;mask<4;mask++)for(unsigned blend=0;blend<2;blend++) {
+            method(NV097_SET_COLOR_MASK,masks[mask]);
+            method(NV097_SET_BLEND_ENABLE,blend);method(NV097_SET_LOGIC_OP_ENABLE,1);
+            method(NV097_SET_LOGIC_OP,0x1500+op);method(NV097_CLEAR_SURFACE,0xf3);
+            method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
+            nv2a_pb_checkpoint_publish();
+            uint32_t expected=(results[op]&bits[mask])|(0x3cc3f00fu&~bits[mask]);
+            uint32_t actual=BRIDGE_MEM32(s_gpu.color_base);
+            if(actual!=expected)fprintf(stderr,"logic mismatch op=%u mask=%u blend=%u route=%u actual=%08x expected=%08x\n",op,mask,blend,route,actual,expected);
+            assert(actual==expected);
+        }
+        /* Consecutive XORs must consume the immediately preceding pixels,
+         * including two overlapping primitives in the same command batch. */
+        method(NV097_SET_COLOR_MASK,0x01010101);method(NV097_SET_LOGIC_OP,0x1506);
+        method(NV097_CLEAR_SURFACE,0xf3);method(NV097_SET_BEGIN_END,5);
+        method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
+        nv2a_pb_checkpoint_publish();assert(BRIDGE_MEM32(s_gpu.color_base)==0x3cc3f00fu);
+        method(NV097_SET_LOGIC_OP_ENABLE,0);
+        method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
+        nv2a_pb_checkpoint_publish();assert(BRIDGE_MEM32(s_gpu.color_base)==0);
+        method(NV097_SET_BLEND_ENABLE,0);
+        method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
+        nv2a_pb_checkpoint_publish();assert(BRIDGE_MEM32(s_gpu.color_base)==0x9669cc33u);
+    }
+    fprintf(stderr,"[COLOUR LOGIC] all operations, masks, blend precedence, overlapping draws and state transitions passed\n");
+}
+
+static float polygon_offset_depth(void) {
+    nv2a_pb_checkpoint_publish();
+    if(!hw_enabled()) {ZetaSurface depth=zeta_surface();uint32_t raw=0;if(depth.format==1){uint16_t value;memcpy(&value,depth.memory,2);raw=value;}else {memcpy(&raw,depth.memory,4);raw>>=8;}return (float)raw;}
+    FILE *dump=tmpfile();assert(dump && hw_save_depths(dump));rewind(dump);
+    uint32_t count;HwDepthCheckpoint header;float depth;
+    assert(fread(&count,4,1,dump)==1 && count>=1);
+    assert(fread(&header,sizeof header,1,dump)==1 && header.address==s_gpu.zeta_offset+0x80000000u);
+    assert(fread(&depth,4,1,dump)==1);fclose(dump);
+    return depth*(float)header.normalization;
+}
+static void polygon_offset_float(uint32_t method_id,float value) {
+    uint32_t bits;memcpy(&bits,&value,4);method(method_id,bits);
+}
+static void skin_matrix_for_test(uint32_t command,unsigned matrix,float x,float normal_z) {
+    for(unsigned row=0;row<4;row++)for(unsigned component=0;component<4;component++) {
+        float value=row==component?1.0f:0.0f;
+        if(row==0 && component==3)value=x;
+        if(row==2 && component==2)value=normal_z;
+        uint32_t bits;memcpy(&bits,&value,4);method(command+matrix*64+(row*4+component)*4,bits);
+    }
+}
+static void image_blit_for_test(unsigned format,unsigned source,unsigned destination,unsigned source_pitch,unsigned destination_pitch,unsigned in_x,unsigned in_y,unsigned out_x,unsigned out_y,unsigned width,unsigned height) {
+    NV2AState *gpu=nv2a_get_state();uint32_t *ramin=(uint32_t *)gpu->ramin_ptr;
+    ramin[0x600/4]=NV_CONTEXT_SURFACES_2D;ramin[0x700/4]=NV_IMAGE_BLIT;ramin[0x900/4]=0x30;
+    pgraph_method(gpu,2,NV_SET_OBJECT,0x600);
+    pgraph_method(gpu,2,NV062_SET_CONTEXT_DMA_IMAGE_SOURCE,0x100);pgraph_method(gpu,2,NV062_SET_CONTEXT_DMA_IMAGE_DESTIN,0x100);
+    pgraph_method(gpu,2,NV062_SET_COLOR_FORMAT,format);pgraph_method(gpu,2,NV062_SET_PITCH,source_pitch|(destination_pitch<<16));
+    pgraph_method(gpu,2,NV062_SET_OFFSET_SOURCE,source);pgraph_method(gpu,2,NV062_SET_OFFSET_DESTIN,destination);
+    pgraph_method(gpu,3,NV_SET_OBJECT,0x700);pgraph_method(gpu,3,NV09F_SET_CONTEXT_SURFACES,0x600);
+    /* Original sub_002F7880 binds the real class-30 object to these slots. */
+    for(unsigned slot=0x184;slot<=0x198;slot+=4)pgraph_method(gpu,3,slot,0x900);
+    pgraph_method(gpu,3,NV09F_SET_OPERATION,NV09F_SET_OPERATION_SRCCOPY);
+    pgraph_method(gpu,3,NV09F_CONTROL_POINT_IN,in_x|(in_y<<16));pgraph_method(gpu,3,NV09F_CONTROL_POINT_OUT,out_x|(out_y<<16));
+    pgraph_method(gpu,3,NV09F_SIZE,width|(height<<16));
+}
+
+static void verify_blit_overlap_direction(void) {
+    NV2AState *gpu=nv2a_get_state();gpu->vram_ptr=(uint8_t *)(xbox_GetMemoryOffset()+0x80000000u);
+    uint32_t *ramin=(uint32_t *)gpu->ramin_ptr;ramin[0x100/4]=ramin[0x200/4]=2;
+    ramin[0x104/4]=ramin[0x204/4]=0x03ffffff;ramin[0x108/4]=ramin[0x208/4]=0;
+    ramin[0xe00/4]=NV_CONTEXT_ROP;
+    for(unsigned tile=0;tile<NV_NUM_GPU_TILES;tile++)gpu->pfb.regs[NV_PFB_TILE_BASE_ADDRESS_AND_FLAGS(tile)]=0;
+    const unsigned formats[]={NV062_SET_COLOR_FORMAT_LE_Y8,NV062_SET_COLOR_FORMAT_LE_R5G6B5,
+        NV062_SET_COLOR_FORMAT_LE_A8R8G8B8,NV062_SET_COLOR_FORMAT_LE_X8R8G8B8};
+    /* Down/up, right/left, both diagonals and equal origin, padded rows. */
+    const unsigned moves[][4]={{1,1,1,2},{1,2,1,1},{1,1,2,1},{2,1,1,1},{1,1,2,2},{2,2,1,1},{1,1,1,1}};
+    unsigned trials=0;
+    for(unsigned f=0;f<4;f++)for(unsigned alias=0;alias<2;alias++)for(unsigned n=0;n<7;n++) {
+        unsigned bpp=f==0?1:f==1?2:4,pitch=32;
+        uint8_t *memory=gpu->vram_ptr+0xa0000,original[256],expected[256];
+        image_blit_for_test(formats[f],0xa0000,0xa0000,pitch,pitch,0,0,0,0,0,0);
+        if(alias)pgraph_method(gpu,2,NV062_SET_CONTEXT_DMA_IMAGE_DESTIN,0x200);
+        for(unsigned i=0;i<sizeof original;i++)memory[i]=(uint8_t)(i*13+7);
+        memcpy(original,memory,sizeof original);memcpy(expected,original,sizeof expected);
+        unsigned sx=moves[n][0],sy=moves[n][1],dx=moves[n][2],dy=moves[n][3];
+        for(unsigned y=0;y<3;y++) {
+            memcpy(expected+(dy+y)*pitch+dx*bpp,original+(sy+y)*pitch+sx*bpp,3*bpp);
+            if(f==3)for(unsigned x=0;x<3;x++)expected[(dy+y)*pitch+(dx+x)*bpp+3]=255;
+        }
+        pgraph_method(gpu,3,NV09F_CONTROL_POINT_IN,sx|(sy<<16));
+        pgraph_method(gpu,3,NV09F_CONTROL_POINT_OUT,dx|(dy<<16));
+        pgraph_method(gpu,3,NV09F_SIZE,3|(3u<<16));
+        assert(!memcmp(memory,expected,sizeof expected));++trials;
+        if(f==3) {
+            memcpy(memory,original,sizeof original);
+            pgraph_method(gpu,5,NV_SET_OBJECT,0xe00);pgraph_method(gpu,5,NV043_SET_ROP5,0xcc);
+            pgraph_method(gpu,3,0x190,0xe00);pgraph_method(gpu,3,NV09F_SET_OPERATION,NV09F_SET_OPERATION_ROP_AND);
+            pgraph_method(gpu,3,NV09F_SIZE,3|(3u<<16));
+            assert(!memcmp(memory,expected,sizeof expected));++trials;
+        }
+    }
+    fprintf(stderr,"[BLIT DIRECTION] %u same-pitch linear source-copy trials, all RAM/guards and canonical DMA aliases passed\n",trials);
+}
+
+static void verify_blit_exact_self_alias(void) {
+    NV2AState *gpu=nv2a_get_state();gpu->vram_ptr=(uint8_t *)(xbox_GetMemoryOffset()+0x80000000u);
+    uint32_t *ramin=(uint32_t *)gpu->ramin_ptr;ramin[0x100/4]=ramin[0x200/4]=2;ramin[0x104/4]=ramin[0x204/4]=0x03ffffff;ramin[0x108/4]=ramin[0x208/4]=0;ramin[0xe00/4]=NV_CONTEXT_ROP;
+    const unsigned alphas[]={0,1,127,128,255};
+    for(unsigned op=0;op<17;op++)for(unsigned alias=0;alias<2;alias++)for(unsigned alpha=0;alpha<5;alpha++) {
+        image_blit_for_test(NV062_SET_COLOR_FORMAT_LE_X8R8G8B8,0xa0000,0xa0000,32,32,1,1,1,1,0,0);
+        if(alias)pgraph_method(gpu,2,NV062_SET_CONTEXT_DMA_IMAGE_DESTIN,0x200);
+        if(op<16){pgraph_method(gpu,5,NV_SET_OBJECT,0xe00);pgraph_method(gpu,5,NV043_SET_ROP5,op*0x11);pgraph_method(gpu,3,0x190,0xe00);}
+        pgraph_method(gpu,3,NV09F_SET_OPERATION,op<16?NV09F_SET_OPERATION_ROP_AND:NV09F_SET_OPERATION_SRCCOPY_AND);
+        uint8_t *memory=gpu->vram_ptr+0xa0000,expected[256];memset(memory,0xa5,256);
+        for(unsigned row=0;row<3;row++)for(unsigned x=0;x<4;x++)stl_le_p(memory+(row+1)*32+(x+1)*4,(alphas[alpha]<<24)|((0x13579b+(row*4+x)*0x112233)&0xffffff));
+        memcpy(expected,memory,sizeof expected);
+        for(unsigned row=0;row<3;row++)for(unsigned x=0;x<4;x++) {
+            uint32_t d=ldl_le_p(memory+(row+1)*32+(x+1)*4);
+            /* With S=D, only ROP truth-table inputs00 and11 can occur. */
+            uint32_t value=op==16?d:((op&1)?~d:0)|((op&8)?d:0);
+            stl_le_p(expected+(row+1)*32+(x+1)*4,0xff000000|(value&0xffffff));
+        }
+        pgraph_method(gpu,3,NV09F_SIZE,4|(3u<<16));assert(!memcmp(memory,expected,sizeof expected));
+    }
+    fprintf(stderr,"[BLIT SELF ALIAS] sixteenROP functions plusCOPY_AND,physicalsamepixel/samepitch withsameanddistinctDMAhandles,fiverawalphas,threepaddedrows/allguards passed\n");
+}
+
+static void verify_blit_rop(const char *mode) {
+    NV2AState *gpu=nv2a_get_state();gpu->vram_ptr=(uint8_t *)(xbox_GetMemoryOffset()+0x80000000u);
+    uint32_t *ramin=(uint32_t *)gpu->ramin_ptr;ramin[0x100/4]=2;ramin[0x104/4]=0x03ffffff;ramin[0x108/4]=0;ramin[0xe00/4]=NV_CONTEXT_ROP;
+    const uint32_t results[]={0xff000000,0xff1403c0,0xff82300c,0xff9633cc,0xff280c30,0xff3c0ff0,0xffaa3c3c,0xffbe3ffc,0xff41c003,0xff55c3c3,0xffc3f00f,0xffd7f3cf,0xff69cc33,0xff7dcff3,0xffebfc3f,0xffffffff};
+    const unsigned alphas[]={0,1,127,128,255};unsigned trials=!strcmp(mode,"blit-rop-copy")?16:1;
+    for(unsigned operation=0;operation<trials;operation++)for(unsigned alpha=0;alpha<5;alpha++) {
+        unsigned format=!strcmp(mode,"blit-rop-alpha")?NV062_SET_COLOR_FORMAT_LE_A8R8G8B8:NV062_SET_COLOR_FORMAT_LE_X8R8G8B8;
+        image_blit_for_test(format,0xa0000,!strcmp(mode,"blit-rop-overlap")?0xa0000:0xb0000,32,40,1,1,2,2,0,0);
+        pgraph_method(gpu,5,NV_SET_OBJECT,0xe00);pgraph_method(gpu,5,NV043_SET_ROP5,!strcmp(mode,"blit-rop-patterned")?0xf0:0xabcdef00u|operation*0x11u);
+        assert(gpu->pgraph.regs[NV_PGRAPH_ROP3]==(!strcmp(mode,"blit-rop-patterned")?0xf0:operation*0x11u));
+        if(operation==6 && alpha==2) {
+            FILE *snapshot=tmpfile();assert(snapshot && nv2a_save_checkpoint(snapshot));rewind(snapshot);void *loaded=nv2a_prepare_checkpoint(snapshot);assert(loaded);
+            gpu->pgraph.regs[NV_PGRAPH_ROP3]=0xff;nv2a_apply_checkpoint(loaded);free(loaded);fclose(snapshot);
+            assert(pgraph_read(gpu,NV_PGRAPH_ROP3,4)==0x66);
+        }
+        if(!strcmp(mode,"blit-rop-identity")) {
+            pgraph_method(gpu,5,NV043_SET_ROP5,0x66);
+            ramin[0xd00/4]=NV_CONTEXT_ROP;pgraph_method(gpu,5,NV_SET_OBJECT,0xd00);pgraph_method(gpu,5,NV043_SET_ROP5,0xcc);
+            pgraph_method(gpu,5,NV_SET_OBJECT,0xe00);assert(pgraph_read(gpu,NV_PGRAPH_ROP3,4)==0xcc);
+        }
+        pgraph_method(gpu,3,0x190,0xe00);pgraph_method(gpu,3,NV09F_SET_OPERATION,NV09F_SET_OPERATION_ROP_AND);
+        if(!strcmp(mode,"blit-rop-pattern")){ramin[0xf00/4]=NV_CONTEXT_PATTERN;pgraph_method(gpu,3,0x18c,0xf00);}
+        if(!strcmp(mode,"blit-rop-key")){ramin[0xf00/4]=0x57;pgraph_method(gpu,3,0x184,0xf00);}
+        if(!strcmp(mode,"blit-rop-overlap")){pgraph_method(gpu,3,NV09F_CONTROL_POINT_IN,0);pgraph_method(gpu,3,NV09F_CONTROL_POINT_OUT,0);}
+        uint8_t *source=gpu->vram_ptr+0xa0000,*destination=gpu->vram_ptr+0xb0000;
+        memset(source,0x7b,256);memset(destination,0xa5,256);uint8_t expected[256];memset(expected,0xa5,sizeof expected);
+        for(unsigned row=0;row<2;row++)for(unsigned x=0;x<4;x++) {
+            stl_le_p(source+(row+1)*32+(x+1)*4,(alphas[alpha]<<24)|0x0069cc33);
+            stl_le_p(destination+(row+2)*40+(x+2)*4,0x3cc3f00f);
+            stl_le_p(expected+(row+2)*40+(x+2)*4,results[!strcmp(mode,"blit-rop-identity")?12:operation]);
+        }
+        if(!strcmp(mode,"blit-rop-partial-tile")) {
+            gpu->pfb.regs[NV_PFB_TILE_BASE_ADDRESS_AND_FLAGS(0)]=NV_PFB_TILE_FLAGS_VALID;
+            gpu->pfb.regs[NV_PFB_TILE_LIMIT(0)]=0xb0000+2*40+2*4+4;
+        }
+        pgraph_method(gpu,3,NV09F_SIZE,4|(2u<<16));
+        assert(!memcmp(destination,expected,256));
+        if(!strcmp(mode,"blit-rop-identity")) {
+            pgraph_method(gpu,5,NV043_SET_ROP5,0x66);
+            for(unsigned row=0;row<2;row++)for(unsigned x=0;x<4;x++) {
+                stl_le_p(destination+(row+2)*40+(x+2)*4,0x3cc3f00f);
+                stl_le_p(expected+(row+2)*40+(x+2)*4,0xffaa3c3c);
+            }
+            pgraph_method(gpu,3,NV09F_SIZE,4|(2u<<16));assert(!memcmp(destination,expected,256));
+        }
+    }
+    fprintf(stderr,"[BLIT ROP] sixteen pattern-independentROP3 functions, original logic consumer, X8 alpha and pitched RAM guards passed\n");
+}
+
+
+static void verify_blit_copy_and(const char *mode) {
+    NV2AState *gpu=nv2a_get_state();gpu->vram_ptr=(uint8_t *)(xbox_GetMemoryOffset()+0x80000000u);
+    uint32_t *ramin=(uint32_t *)gpu->ramin_ptr;ramin[0x100/4]=2;ramin[0x104/4]=0x03ffffff;ramin[0x108/4]=0;
+    const unsigned alphas[]={0,1,127,128,255};
+    for(unsigned alpha=0;alpha<5;alpha++) {
+        unsigned format=!strcmp(mode,"blit-copy-and-alpha")?NV062_SET_COLOR_FORMAT_LE_A8R8G8B8:NV062_SET_COLOR_FORMAT_LE_X8R8G8B8;
+        image_blit_for_test(format,0xa0000,!strcmp(mode,"blit-copy-and-overlap")?0xa0000:0xb0000,32,40,1,1,2,2,0,0);
+        pgraph_method(gpu,3,NV09F_SET_OPERATION,NV09F_SET_OPERATION_SRCCOPY_AND);
+        if(!strcmp(mode,"blit-copy-and-pattern")){ramin[0xf00/4]=NV_CONTEXT_PATTERN;pgraph_method(gpu,3,0x18c,0xf00);}
+        if(!strcmp(mode,"blit-copy-and-key")){ramin[0xf00/4]=0x57;pgraph_method(gpu,3,0x184,0xf00);}
+        if(!strcmp(mode,"blit-copy-and-overlap")){pgraph_method(gpu,3,NV09F_CONTROL_POINT_IN,0);pgraph_method(gpu,3,NV09F_CONTROL_POINT_OUT,0);}
+        uint8_t *source=gpu->vram_ptr+0xa0000,*destination=gpu->vram_ptr+0xb0000;
+        memset(source,0x7b,256);memset(destination,0xa5,256);uint8_t expected[256];memset(expected,0xa5,sizeof expected);
+        for(unsigned row=0;row<2;row++)for(unsigned x=0;x<4;x++) {
+            uint32_t rgb=0x13579b+(row*4+x)*0x112233;
+            stl_le_p(source+(row+1)*32+(x+1)*4,(alphas[alpha]<<24)|rgb);
+            stl_le_p(expected+(row+2)*40+(x+2)*4,0xff000000|rgb);
+        }
+        if(!strcmp(mode,"blit-copy-and-partial-tile")) {
+            gpu->pfb.regs[NV_PFB_TILE_BASE_ADDRESS_AND_FLAGS(0)]=NV_PFB_TILE_FLAGS_VALID;
+            gpu->pfb.regs[NV_PFB_TILE_LIMIT(0)]=0xb0000+2*40+2*4+4;
+        }
+        pgraph_method(gpu,3,NV09F_SIZE,4|(2u<<16));assert(!memcmp(destination,expected,256));
+    }
+    fprintf(stderr,"[BLIT COPY AND] original operation0 opaqueX8 avoids zero-alpha discard; raw high bytes0/1/127/128/255, all RAM and guards exact\n");
+}
+
+static void verify_original_image_blit_copy(void) {
+    /* The runtime supplies g_contig_memory to standalone NV2A, just as the
+     * existing DMA/FIFO fixtures do. The general shader fixture starts with
+     * the guest-linear view because that path supplies its own DMA mapping. */
+    nv2a_get_state()->vram_ptr=(uint8_t *)(xbox_GetMemoryOffset()+0x80000000u);
+    seed();method(NV097_SET_BEGIN_END,0);
+    const unsigned formats[]={NV062_SET_COLOR_FORMAT_LE_Y8,NV062_SET_COLOR_FORMAT_LE_R5G6B5,
+        NV062_SET_COLOR_FORMAT_LE_X8R8G8B8_Z8R8G8B8,NV062_SET_COLOR_FORMAT_LE_X8R8G8B8,
+        NV062_SET_COLOR_FORMAT_LE_A8R8G8B8,NV062_SET_COLOR_FORMAT_LE_Y32};
+    for(unsigned test=0;test<sizeof formats/sizeof formats[0];test++) {
+        unsigned bpp=test==0?1:test==1?2:4;
+        uint8_t *source=(uint8_t *)(xbox_GetMemoryOffset()+0x800a0000u),*destination=(uint8_t *)(xbox_GetMemoryOffset()+0x800b0000u);
+        for(unsigned i=0;i<256;i++)source[i]=(uint8_t)(i*17+test);
+        memset(destination,0xa5,256);uint8_t expected[256];memset(expected,0xa5,sizeof expected);
+        for(unsigned row=0;row<2;row++) {
+            memcpy(expected+(row+2)*40+2*bpp,source+(row+1)*32+bpp,3*bpp);
+            if(test==2 || test==3)for(unsigned x=0;x<3;x++)expected[(row+2)*40+(x+2)*4+3]=(uint8_t)(test==2?0:255);
+        }
+        image_blit_for_test(formats[test],0xa0000,0xb0000,32,40,1,1,2,2,3,2);
+        assert(!memcmp(destination,expected,sizeof expected));
+    }
+    /* Existing upstream copy order preserves horizontal overlap and limits
+     * transferred row pixels to the smaller source/destination pitch. */
+    uint8_t *overlap=(uint8_t *)(xbox_GetMemoryOffset()+0x800a0000u);
+    for(unsigned i=0;i<128;i++)overlap[i]=(uint8_t)i;
+    uint8_t overlap_expected[128];memcpy(overlap_expected,overlap,128);
+    for(unsigned row=0;row<2;row++)memmove(overlap_expected+row*32+4,overlap_expected+row*32,16);
+    image_blit_for_test(NV062_SET_COLOR_FORMAT_LE_Y32,0xa0000,0xa0000,32,32,0,0,1,0,4,2);
+    assert(!memcmp(overlap,overlap_expected,128));
+    uint32_t *clip_source=(uint32_t *)(xbox_GetMemoryOffset()+0x800a0000u);
+    uint32_t *clip_dest=(uint32_t *)(xbox_GetMemoryOffset()+0x800b0000u);
+    for(unsigned i=0;i<64;i++)clip_source[i]=0x80201000u+i;
+    memset(clip_dest,0xa5,256);
+    image_blit_for_test(NV062_SET_COLOR_FORMAT_LE_Y32,0xa0000,0xb0000,32,32,0,0,0,0,10,2);
+    for(unsigned i=0;i<64;i++)assert(clip_dest[i]==(i<16?clip_source[i]:0xa5a5a5a5u));
+    NV2AState *gpu=nv2a_get_state();uint32_t *ramin=(uint32_t *)gpu->ramin_ptr;
+    ramin[0xa00/4]=NV_CONTEXT_CLIP_RECTANGLE;ramin[0xb00/4]=NV_BETA;
+    image_blit_for_test(NV062_SET_COLOR_FORMAT_LE_A8R8G8B8,0xa0000,0xb0000,32,32,0,0,1,1,0,0);
+    pgraph_method(gpu,4,NV_SET_OBJECT,0xa00);
+    pgraph_method(gpu,4,NV019_SET_POINT,3|(2u<<16));pgraph_method(gpu,4,NV019_SET_SIZE,2|(2u<<16));
+    pgraph_method(gpu,3,0x188,0xa00);memset(clip_dest,0xa5,256);
+    pgraph_method(gpu,3,NV09F_SIZE,5|(4u<<16));
+    for(unsigned y=0;y<8;y++)for(unsigned x=0;x<8;x++)
+        assert(clip_dest[y*8+x]==(x>=3 && x<5 && y>=2 && y<4?clip_source[(y-1)*8+x-1]:0xa5a5a5a5u));
+    pgraph_method(gpu,4,NV019_SET_SIZE,0);memset(clip_dest,0xa5,256);
+    pgraph_method(gpu,3,NV09F_SIZE,5|(4u<<16));
+    for(unsigned i=0;i<64;i++)assert(clip_dest[i]==0xa5a5a5a5u);
+    const uint32_t betas[]={0,0x007fffff,0x00800000,0x444fffff,0x7f800000,0x7fffffff,0x80000000,0xffffffff};
+    for(unsigned test=0;test<sizeof betas/sizeof betas[0];test++) {
+        image_blit_for_test(NV062_SET_COLOR_FORMAT_LE_A8R8G8B8,0xa0000,0xb0000,32,32,0,0,0,0,0,0);
+        pgraph_method(gpu,5,NV_SET_OBJECT,0xb00);pgraph_method(gpu,5,NV012_SET_BETA,betas[test]);
+        pgraph_method(gpu,3,0x194,0xb00);pgraph_method(gpu,3,NV09F_SET_OPERATION,NV09F_SET_OPERATION_BLEND_AND);
+        clip_source[0]=0x11224466;clip_dest[0]=0x77442200;
+        pgraph_method(gpu,3,NV09F_SIZE,1|(1u<<16));
+        unsigned weight=(betas[test]&0x80000000u)?0:(betas[test]>>23)&255;
+        uint32_t expected=0x77000000u;
+        for(unsigned channel=0;channel<3;channel++) {
+            unsigned src=(0x11224466u>>(channel*8))&255,dst=(0x77442200u>>(channel*8))&255;
+            expected|=((src*weight+dst*(255-weight))/255)<<(channel*8);
+        }
+        assert(clip_dest[0]==expected);
+    }
+    /* Source publication and destination invalidation reuse the original
+     * physical-memory fault/ownership consumer; no separate blit cache. */
+    method(NV097_SET_CLEAR_RECT_HORIZONTAL,7u<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,7u<<16);
+    method(NV097_SET_COLOR_CLEAR_VALUE,0xff2a4c6e);method(NV097_CLEAR_SURFACE,0xf0);
+    image_blit_for_test(NV062_SET_COLOR_FORMAT_LE_A8R8G8B8,0x20000,0x90000,32,32,0,0,0,0,8,8);
+    const uint32_t *copy=(const uint32_t *)(xbox_GetMemoryOffset()+0x80090000u);
+    for(unsigned i=0;i<64;i++)assert(copy[i]==0xff2a4c6e);
+    uint32_t *cpu_source=(uint32_t *)(xbox_GetMemoryOffset()+0x800a0000u);
+    for(unsigned i=0;i<64;i++)cpu_source[i]=0xff7b3c95;
+    image_blit_for_test(NV062_SET_COLOR_FORMAT_LE_A8R8G8B8,0xa0000,0x20000,32,32,0,0,0,0,8,8);
+    if(hw_enabled()) {
+        HwColor *color=hw_color(0);uint32_t actual[64];
+        if(d3d8_IsNativeVulkan())assert(nvk_image_read(color->native_surface,actual,32));
+        else {D3DLOCKED_RECT locked;assert(SUCCEEDED(color->surface->lpVtbl->LockRect(color->surface,&locked,NULL,D3DLOCK_READONLY)));
+            for(unsigned row=0;row<8;row++)memcpy(actual+row*8,(const uint8_t *)locked.pBits+row*locked.Pitch,32);
+            assert(SUCCEEDED(color->surface->lpVtbl->UnlockRect(color->surface)));}
+        for(unsigned i=0;i<64;i++)assert(actual[i]==0xff7b3c95);
+    }
+    fprintf(stderr,"[IMAGE BLIT] real null/clip/beta contexts, DMA pitches/offsets, six formats with alpha, overlap, clipping, blend and shared GPU publication/invalidation passed\n");
+}
+static uint32_t stencil_sample(float *z);
+static void verify_dependent_texture_stages(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);
+    method(NV097_SET_CONTEXT_DMA_A,0x100);
+    const uint32_t texels[4]={0xff112233,0xff445566,0xff778899,0xffaabbcc};
+    memcpy((void *)(xbox_GetMemoryOffset()+0x80080000u),texels,sizeof texels);
+    for(unsigned stage=1;stage<4;stage++)for(unsigned source=0;source<stage;source++)for(unsigned mode=15;mode<=16;mode++)for(unsigned quadrant=0;quadrant<4;quadrant++) {
+        float u=(quadrant&1)?.75f:.25f,v=(quadrant&2)?.75f:.25f;
+        for(unsigned st=0;st<4;st++) {
+            float coordinates[3][4];
+            for(unsigned vertex=0;vertex<3;vertex++)for(unsigned c=0;c<4;c++)coordinates[vertex][c]=.5f;
+            if(st==source)for(unsigned vertex=0;vertex<3;vertex++) {
+                coordinates[vertex][mode==15?3:1]=u;coordinates[vertex][mode==15?0:2]=v;
+            }
+            memcpy((void *)(xbox_GetMemoryOffset()+0x80050000u+st*256),coordinates,sizeof coordinates);
+            method(NV097_SET_VERTEX_DATA_ARRAY_OFFSET+(9+st)*4,0x50000+st*256);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT+(9+st)*4,0x1042);
+        }
+        unsigned offset=stage*64;
+        method(NV097_SET_TEXTURE_OFFSET+offset,0x80000);method(NV097_SET_TEXTURE_FORMAT+offset,(2<<4)|(0x06<<8)|(1<<16)|(1<<20)|(1<<24));
+        method(NV097_SET_TEXTURE_CONTROL0+offset,NV_PGRAPH_TEXCTL0_0_ENABLE);method(NV097_SET_TEXTURE_ADDRESS+offset,3|(3<<8));method(NV097_SET_TEXTURE_FILTER+offset,0x01010000);
+        uint32_t program=mode<<(stage*5);for(unsigned st=0;st<stage;st++)program|=4u<<(st*5);
+        method(NV097_SET_SHADER_OTHER_STAGE_INPUT,stage==1?0:source<<(stage==2?16:20));method(NV097_SET_SHADER_STAGE_PROGRAM,program);
+        method(NV097_SET_COMBINER_COLOR_ICW,((8+stage)<<24)|0x200000);method(NV097_SET_COMBINER_ALPHA_ICW,((0x18+stage)<<24)|0x200000);
+        for(unsigned keyed=0;keyed<2;keyed++) {
+            method(NV097_SET_TEXTURE_CONTROL0+offset,NV_PGRAPH_TEXCTL0_0_ENABLE|(keyed?3:0));method(NV097_SET_COLOR_KEY_COLOR+stage*4,texels[quadrant]);
+            method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+            assert(BRIDGE_MEM32(s_gpu.color_base)==(keyed?0xff334455:texels[quadrant]));
+        }
+    }
+    /* The dependency reads the sampled/post-key color, not the original UV. */
+    float chain_coordinates[3][4];for(unsigned v=0;v<3;v++)for(unsigned c=0;c<4;c++)chain_coordinates[v][c]=.75f;
+    memcpy((void *)(xbox_GetMemoryOffset()+0x80050000u),chain_coordinates,sizeof chain_coordinates);
+    method(NV097_SET_SHADER_OTHER_STAGE_INPUT,1u<<20);
+    method(NV097_SET_TEXTURE_CONTROL0+3*64,NV_PGRAPH_TEXCTL0_0_ENABLE);
+    method(NV097_SET_COMBINER_COLOR_ICW,(11u<<24)|0x200000);method(NV097_SET_COMBINER_ALPHA_ICW,(27u<<24)|0x200000);
+    for(unsigned mode=15;mode<=16;mode++)for(unsigned key_mode=0;key_mode<3;key_mode++) {
+        method(NV097_SET_SHADER_STAGE_PROGRAM,4|(15<<5)|(4<<10)|(mode<<15));
+        method(NV097_SET_TEXTURE_CONTROL0+64,NV_PGRAPH_TEXCTL0_0_ENABLE|key_mode);method(NV097_SET_COLOR_KEY_COLOR+4,texels[3]);
+        method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+        unsigned expected=mode==15?(key_mode==2?0:key_mode==1?2:3):(key_mode==2?0:3);
+        if(BRIDGE_MEM32(s_gpu.color_base)!=texels[expected])fprintf(stderr,"[CHAIN] mode=%u key=%u actual=%08x expected=%08x\n",mode,key_mode,BRIDGE_MEM32(s_gpu.color_base),texels[expected]);
+        assert(BRIDGE_MEM32(s_gpu.color_base)==texels[expected]);
+    }
+    fprintf(stderr,"[DEPENDENT TEXTURES] AR/GB, stages1..3, every earlier source, four quadrants and color-key discard passed\n");
+}
+
+static void verify_texture_color_keys(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);
+    method(NV097_SET_CONTEXT_DMA_A,0x100);
+    const uint32_t texels[4]={0x7f112233,0x7f112233,0x7f112233,0x7f112233};
+    memcpy((void *)(xbox_GetMemoryOffset()+0x80080000u),texels,sizeof texels);
+    float coordinates[3][4]={{.5f,.5f,0,1},{.5f,.5f,0,1},{.5f,.5f,0,1}};
+    memcpy((void *)(xbox_GetMemoryOffset()+0x80050000u),coordinates,sizeof coordinates);
+    for(unsigned stage=0;stage<4;stage++) {
+        unsigned offset=stage*64;
+        method(NV097_SET_VERTEX_DATA_ARRAY_OFFSET+(9+stage)*4,0x50000);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT+(9+stage)*4,0x1042);
+        method(NV097_SET_TEXTURE_OFFSET+offset,0x80000);method(NV097_SET_TEXTURE_CONTROL1+offset,8<<16);
+        method(NV097_SET_TEXTURE_IMAGE_RECT+offset,(2<<16)|2);method(NV097_SET_TEXTURE_ADDRESS+offset,3|(3<<8));method(NV097_SET_TEXTURE_FILTER+offset,0x01010000);
+        method(NV097_SET_SHADER_STAGE_PROGRAM,1u<<(stage*5));
+        method(NV097_SET_COMBINER_COLOR_ICW,((8+stage)<<24)|0x200000);method(NV097_SET_COMBINER_ALPHA_ICW,((0x18+stage)<<24)|0x200000);
+        for(unsigned xrgb=0;xrgb<2;xrgb++) {
+            method(NV097_SET_TEXTURE_FORMAT+offset,((xrgb?0x1e:0x12)<<8)|(1<<16));
+            uint32_t sampled=xrgb?0xff112233:texels[0];
+            for(unsigned mode=0;mode<4;mode++)for(unsigned key_case=0;key_case<3;key_case++) {
+                uint32_t key=sampled^(key_case==1?0x10000:key_case==2?0xff000000:0);
+                method(NV097_SET_TEXTURE_CONTROL0+offset,NV_PGRAPH_TEXCTL0_0_ENABLE|mode);method(NV097_SET_COLOR_KEY_COLOR+stage*4,key);
+                method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+                int matched=key_case==0 || (xrgb && key_case==2);
+                uint32_t expected=!mode || !matched?sampled:mode==1?(sampled&0xffffff):mode==2?0:0xff334455;
+                assert(BRIDGE_MEM32(s_gpu.color_base)==expected);
+            }
+        }
+    }
+    /* Discard must suppress both depth and every stencil outcome even when
+     * color writes are disabled and ordinary alpha testing is disabled. */
+    method(NV097_SET_SHADER_STAGE_PROGRAM,1);method(NV097_SET_TEXTURE_FORMAT,(0x12<<8)|(1<<16));
+    method(NV097_SET_TEXTURE_CONTROL0,NV_PGRAPH_TEXCTL0_0_ENABLE|3);method(NV097_SET_COLOR_KEY_COLOR,texels[0]);
+    method(NV097_SET_COLOR_MASK,0);method(NV097_SET_DEPTH_TEST_ENABLE,1);method(NV097_SET_DEPTH_MASK,1);
+    method(NV097_SET_STENCIL_TEST_ENABLE,1);method(NV097_SET_CONTROL0,NV097_SET_CONTROL0_STENCIL_WRITE_ENABLE);
+    method(NV097_SET_STENCIL_MASK,255);method(NV097_SET_STENCIL_FUNC_MASK,255);method(NV097_SET_STENCIL_FUNC_REF,0x33);
+    method(NV097_SET_STENCIL_OP_FAIL,0x1e01);method(NV097_SET_STENCIL_OP_ZFAIL,0x1e01);method(NV097_SET_STENCIL_OP_ZPASS,0x1e01);
+    for(unsigned outcome=0;outcome<3;outcome++) {
+        method(NV097_SET_STENCIL_FUNC,outcome==0?0x200:0x207);method(NV097_SET_DEPTH_FUNC,outcome==1?0x200:0x207);
+        method(NV097_SET_ZSTENCIL_CLEAR_VALUE,0x7f0000a5);method(NV097_CLEAR_SURFACE,0xf3);
+        float before,after;assert(stencil_sample(&before)==0xa5);
+        method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
+        assert(stencil_sample(&after)==0xa5 && before==after);
+    }
+    fprintf(stderr,"[COLOR KEYS] four stages, three actions, no-match, ARGB/XRGB alpha masks and depth/stencil discard passed\n");
+}
+static void verify_existing_resource_format_connections(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);
+    method(NV097_SET_CONTEXT_DMA_A,0x100);method(NV097_SET_TEXTURE_OFFSET,0x80000);
+    method(NV097_SET_TEXTURE_CONTROL0,NV_PGRAPH_TEXCTL0_0_ENABLE);method(NV097_SET_TEXTURE_IMAGE_RECT,(2<<16)|2);
+    method(NV097_SET_TEXTURE_ADDRESS,3|(3<<8));method(NV097_SET_TEXTURE_FILTER,0x01010000);
+    method(NV097_SET_SHADER_STAGE_PROGRAM,1);method(NV097_SET_COMBINER_COLOR_ICW,0x08200000);method(NV097_SET_COMBINER_ALPHA_ICW,0x18200000);
+    const struct {unsigned format;uint32_t bits,color;} cases[]={
+        {D3DFMT_AL8,0xa3,0xa3a3a3a3},{D3DFMT_LIN_AL8,0xa3,0xa3a3a3a3},
+        {D3DFMT_A8L8,0x7f4c,0x7f4c4c4c},{D3DFMT_LIN_A8L8,0x7f4c,0x7f4c4c4c},
+        {D3DFMT_R5G5B5A1,0xf801,0xffff0000},{D3DFMT_LIN_R5G5B5A1,0xf801,0xffff0000},
+        {D3DFMT_R4G4B4A4,0xa53c,0xccaa5533},{D3DFMT_LIN_R4G4B4A4,0xa53c,0xccaa5533},
+        {D3DFMT_A8B8G8R8,0x7f112233,0x7f332211},{D3DFMT_B8G8R8A8,0x1122337f,0x7f332211},{D3DFMT_R8G8B8A8,0x3322117f,0x7f332211}};
+    float coordinates[3][4]={{.5f,.5f,0,1},{.5f,.5f,0,1},{.5f,.5f,0,1}};
+    memcpy((void *)(xbox_GetMemoryOffset()+0x80050000u),coordinates,sizeof coordinates);
+    method(NV097_SET_VERTEX_DATA_ARRAY_OFFSET+9*4,0x50000);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT+9*4,0x1042);
+    for(unsigned test=0;test<sizeof cases/sizeof cases[0];test++) {
+        unsigned bytes=d3d8_format_bpp((D3DFORMAT)cases[test].format)/8;
+        uint8_t *pixels=(uint8_t *)(xbox_GetMemoryOffset()+0x80080000u);
+        for(unsigned i=0;i<4;i++)memcpy(pixels+i*bytes,&cases[test].bits,bytes);
+        method(NV097_SET_TEXTURE_CONTROL1,(bytes*2)<<16);
+        method(NV097_SET_TEXTURE_FORMAT,(cases[test].format<<8)|(1<<16)|(1<<20)|(1<<24));
+        for(unsigned y=0;y<2;y++)for(unsigned x=0;x<2;x++) {uint32_t pixel;assert(sample_tex(&s_gpu.texs[0],0,x,y,&pixel)); if(!x && !y && (cases[test].format==D3DFMT_AL8 || cases[test].format==D3DFMT_LIN_AL8))fprintf(stderr,"[AY8] format=%02X raw=%02X actual=%08X expected=%08X\n",cases[test].format,cases[test].bits,pixel,cases[test].color); assert(pixel==cases[test].color);}
+        method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+        assert(BRIDGE_MEM32(s_gpu.color_base)==cases[test].color);
+    }
+    fprintf(stderr,"[RESOURCE FORMATS] eleven missing format connections reuse original conversion/linear consumers and reach actual pixels\n");
+}
+static void verify_rectangle_point_sprite(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_LIGHTING_ENABLE,0);
+    method(NV097_SET_CONTEXT_DMA_A,0x100);method(NV097_SET_POINT_SIZE,32);method(NV097_SET_POINT_SMOOTH_ENABLE,1);
+    for(unsigned row=0;row<16;row++){float value[4]={0};value[row%4]=1;nv2a_vsh_set_constant(row,value);}
+    struct {float x,y,z,w;uint32_t color;} point={4,4,1,1,0xffff0000};
+    memcpy((void *)(xbox_GetMemoryOffset()+0x80040000u),&point,sizeof point);
+    const uint32_t colors[4]={0xffff0000,0xff00ff00,0xff0000ff,0xffffffff};
+    memcpy((void *)(xbox_GetMemoryOffset()+0x80080000u),colors,sizeof colors);
+    unsigned stage=3*64;
+    method(NV097_SET_TEXTURE_OFFSET+stage,0x80000);method(NV097_SET_TEXTURE_CONTROL1+stage,8<<16);
+    method(NV097_SET_TEXTURE_IMAGE_RECT+stage,(2<<16)|2);method(NV097_SET_TEXTURE_CONTROL0+stage,NV_PGRAPH_TEXCTL0_0_ENABLE);
+    method(NV097_SET_TEXTURE_ADDRESS+stage,3|(3<<8));method(NV097_SET_TEXTURE_FILTER+stage,0x01010000);
+    method(NV097_SET_SHADER_STAGE_PROGRAM,1u<<15);
+    method(NV097_SET_COMBINER_COLOR_ICW,0x0b200000);method(NV097_SET_COMBINER_ALPHA_ICW,0x1b200000);
+    for(unsigned program=0;program<2;program++) {
+        uint32_t reference[64],actual[64];method(NV097_SET_TRANSFORM_EXECUTION_MODE,program?2:0);
+        for(unsigned linear=0;linear<2;linear++) {
+            method(NV097_SET_TEXTURE_FORMAT+stage,linear?((0x12<<8)|(1<<16)):((0x06<<8)|(1<<16)|(1<<20)|(1<<24)));
+            method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,1);method(NV097_DRAW_ARRAYS,0);method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+            memcpy(linear?actual:reference,(const void *)(xbox_GetMemoryOffset()+s_gpu.color_base),sizeof actual);
+        }
+        assert(reference[2*8+2]==colors[0] && reference[2*8+4]==colors[1]);
+        assert(reference[4*8+2]==colors[2] && reference[4*8+4]==colors[3]);
+        assert(!memcmp(actual,reference,sizeof actual));
+    }
+    fprintf(stderr,"[RECTANGLE SPRITE] stage3 UV replacement produces matching four-color sprite for rectangle/swizzled textures on fixed/program paths\n");
+}
+static void verify_two_sided_vertex_colors(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_LIGHTING_ENABLE,0);
+    method(NV097_SET_SPECULAR_ENABLE,1);method(NV097_SET_LIGHT_CONTROL,NV097_SET_LIGHT_CONTROL_SEPARATE_SPECULAR);
+    for(unsigned row=0;row<16;row++){float value[4]={0};value[row%4]=1;nv2a_vsh_set_constant(row,value);}
+    const float colors[3][4]={{0,0,1,1},{0,1,0,1},{1,0,1,1}};
+    const unsigned attributes[3]={4,7,8};
+    for(unsigned a=0;a<3;a++)for(unsigned c=0;c<4;c++){uint32_t bits;memcpy(&bits,&colors[a][c],4);method(NV097_SET_VERTEX_DATA4F_M+attributes[a]*16+c*4,bits);}
+    const unsigned inputs[5]={0,3,4,7,8},outputs[5]={0,3,4,7,8};
+    for(unsigned i=0;i<5;i++) {uint32_t instruction[4]={0,(1u<<21)|(inputs[i]<<9)|0x1b,2u<<26,(15u<<12)|(1u<<11)|(outputs[i]<<3)|(i==4)};nv2a_vsh_set_instruction(i,instruction);}
+    nv2a_vsh_set_start_slot(0);vertices(1.0f/16777215.0f);
+    for(unsigned program=0;program<2;program++) {
+        method(NV097_SET_TRANSFORM_EXECUTION_MODE,program?2:0);
+        for(unsigned specular=0;specular<2;specular++) {
+            method(NV097_SET_COMBINER_COLOR_ICW,specular?0x05200000:0x04200000);
+            method(NV097_SET_COMBINER_ALPHA_ICW,specular?0x15200000:0x14200000);
+            for(unsigned flat=0;flat<2;flat++) {
+                method(NV097_SET_SHADE_MODE,flat?NV097_SET_SHADE_MODE_V_FLAT:NV097_SET_SHADE_MODE_V_SMOOTH);
+                for(unsigned back=0;back<2;back++)for(unsigned enabled=0;enabled<2;enabled++) {
+                    method(NV097_SET_FRONT_FACE,back?NV097_SET_FRONT_FACE_V_CCW:NV097_SET_FRONT_FACE_V_CW);
+                    method(NV097_SET_LIGHT_TWO_SIDE_ENABLE,enabled);method(NV097_CLEAR_SURFACE,0xf0);
+                    method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+                    uint32_t expected=specular?(back && enabled?0xffff00ff:0xff0000ff):(back && enabled?0xff00ff00:0xffff0000);
+                    if(!program && back && enabled)expected=0xff000000;
+                    assert(BRIDGE_MEM32(s_gpu.color_base)==expected);
+                }
+            }
+        }
+    }
+    const float back_colors[6][4]={{0,1,0,1},{0,0,1,1},{1,1,1,1},{1,0,1,1},{1,1,0,1},{0,1,1,1}};
+    memcpy((void *)(xbox_GetMemoryOffset()+0x80060000u),back_colors,sizeof back_colors);
+    method(NV097_SET_VERTEX_DATA_ARRAY_OFFSET+7*4,0x60000);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT+7*4,0x1042);
+    method(NV097_SET_VERTEX_DATA_ARRAY_OFFSET+8*4,0x60030);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT+8*4,0x1042);
+    method(NV097_SET_SHADE_MODE,NV097_SET_SHADE_MODE_V_FLAT);method(NV097_SET_FRONT_FACE,NV097_SET_FRONT_FACE_V_CCW);method(NV097_SET_LIGHT_TWO_SIDE_ENABLE,1);
+    for(unsigned program=0;program<2;program++)for(unsigned specular=0;specular<2;specular++)for(unsigned first=0;first<2;first++) {
+        method(NV097_SET_TRANSFORM_EXECUTION_MODE,program?2:0);method(NV097_SET_PROVOKING_VERTEX,first);
+        method(NV097_SET_COMBINER_COLOR_ICW,specular?0x05200000:0x04200000);method(NV097_SET_COMBINER_ALPHA_ICW,specular?0x15200000:0x14200000);
+        method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+        uint32_t expected=specular?(first?0xffff00ff:0xff00ffff):(first?0xff00ff00:0xffffffff);
+        if(!program)expected=0xff000000;
+        assert(BRIDGE_MEM32(s_gpu.color_base)==expected);
+    }
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,2);method(NV097_SET_SHADE_MODE,NV097_SET_SHADE_MODE_V_SMOOTH);
+    method(NV097_SET_COLOR_CLEAR_VALUE,0xff101010);method(NV097_SET_COMBINER_COLOR_ICW,0x04200000);method(NV097_SET_COMBINER_ALPHA_ICW,0x14200000);
+    const float clip_scale[4]={4,-4,1,0},clip_offset[4]={4,4,0,0};nv2a_vsh_set_constant(58,clip_scale);nv2a_vsh_set_constant(59,clip_offset);
+    struct {float x,y,z,w;uint32_t color;} clipped[3]={{0,0,0,-1,0xffff0000},{7,0,0,1,0xffff0000},{0,7,0,1,0xffff0000}};
+    memcpy((void *)(xbox_GetMemoryOffset()+0x80040000u),clipped,sizeof clipped);
+    /* The clipped positive-W polygon has reversed screen winding relative
+       to the original mixed-W triangle. Select its back face after clipping. */
+    uint32_t reference[64],actual[64];
+    for(unsigned pass=0;pass<2;pass++) {
+        for(unsigned i=0;i<5;i++) {unsigned attribute=i==0?0:(!pass && i<=2?6+i:inputs[i]);uint32_t instruction[4]={0,(1u<<21)|(attribute<<9)|0x1b,2u<<26,(15u<<12)|(1u<<11)|(outputs[i]<<3)|(i==4)};nv2a_vsh_set_instruction(i,instruction);}
+        method(NV097_SET_LIGHT_TWO_SIDE_ENABLE,pass);method(NV097_SET_FRONT_FACE,NV097_SET_FRONT_FACE_V_CW);
+        method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+        memcpy(pass?actual:reference,(void *)(xbox_GetMemoryOffset()+s_gpu.color_base),sizeof reference);
+    }
+    unsigned covered=0;for(unsigned i=0;i<64;i++)covered+=reference[i]!=0xff101010u;
+    if(!covered || memcmp(reference,actual,sizeof reference)) {fprintf(stderr,"[BACK CLIP] covered=%u\n",covered);for(unsigned i=0;i<64;i++)if(reference[i]!=actual[i])fprintf(stderr,"%u %08x %08x\n",i,reference[i],actual[i]);}
+    assert(covered && !memcmp(reference,actual,sizeof reference));
+    fprintf(stderr,"[TWO SIDED COLORS] program/unlit fixed front/back diffuse/specular, face convention, flat/smooth, first/last provoking and enable state passed\n");
+}
+static void lighting_scalar_for_test(uint32_t command,float value) {
+    uint32_t bits;memcpy(&bits,&value,4);method(command,bits);
+}
+static void lighting_draw_for_test(uint32_t pixels[64]) {
+    method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+    memcpy(pixels,(const void *)(xbox_GetMemoryOffset()+s_gpu.color_base),64*4);
+}
+static void verify_fixed_lighting_coefficients(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT,0x1432);
+    for(unsigned row=0;row<16;row++){float value[4]={0};value[row%4]=1;nv2a_vsh_set_constant(row,value);}
+    method(NV097_SET_LIGHTING_ENABLE,1);method(NV097_SET_MATERIAL_ALPHA,0x3f800000);
+    method(NV097_SET_VERTEX_DATA4F_M+2*16,0);method(NV097_SET_VERTEX_DATA4F_M+2*16+4,0);method(NV097_SET_VERTEX_DATA4F_M+2*16+8,0x3f800000);
+    vertices(1.0f/16777215.0f);method(NV097_SET_LIGHT_ENABLE_MASK,1);method(NV097_SET_LIGHT_CONTROL,0);
+    method(NV097_SET_LIGHT_INFINITE_DIRECTION,0);method(NV097_SET_LIGHT_INFINITE_DIRECTION+4,0);method(NV097_SET_LIGHT_INFINITE_DIRECTION+8,0x3f800000);
+    const float cases[][5]={{0,0,1,.5f,.5f},{-.3f,.5f,.4f,.5f,.30769231f},{.1f,-1,.5f,.5f,1},{.1f,-1,.25f,.5f,0},{-.7f,0,1,.5f,0},{.2f,.4f,.6f,0,.33333333f},{-.2f,0,0,.5f,1}};
+    for(unsigned test=0;test<sizeof cases/sizeof cases[0];test++) {
+        uint32_t expected[64],actual[64];
+        for(unsigned pass=0;pass<2;pass++) {
+            method(NV097_SET_SPECULAR_ENABLE,pass);
+            for(unsigned c=0;c<3;c++) {
+                lighting_scalar_for_test(NV097_SET_LIGHT_AMBIENT_COLOR+c*4,pass?0:cases[test][4]);
+                lighting_scalar_for_test(NV097_SET_LIGHT_DIFFUSE_COLOR+c*4,0);
+                lighting_scalar_for_test(NV097_SET_LIGHT_SPECULAR_COLOR+c*4,pass?1:0);
+                lighting_scalar_for_test(NV097_SET_SPECULAR_PARAMS+c*4,cases[test][c]);
+            }
+            method(NV097_SET_LIGHT_INFINITE_HALF_VECTOR,0);method(NV097_SET_LIGHT_INFINITE_HALF_VECTOR+4,0);
+            lighting_scalar_for_test(NV097_SET_LIGHT_INFINITE_HALF_VECTOR+8,cases[test][3]);
+            lighting_draw_for_test(pass?actual:expected);
+        }
+        assert((expected[0]&0xffffff)!=0 || cases[test][4]==0);
+        assert((expected[0]&0xffffff)==0 || cases[test][4]!=0);
+        assert(!memcmp(actual,expected,sizeof actual));
+    }
+    method(NV097_SET_SPECULAR_ENABLE,0);
+    const float spot_cases[][5]={{0,0,1,-.1f,0},{0,0,1,1.1f,1},{-.1f,.5f,.2f,.25f,.46153846f},{-.7f,0,1,.5f,0},{0,0,0,.5f,1},{0,0,-1,.5f,0}};
+    for(unsigned light=0;light<8;light+=7) {
+        unsigned offset=light*128;
+        lighting_scalar_for_test(NV097_SET_LIGHT_LOCAL_RANGE+offset,1000);
+        method(NV097_SET_LIGHT_LOCAL_POSITION+offset,0);method(NV097_SET_LIGHT_LOCAL_POSITION+offset+4,0);
+        lighting_scalar_for_test(NV097_SET_LIGHT_LOCAL_POSITION+offset+8,10);
+        lighting_scalar_for_test(NV097_SET_LIGHT_LOCAL_ATTENUATION+offset,1);
+        method(NV097_SET_LIGHT_LOCAL_ATTENUATION+offset+4,0);method(NV097_SET_LIGHT_LOCAL_ATTENUATION+offset+8,0);
+        for(unsigned c=0;c<3;c++) {method(NV097_SET_LIGHT_SPOT_DIRECTION+offset+c*4,0);method(NV097_SET_LIGHT_DIFFUSE_COLOR+offset+c*4,0);}
+        for(unsigned test=0;test<sizeof spot_cases/sizeof spot_cases[0];test++) {
+            uint32_t expected[64],actual[64];
+            for(unsigned pass=0;pass<2;pass++) {
+                method(NV097_SET_LIGHT_ENABLE_MASK,(pass?3u:2u)<<(light*2));
+                for(unsigned c=0;c<3;c++) {
+                    lighting_scalar_for_test(NV097_SET_LIGHT_AMBIENT_COLOR+offset+c*4,pass?1:spot_cases[test][4]);
+                    lighting_scalar_for_test(NV097_SET_LIGHT_SPOT_FALLOFF+offset+c*4,spot_cases[test][c]);
+                }
+                lighting_scalar_for_test(NV097_SET_LIGHT_SPOT_DIRECTION+offset+12,spot_cases[test][3]);
+                lighting_draw_for_test(pass?actual:expected);
+            }
+            assert((expected[0]&0xffffff)!=0 || spot_cases[test][4]==0);
+            assert((expected[0]&0xffffff)==0 || spot_cases[test][4]!=0);
+            assert(!memcmp(actual,expected,sizeof actual));
+        }
+    }
+    fprintf(stderr,"[LIGHTING COEFFICIENTS] rational specular thresholds/denominators and spotlight cones/falloff on first/last lights passed\n");
+}
+static void verify_fixed_two_sided_lighting(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT,0x1432);
+    for(unsigned row=0;row<16;row++){float value[4]={0};value[row%4]=1;nv2a_vsh_set_constant(row,value);}
+    method(NV097_SET_LIGHTING_ENABLE,1);method(NV097_SET_NORMALIZATION_ENABLE,1);
+    vertices(1.0f/16777215.0f);
+    for(unsigned attribute=3;attribute<=8;attribute++)for(unsigned c=0;c<4;c++)
+        lighting_scalar_for_test(NV097_SET_VERTEX_DATA4F_M+attribute*16+c*4,c==3?.625f:attribute==3?.25f:attribute==4?.125f:.875f);
+    const float light_color[3][3]={{.03125f,.0625f,.09375f},{.125f,.25f,.375f},{.25f,.125f,.0625f}};
+    for(unsigned light=0;light<8;light+=7)for(unsigned mode=1;mode<=3;mode++)
+    for(unsigned source=0;source<3;source++)for(unsigned separate=0;separate<2;separate++) {
+        uint32_t expected[64],actual[64];unsigned offset=light*128;
+        method(NV097_SET_LIGHT_ENABLE_MASK,mode<<(light*2));
+        method(NV097_SET_SPECULAR_ENABLE,1);method(NV097_SET_LIGHT_CONTROL,separate?NV097_SET_LIGHT_CONTROL_SEPARATE_SPECULAR:0);
+        lighting_scalar_for_test(NV097_SET_LIGHT_LOCAL_RANGE+offset,1000);
+        lighting_scalar_for_test(NV097_SET_LIGHT_LOCAL_POSITION+offset,0);lighting_scalar_for_test(NV097_SET_LIGHT_LOCAL_POSITION+offset+4,0);
+        lighting_scalar_for_test(NV097_SET_LIGHT_LOCAL_POSITION+offset+8,10);
+        lighting_scalar_for_test(NV097_SET_LIGHT_LOCAL_ATTENUATION+offset,1);
+        lighting_scalar_for_test(NV097_SET_LIGHT_LOCAL_ATTENUATION+offset+4,0);lighting_scalar_for_test(NV097_SET_LIGHT_LOCAL_ATTENUATION+offset+8,0);
+        for(unsigned c=0;c<3;c++) {
+            lighting_scalar_for_test(NV097_SET_LIGHT_INFINITE_DIRECTION+offset+c*4,c==2?1:0);
+            lighting_scalar_for_test(NV097_SET_LIGHT_INFINITE_HALF_VECTOR+offset+c*4,c==2?.5f:0);
+            lighting_scalar_for_test(NV097_SET_LIGHT_SPOT_DIRECTION+offset+c*4,0);
+            lighting_scalar_for_test(NV097_SET_LIGHT_SPOT_FALLOFF+offset+c*4,c==2?1:0);
+        }
+        lighting_scalar_for_test(NV097_SET_LIGHT_SPOT_DIRECTION+offset+12,.75f);
+        for(unsigned pass=0;pass<2;pass++) {
+            method(NV097_SET_LIGHT_TWO_SIDE_ENABLE,pass);
+            method(NV097_SET_FRONT_FACE,pass?NV097_SET_FRONT_FACE_V_CCW:NV097_SET_FRONT_FACE_V_CW);
+            method(NV097_SET_COLOR_MATERIAL,(source*0x55u)<<(pass?8:0));
+            for(unsigned c=0;c<3;c++) {
+                lighting_scalar_for_test(NV097_SET_VERTEX_DATA4F_M+2*16+c*4,c==2?(pass?-1:1):0);
+                lighting_scalar_for_test(NV097_SET_SCENE_AMBIENT_COLOR+c*4,pass?0:.0625f);
+                lighting_scalar_for_test(NV097_SET_MATERIAL_EMISSION+c*4,.25f);
+                lighting_scalar_for_test(NV097_SET_BACK_SCENE_AMBIENT_COLOR+c*4,.0625f);
+                lighting_scalar_for_test(NV097_SET_BACK_MATERIAL_EMISSION+c*4,.25f);
+                lighting_scalar_for_test(NV097_SET_SPECULAR_PARAMS+c*4,c==2?1:0);
+                lighting_scalar_for_test(NV097_SET_SPECULAR_PARAMS_BACK+c*4,c==2?1:0);
+                for(unsigned product=0;product<3;product++) {
+                    lighting_scalar_for_test(NV097_SET_LIGHT_AMBIENT_COLOR+offset+product*12+c*4,pass?0:light_color[product][c]);
+                    lighting_scalar_for_test(NV097_SET_BACK_LIGHT_AMBIENT_COLOR+light*64+product*12+c*4,light_color[product][c]);
+                }
+            }
+            /* Local/spot consume the original second coefficient triplet. */
+            for(unsigned c=3;c<6;c++) {
+                lighting_scalar_for_test(NV097_SET_SPECULAR_PARAMS+c*4,c==5?1:0);
+                lighting_scalar_for_test(NV097_SET_SPECULAR_PARAMS_BACK+c*4,c==5?1:0);
+            }
+            lighting_scalar_for_test(NV097_SET_MATERIAL_ALPHA,pass?.875f:.375f);
+            lighting_scalar_for_test(NV097_SET_BACK_MATERIAL_ALPHA,.375f);
+            if(pass && light==7 && mode==3 && source==2 && separate==1) {
+                FILE *saved=tmpfile();assert(saved && nv2a_save_checkpoint(saved));rewind(saved);
+                struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
+                pg->back_material_alpha=0;pg->back_material_sources=0;memset(pg->back_specular_params,0,sizeof pg->back_specular_params);
+                memset(pg->ltctxa[NV_IGRAPH_XF_LTCTXA_BR_AMB],0,16);memset(pg->ltctxa[NV_IGRAPH_XF_LTCTXA_BCM_COL],0,16);
+                for(unsigned product=0;product<3;product++)memset(pg->ltctxb[NV_IGRAPH_XF_LTCTXB_L0_BAMB+7*6+product],0,16);
+                void *loaded=nv2a_prepare_checkpoint(saved);assert(loaded);nv2a_apply_checkpoint(loaded);free(loaded);fclose(saved);
+            }
+            lighting_draw_for_test(pass?actual:expected);
+        }
+        assert(expected[0]!=0 && !memcmp(actual,expected,sizeof actual));
+    }
+    fprintf(stderr,"[FIXED TWO SIDED LIGHTING] independent back LT/material/source/alpha with reversed normals, local/directional/spot first/last lights and specular separation passed\n");
+}
+static void verify_fixed_specular_six(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT,0x1432);
+    method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT+3*4,0);method(NV097_SET_NORMALIZATION_ENABLE,0);
+    vertices(1.0f/16777215.0f);
+    for(unsigned row=0;row<16;row++){float v[4]={0};if(row<4 || row>=12)v[row%4]=1;if(row==11)v[3]=1;nv2a_vsh_set_constant(row,v);}
+    const float axis[4]={.8660254037844386f,0,.5f,1};
+    for(unsigned c=0;c<4;c++)lighting_scalar_for_test(NV097_SET_EYE_POSITION+c*4,axis[c]);
+    for(unsigned c=0;c<3;c++) {
+        lighting_scalar_for_test(NV097_SET_LIGHT_INFINITE_DIRECTION+c*4,axis[c]);
+        lighting_scalar_for_test(NV097_SET_LIGHT_INFINITE_HALF_VECTOR+c*4,axis[c]);
+        lighting_scalar_for_test(NV097_SET_LIGHT_LOCAL_POSITION+c*4,axis[c]);
+        lighting_scalar_for_test(NV097_SET_LIGHT_LOCAL_ATTENUATION+c*4,c==0?1:0);
+        lighting_scalar_for_test(NV097_SET_LIGHT_SPOT_DIRECTION+c*4,0);
+        lighting_scalar_for_test(NV097_SET_SCENE_AMBIENT_COLOR+c*4,0);lighting_scalar_for_test(NV097_SET_BACK_SCENE_AMBIENT_COLOR+c*4,0);
+        lighting_scalar_for_test(NV097_SET_MATERIAL_EMISSION+c*4,0);lighting_scalar_for_test(NV097_SET_BACK_MATERIAL_EMISSION+c*4,0);
+        for(unsigned product=0;product<3;product++) {
+            lighting_scalar_for_test(NV097_SET_LIGHT_AMBIENT_COLOR+product*12+c*4,product==2?1:0);
+            lighting_scalar_for_test(NV097_SET_BACK_LIGHT_AMBIENT_COLOR+product*12+c*4,product==2?1:0);
+        }
+        lighting_scalar_for_test(NV097_SET_VERTEX_DATA4F_M+4*16+c*4,0);
+    }
+    lighting_scalar_for_test(NV097_SET_LIGHT_LOCAL_RANGE,1000);lighting_scalar_for_test(NV097_SET_LIGHT_SPOT_DIRECTION+12,1);
+    lighting_scalar_for_test(NV097_SET_MATERIAL_ALPHA,1);lighting_scalar_for_test(NV097_SET_BACK_MATERIAL_ALPHA,1);
+    lighting_scalar_for_test(NV097_SET_VERTEX_DATA4F_M+3*16+12,1);
+    const float second[][4]={{0,0,1,.25f},{0,0,2,.125f},{.25f,0,1,.5f},{0,4,1,.125f}};
+    for(unsigned mode=1;mode<=3;mode++)for(unsigned local=0;local<2;local++)
+    for(unsigned face=0;face<2;face++)for(unsigned test=0;test<4;test++) {
+        uint32_t expected[64],actual[64];float result=mode==1 && !local?.5f:second[test][3];
+        method(NV097_SET_LIGHT_ENABLE_MASK,mode);method(NV097_SET_LIGHT_CONTROL,local?NV097_SET_LIGHT_CONTROL_LOCALEYE:0);
+        method(NV097_SET_COLOR_MATERIAL,0);
+        for(unsigned pass=0;pass<2;pass++) {
+            method(NV097_SET_LIGHTING_ENABLE,pass);method(NV097_SET_SPECULAR_ENABLE,pass);
+            method(NV097_SET_LIGHT_TWO_SIDE_ENABLE,pass && face);
+            method(NV097_SET_FRONT_FACE,pass && face?NV097_SET_FRONT_FACE_V_CCW:NV097_SET_FRONT_FACE_V_CW);
+            for(unsigned c=0;c<3;c++) {
+                lighting_scalar_for_test(NV097_SET_VERTEX_DATA4F_M+3*16+c*4,result);
+                lighting_scalar_for_test(NV097_SET_VERTEX_DATA4F_M+2*16+c*4,c==2?(face?-1:1):0);
+            }
+            for(unsigned side=0;side<2;side++)for(unsigned c=0;c<6;c++) {
+                float value=c==2?(side==face?1:2):c<3?0:side==face?second[test][c-3]:c==3?-1:c==5?1:0;
+                lighting_scalar_for_test((side?NV097_SET_SPECULAR_PARAMS_BACK:NV097_SET_SPECULAR_PARAMS)+c*4,value);
+            }
+            if(pass && mode==3 && local && face && test==2) {
+                FILE *saved=tmpfile();assert(saved && nv2a_save_checkpoint(saved));rewind(saved);
+                memset(nv2a_get_state()->pgraph.back_specular_params,0,24);
+                void *loaded=nv2a_prepare_checkpoint(saved);assert(loaded);nv2a_apply_checkpoint(loaded);free(loaded);fclose(saved);
+            }
+            lighting_draw_for_test(pass?actual:expected);
+        }
+        if(memcmp(actual,expected,sizeof actual))fprintf(stderr,"[SIX SPECULAR] mode=%u local=%u face=%u case=%u expected=%08x actual=%08x\n",mode,local,face,test,expected[0],actual[0]);
+        assert(!memcmp(actual,expected,sizeof actual));
+    }
+    fprintf(stderr,"[SIX SPECULAR] absolute A/B/C versus D/E/F mode and local-eye branches, both faces and restored back coefficients passed\n");
+}
+static void verify_fixed_material_products(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);
+    method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT,0x1432);
+    for(unsigned row=0;row<16;row++){float value[4]={0};value[row%4]=1;nv2a_vsh_set_constant(row,value);}
+    vertices(1.0f/16777215.0f);method(NV097_SET_LIGHT_ENABLE_MASK,1);method(NV097_SET_SPECULAR_ENABLE,0);
+    for(unsigned c=0;c<3;c++) {
+        lighting_scalar_for_test(NV097_SET_SCENE_AMBIENT_COLOR+c*4,.125f);lighting_scalar_for_test(NV097_SET_BACK_SCENE_AMBIENT_COLOR+c*4,.125f);
+        lighting_scalar_for_test(NV097_SET_MATERIAL_EMISSION+c*4,.25f);lighting_scalar_for_test(NV097_SET_BACK_MATERIAL_EMISSION+c*4,.25f);
+        lighting_scalar_for_test(NV097_SET_LIGHT_AMBIENT_COLOR+c*4,.125f);lighting_scalar_for_test(NV097_SET_BACK_LIGHT_AMBIENT_COLOR+c*4,.125f);
+        lighting_scalar_for_test(NV097_SET_LIGHT_DIFFUSE_COLOR+c*4,0);lighting_scalar_for_test(NV097_SET_BACK_LIGHT_DIFFUSE_COLOR+c*4,0);
+        lighting_scalar_for_test(NV097_SET_LIGHT_SPECULAR_COLOR+c*4,0);lighting_scalar_for_test(NV097_SET_BACK_LIGHT_SPECULAR_COLOR+c*4,0);
+    }
+    lighting_scalar_for_test(NV097_SET_MATERIAL_ALPHA,1);lighting_scalar_for_test(NV097_SET_BACK_MATERIAL_ALPHA,1);
+    lighting_scalar_for_test(NV097_SET_LIGHT_INFINITE_DIRECTION+8,1);lighting_scalar_for_test(NV097_SET_VERTEX_DATA4F_M+2*16+8,1);
+    /* Original scene-product and light-product results for emissive/ambient
+       material, vertex diffuse=.25, vertex specular=.5; scene=.125,
+       material factor=.25, light ambient=.125. */
+    const float result[3][3]={{.25f,.21875f,.3125f},{.3125f,.34375f,.4375f},{.375f,.59375f,.6875f}};
+    for(unsigned e=0;e<3;e++)for(unsigned a=0;a<3;a++)for(unsigned back=0;back<2;back++) {
+        uint32_t expected[64],actual[64];method(NV097_SET_LIGHTING_ENABLE,0);method(NV097_SET_LIGHT_TWO_SIDE_ENABLE,0);method(NV097_SET_FRONT_FACE,NV097_SET_FRONT_FACE_V_CW);
+        for(unsigned c=0;c<4;c++)lighting_scalar_for_test(NV097_SET_VERTEX_DATA4F_M+3*16+c*4,c==3?1:result[e][a]);
+        /* Use a disabled diffuse array so both reference and lighting inputs
+           come from the declared current vertex register. */
+        method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT+3*4,0);
+        lighting_draw_for_test(expected);
+        method(NV097_SET_LIGHTING_ENABLE,1);method(NV097_SET_LIGHT_TWO_SIDE_ENABLE,back);method(NV097_SET_FRONT_FACE,back?NV097_SET_FRONT_FACE_V_CCW:NV097_SET_FRONT_FACE_V_CW);
+        method(NV097_SET_COLOR_MATERIAL,(e|(a<<2))<<(back?8:0));
+        for(unsigned c=0;c<4;c++){lighting_scalar_for_test(NV097_SET_VERTEX_DATA4F_M+3*16+c*4,c==3?1:.25f);lighting_scalar_for_test(NV097_SET_VERTEX_DATA4F_M+4*16+c*4,c==3?1:.5f);}
+        lighting_draw_for_test(actual);assert(!memcmp(expected,actual,sizeof actual));
+    }
+    fprintf(stderr,"[FIXED MATERIAL PRODUCTS] all nine scene/emission/ambient bindings have independent absolute scalar outputs on both faces\n");
+}
+static void verify_fixed_skinning(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);
+    method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT,0x1432);
+    for(unsigned row=0;row<4;row++) {float value[4]={0};value[row]=1;nv2a_vsh_set_constant(row,value);}
+    skin_matrix_for_test(NV097_SET_PROJECTION_MATRIX,0,100,1);
+    const float input_weights[4]={0.25f,0.5f,0.75f,1.0f};
+    for(unsigned c=0;c<4;c++) {uint32_t bits;memcpy(&bits,input_weights+c,4);method(NV097_SET_VERTEX_DATA4F_M+16+c*4,bits);}
+    method(NV097_SET_VERTEX_DATA4F_M+2*16,0);method(NV097_SET_VERTEX_DATA4F_M+2*16+4,0);
+    method(NV097_SET_VERTEX_DATA4F_M+2*16+8,0x3f800000);method(NV097_SET_VERTEX_DATA4F_M+2*16+12,0);
+    method(NV097_SET_MATERIAL_ALPHA,0x3f800000);method(NV097_SET_LIGHT_ENABLE_MASK,1);
+    for(unsigned c=0;c<3;c++)method(NV097_SET_LIGHT_DIFFUSE_COLOR+c*4,0x3f800000);
+    method(NV097_SET_LIGHT_INFINITE_DIRECTION,0);method(NV097_SET_LIGHT_INFINITE_DIRECTION+4,0);method(NV097_SET_LIGHT_INFINITE_DIRECTION+8,0x3f800000);
+    for(unsigned mode=1;mode<=6;mode++) {
+        float total=0,weighted_x=0,weighted_normal=0,remaining=1;unsigned count=(mode+3)/2;
+        for(unsigned bone=0;bone<count;bone++) {
+            float weight=(mode&1) && bone==count-1?remaining:input_weights[bone];remaining-=weight;
+            total+=weight;weighted_x+=weight*bone*0.5f;weighted_normal+=weight*(bone+1)*0.125f;
+        }
+        for(unsigned lighting=0;lighting<2;lighting++) {
+            uint32_t reference[64];method(NV097_SET_LIGHTING_ENABLE,lighting);
+            for(unsigned active=0;active<2;active++) {
+                for(unsigned bone=0;bone<4;bone++) {
+                    skin_matrix_for_test(NV097_SET_MODEL_VIEW_MATRIX,bone,active?bone*0.5f:0,1);
+                    skin_matrix_for_test(NV097_SET_INVERSE_MODEL_VIEW_MATRIX,bone,0,active?(bone+1)*0.125f:weighted_normal);
+                }
+                struct {float x,y,z,w;uint32_t color;} data[3]={{0,0,1,1,0xffff0000},{6,0,1,1,0xffff0000},{0,6,1,1,0xffff0000}};
+                if(!active)for(unsigned v=0;v<3;v++)data[v].x+=weighted_x/total;
+                memcpy((void *)(xbox_GetMemoryOffset()+0x80040000u),data,sizeof data);
+                method(NV097_SET_SKIN_MODE,active?mode:0);method(NV097_CLEAR_SURFACE,0xf0);
+                method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+                const void *pixels=(const void *)(xbox_GetMemoryOffset()+s_gpu.color_base);
+                if(!active)memcpy(reference,pixels,sizeof reference);else assert(!memcmp(reference,pixels,sizeof reference));
+            }
+        }
+    }
+    fprintf(stderr,"[SKINNING] six modes, generated and explicit weights, four original matrix pairs, position and lit normal pixels passed\n");
+}
+static void verify_texture_addressing(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);
+    method(NV097_SET_CONTEXT_DMA_A,0x100);
+    const uint32_t texels[4]={0xff112233,0xff446688,0xff7799aa,0xffbbccdd};
+    memcpy((void *)(xbox_GetMemoryOffset()+0x80080000u),texels,sizeof texels);
+    method(NV097_SET_TEXTURE_OFFSET,0x80000);
+    method(NV097_SET_TEXTURE_FORMAT,(0x12<<8)|(1<<16));
+    method(NV097_SET_TEXTURE_CONTROL1,8<<16);
+    method(NV097_SET_TEXTURE_IMAGE_RECT,(2<<16)|2);
+    method(NV097_SET_TEXTURE_CONTROL0,NV_PGRAPH_TEXCTL0_0_ENABLE);
+    method(NV097_SET_TEXTURE_FILTER,0x01010000);
+    method(NV097_SET_SHADER_STAGE_PROGRAM,1);
+    method(NV097_SET_COMBINER_COLOR_ICW,0x08200000);method(NV097_SET_COMBINER_ALPHA_ICW,0x18200000);
+    method(NV097_SET_VERTEX_DATA_ARRAY_OFFSET+9*4,0x50000);
+    method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT+9*4,0x1042);
+    const int coords[]={-5,-2,-1,0,1,2,5};
+    const unsigned wrap[]={1,0,1,0,1,0,1},mirror[]={0,1,0,0,1,1,1},clamp[]={0,0,0,0,1,1,1},once[]={1,1,0,0,1,1,1};
+    const unsigned *indices[]={wrap,mirror,clamp,NULL,once};
+    for(unsigned mode=1;mode<=5;mode++) {
+        for(unsigned border=0;border<5;border++) {
+            const uint32_t colors[]={0,0xff000000,0xffffffff,0xff3399cc,0x7fbb6611};
+            method(NV097_SET_TEXTURE_ADDRESS,mode|(3<<8));
+            method(NV097_SET_TEXTURE_BORDER_COLOR,colors[border]);
+            for(unsigned i=0;i<7;i++) {
+                uint32_t expected=mode==4 && (coords[i]<0 || coords[i]>=2)?colors[border]:texels[mode==4?(unsigned)coords[i]:indices[mode-1][i]];
+                uint32_t sampled=0;assert(sample_tex(&s_gpu.texs[0],0,(uint32_t)coords[i],0,&sampled) && sampled==expected);
+                float coordinates[3][4];for(unsigned v=0;v<3;v++) {coordinates[v][0]=coords[i]+0.5f;coordinates[v][1]=0.5f;coordinates[v][2]=0;coordinates[v][3]=1;}
+                memcpy((void *)(xbox_GetMemoryOffset()+0x80050000u),coordinates,sizeof coordinates);
+                method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
+                nv2a_pb_checkpoint_publish();
+                assert(BRIDGE_MEM32(s_gpu.color_base)==expected);
+            }
+        }
+    }
+    fprintf(stderr,"[TEXTURE ADDRESS] signed taps, wrap/mirror/clamp/border/mirror-once and standing border updates passed\n");
+}
+struct RasterVertexForTest { float x,y,z,w;uint32_t color; };
+static void raster_vertices_for_test(const struct RasterVertexForTest *data,unsigned count) {
+    memcpy((void *)(xbox_GetMemoryOffset()+0x80040000u),data,count*sizeof *data);
+}
+static void raster_mode_for_test(unsigned front,unsigned back) {
+    const unsigned mode[]={0x1b02,0x1b00,0x1b01};
+    method(NV097_SET_FRONT_POLYGON_MODE,mode[front]);method(NV097_SET_BACK_POLYGON_MODE,mode[back]);
+}
+static void raster_draw_for_test(unsigned primitive,unsigned start,unsigned count) {
+    method(NV097_SET_BEGIN_END,primitive);method(NV097_DRAW_ARRAYS,start|((count-1)<<24));method(NV097_SET_BEGIN_END,0);
+}
+static void raster_pixels_for_test(uint32_t *pixels) {
+    nv2a_pb_checkpoint_publish();memcpy(pixels,(void *)(xbox_GetMemoryOffset()+s_gpu.color_base),64*64*4);
+}
+static float raster_depth_for_test(unsigned mode) {
+    if(!hw_enabled()){nv2a_pb_checkpoint_publish();return (float)(BRIDGE_MEM32(0x80060000u+(mode==0?16u:0u)*4)>>8);}
+    nv2a_pb_checkpoint_publish();FILE *dump=tmpfile();assert(dump && hw_save_depths(dump));rewind(dump);
+    uint32_t count;assert(fread(&count,4,1,dump)==1);
+    for(unsigned i=0;i<count;i++) {
+        HwDepthCheckpoint header;assert(fread(&header,sizeof header,1,dump)==1);
+        if(header.address==0x80060000u){float depth;if(mode==0)assert(!fseek(dump,(long)header.width*header.scale*header.scale*8,SEEK_CUR));assert(fread(&depth,4,1,dump)==1);fclose(dump);return depth*(float)header.normalization;}
+        assert(!fseek(dump,(long)header.bytes,SEEK_CUR));
+    }
+    fclose(dump);assert(!"actual depth surface missing");return -1;
+}
+static void verify_polygon_raster_consumers(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_DEPTH_MASK,0);
+    method(NV097_SET_SURFACE_PITCH,256|(256u<<16));method(NV097_SET_SURFACE_CLIP_HORIZONTAL,64<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,64<<16);
+    method(NV097_SET_CLEAR_RECT_HORIZONTAL,63<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,63<<16);
+    method(NV097_SET_WINDOW_CLIP_HORIZONTAL,63<<16);method(NV097_SET_WINDOW_CLIP_VERTICAL,63<<16);
+    method(NV097_SET_POINT_SIZE,8);method(NV097_SET_LINE_WIDTH,8);method(NV097_SET_EDGE_FLAG,1);method(NV097_SET_FRONT_FACE,0x900);
+    skin_matrix_for_test(NV097_SET_COMPOSITE_MATRIX,0,0,1);
+    uint32_t reference[64*64],actual[64*64];
+    for(unsigned route=0;route<2;route++) {
+        method(NV097_SET_TRANSFORM_EXECUTION_MODE,route?0:2);
+        struct RasterVertexForTest triangle[3]={{16,16,1,1,0xffff0000},{48,16,1,1,0xffff0000},{16,48,1,1,0xffff0000}};
+        raster_vertices_for_test(triangle,3);
+        /* Polygon points use the same point-size and generated coverage as points. */
+        for(unsigned size=1;size<=4;size++) {
+            method(NV097_SET_POINT_SIZE,size*8);raster_mode_for_test(0,0);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(1,0,3);raster_pixels_for_test(reference);
+            unsigned red=0;for(unsigned i=0;i<64*64;i++)red+=reference[i]==0xffff0000;if(red!=3*size*size)fprintf(stderr,"[POINT REFERENCE] route=%u size=%u red=%u\n",route,size,red);assert(red==3*size*size);
+            raster_mode_for_test(1,1);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(5,0,3);raster_pixels_for_test(actual);assert(!memcmp(reference,actual,sizeof actual));
+        }
+        method(NV097_SET_POINT_SIZE,8);
+        const uint32_t vertex_colors[]={0xffff0000,0xff00ff00,0xff0000ff};
+        for(unsigned first=0;first<2;first++)for(unsigned mode=1;mode<=2;mode++) {
+            method(NV097_SET_PROVOKING_VERTEX,first);method(NV097_SET_SHADE_MODE,0x1d00);
+            struct RasterVertexForTest uniform[6];unsigned n=mode==1?3:6;
+            for(unsigned i=0;i<n;i++){uniform[i]=triangle[mode==1?i:(i/2+i%2)%3];uniform[i].color=vertex_colors[first?0:2];}
+            raster_mode_for_test(0,0);raster_vertices_for_test(uniform,n);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(mode==1?1:2,0,n);raster_pixels_for_test(reference);
+            for(unsigned i=0;i<3;i++)triangle[i].color=vertex_colors[i];
+            raster_vertices_for_test(triangle,3);raster_mode_for_test(mode,mode);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(5,0,3);raster_pixels_for_test(actual);assert(!memcmp(reference,actual,sizeof actual));
+            for(unsigned i=0;i<3;i++)triangle[i].color=0xffff0000;
+        }
+        method(NV097_SET_PROVOKING_VERTEX,0);
+        /* Per-vertex boundary flags are captured by every original producer. */
+        for(unsigned producer=0;producer<4;producer++)for(unsigned point=0;point<2;point++)for(unsigned mask=0;mask<8;mask++) {
+            struct RasterVertexForTest segments[6];unsigned used=0;
+            for(unsigned i=0;i<3;i++)if(mask&(1u<<i)){segments[used++]=triangle[i];if(!point)segments[used++]=triangle[(i+1)%3];}
+            raster_mode_for_test(0,0);method(NV097_SET_EDGE_FLAG,1);method(NV097_CLEAR_SURFACE,0xf0);
+            if(used){raster_vertices_for_test(segments,used);raster_draw_for_test(point?1:2,0,used);}raster_pixels_for_test(reference);
+            raster_vertices_for_test(triangle,3);raster_mode_for_test(point?1:2,point?1:2);method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,5);
+            for(unsigned i=0;i<3;i++) {
+                method(NV097_SET_EDGE_FLAG,(mask>>i)&1);
+                if(producer==0)method(NV097_DRAW_ARRAYS,i);
+                else if(producer==1)method(NV097_ARRAY_ELEMENT32,i);
+                else if(producer==2)for(unsigned j=0;j<5;j++)method(NV097_INLINE_ARRAY,((uint32_t *)&triangle[i])[j]);
+                else {method(NV097_SET_VERTEX_DATA4UB+3*4,0xff0000ff);for(unsigned j=0;j<4;j++)method(NV097_SET_VERTEX4F+j*4,((uint32_t *)&triangle[i])[j]);}
+            }
+            method(NV097_SET_BEGIN_END,0);raster_pixels_for_test(actual);assert(!memcmp(reference,actual,sizeof actual));
+        }
+        method(NV097_SET_EDGE_FLAG,1);
+        /* Whole quads and polygon fans retain only their real boundary. */
+        struct RasterVertexForTest polygon[5]={{16,16,1,1,0xffff0000},{48,16,1,1,0xffff0000},{48,40,1,1,0xffff0000},{32,48,1,1,0xffff0000},{16,40,1,1,0xffff0000}};
+        for(unsigned count=4;count<=5;count++)for(unsigned point=0;point<2;point++) {
+            struct RasterVertexForTest segments[10];for(unsigned i=0;i<count;i++){segments[point?i:i*2]=polygon[i];if(!point)segments[i*2+1]=polygon[(i+1)%count];}
+            raster_mode_for_test(0,0);raster_vertices_for_test(segments,count*(point?1:2));method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(point?1:2,0,count*(point?1:2));raster_pixels_for_test(reference);
+            raster_vertices_for_test(polygon,count);raster_mode_for_test(point?1:2,point?1:2);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(count==4?8:10,0,count);raster_pixels_for_test(actual);assert(!memcmp(reference,actual,sizeof actual));
+        }
+        /* Polygon clipping precedes mode selection: clipping creates real
+         * boundary vertices/edges rather than merely trimming original lines. */
+        for(unsigned quad=0;quad<2;quad++)for(unsigned point=0;point<2;point++) {
+            const struct RasterVertexForTest clipped[5]={{0,16,1,1,0xffff0000},{48,16,1,1,0xffff0000},{24,64,1,1,0xffff0000},{8,64,1,1,0xffff0000},{0,48,1,1,0xffff0000}};
+            const struct RasterVertexForTest clipped_quad[4]={{0,16,1,1,0xffff0000},{48,16,1,1,0xffff0000},{48,64,1,1,0xffff0000},{0,64,1,1,0xffff0000}};
+            const struct RasterVertexForTest *boundary=quad?clipped_quad:clipped;unsigned count=quad?4:5;
+            struct RasterVertexForTest segments[10];for(unsigned i=0;i<count;i++){segments[point?i:i*2]=boundary[i];if(!point)segments[i*2+1]=boundary[(i+1)%count];}
+            raster_mode_for_test(0,0);raster_vertices_for_test(segments,count*(point?1:2));method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(point?1:2,0,count*(point?1:2));raster_pixels_for_test(reference);
+            struct RasterVertexForTest source[4]={{-16,16,1,1,0xffff0000},{48,16,1,1,0xffff0000},{16,80,1,1,0xffff0000},{-16,80,1,1,0xffff0000}};
+            if(quad)source[2].x=48;
+            raster_vertices_for_test(source,quad?4:3);raster_mode_for_test(point?1:2,point?1:2);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(quad?8:5,0,quad?4:3);raster_pixels_for_test(actual);assert(!memcmp(reference,actual,sizeof actual));
+        }
+        /* Reversing one overlapping primitive makes both faces visible.
+         * Sequential uniform draws establish the required original blend order. */
+        struct RasterVertexForTest overlap[6];for(unsigned i=0;i<3;i++){overlap[i]=triangle[i];overlap[i].color=0x80ff0000;overlap[3+i]=triangle[2-i];overlap[3+i].color=0x8000ff00;}
+        raster_vertices_for_test(overlap,6);method(NV097_SET_BLEND_ENABLE,1);method(NV097_SET_BLEND_FUNC_SFACTOR,0x302);method(NV097_SET_BLEND_FUNC_DFACTOR,0x303);
+        for(unsigned front=0;front<3;front++)for(unsigned back=0;back<3;back++) {
+            method(NV097_CLEAR_SURFACE,0xf0);raster_mode_for_test(front,front);raster_draw_for_test(5,0,3);raster_mode_for_test(back,back);raster_draw_for_test(5,3,3);raster_pixels_for_test(reference);
+            method(NV097_CLEAR_SURFACE,0xf0);raster_mode_for_test(front,back);raster_draw_for_test(5,0,6);raster_pixels_for_test(actual);assert(!memcmp(reference,actual,sizeof actual));
+        }
+        method(NV097_SET_BLEND_ENABLE,0);raster_mode_for_test(0,0);
+        /* Aliased width is nearest integer; the major axis selects contiguous
+         * native unit lines. Compare actual wide output with those original lines. */
+        const unsigned widths[]={0,1,4,7,8,9,11,12,16,24,56,504};
+        const float lines[][4]={{8,32,56,32},{32,8,32,56},{8,16,56,36},{16,8,36,56}};
+        for(unsigned line=0;line<4;line++)for(unsigned w=0;w<sizeof widths/sizeof *widths;w++) {
+            unsigned width=(widths[w]+4)/8;if(!width)width=1;
+            struct RasterVertexForTest copies[126];
+            for(unsigned j=0;j<width;j++)for(unsigned endpoint=0;endpoint<2;endpoint++) {
+                copies[j*2+endpoint]=(struct RasterVertexForTest){lines[line][endpoint*2],lines[line][endpoint*2+1],1,1,0xffff0000};
+                float offset=j-(width-1)*.5f;if(line==0 || line==2)copies[j*2+endpoint].y+=offset;else copies[j*2+endpoint].x+=offset;
+            }
+            raster_vertices_for_test(copies,width*2);method(NV097_SET_LINE_WIDTH,8);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(2,0,width*2);raster_pixels_for_test(reference);
+            struct RasterVertexForTest endpoints[2]={{lines[line][0],lines[line][1],1,1,0xffff0000},{lines[line][2],lines[line][3],1,1,0xffff0000}};
+            raster_vertices_for_test(endpoints,2);method(NV097_SET_LINE_WIDTH,widths[w]);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(2,0,2);raster_pixels_for_test(actual);assert(!memcmp(reference,actual,sizeof actual));
+        }
+        method(NV097_SET_LINE_WIDTH,8);
+    }
+    /* Point/line/fill offset enables follow the actual polygon mode;
+     * standalone point and line primitives inherit none of those offsets. */
+    method(NV097_SET_SURFACE_PITCH,32|(32u<<16));method(NV097_SET_SURFACE_CLIP_HORIZONTAL,8<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,8<<16);
+    method(NV097_SET_SURFACE_ZETA_OFFSET,0x60000);method(NV097_SET_CLEAR_RECT_HORIZONTAL,7<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,7<<16);
+    method(NV097_SET_DEPTH_TEST_ENABLE,1);method(NV097_SET_DEPTH_MASK,1);method(NV097_SET_DEPTH_FUNC,0x207);
+    method(NV097_SET_POLYGON_OFFSET_BIAS,0x40400000);method(NV097_SET_POLYGON_OFFSET_SCALE_FACTOR,0);
+    struct RasterVertexForTest depth_triangle[3]={{0,.5f,1,1,0xffff0000},{8,.5f,1,1,0xffff0000},{0,8,1,1,0xffff0000}};
+    raster_vertices_for_test(depth_triangle,3);
+    const unsigned offset_method[]={NV097_SET_POLY_OFFSET_FILL_ENABLE,NV097_SET_POLY_OFFSET_POINT_ENABLE,NV097_SET_POLY_OFFSET_LINE_ENABLE};
+    for(unsigned route=0;route<2;route++)for(unsigned mode=0;mode<3;mode++)for(unsigned enabled=0;enabled<3;enabled++) {
+        method(NV097_SET_TRANSFORM_EXECUTION_MODE,route?0:2);raster_mode_for_test(mode,mode);
+        for(unsigned i=0;i<3;i++)method(offset_method[i],i==enabled);
+        method(NV097_SET_ZSTENCIL_CLEAR_VALUE,(100<<8)|0xa5);method(NV097_CLEAR_SURFACE,0xf3);raster_draw_for_test(5,0,3);
+        float depth=raster_depth_for_test(mode);if(lroundf(depth)!=(mode==enabled?4:1))fprintf(stderr,"[OFFSET] route=%u mode=%u enabled=%u actual=%g\n",route,mode,enabled,depth);assert(lroundf(depth)==(mode==enabled?4:1));
+    }
+    for(unsigned primitive=1;primitive<=2;primitive++) {
+        for(unsigned i=0;i<3;i++)method(offset_method[i],1);
+        method(NV097_CLEAR_SURFACE,0xf3);raster_draw_for_test(primitive,0,primitive);float depth=raster_depth_for_test(primitive);assert(lroundf(depth)==1);
+    }
+    fprintf(stderr,"[POLYGON RASTER] point sizes, per-vertex boundaries, original quad/polygon edges, all mixed modes and ordered blending; aliased widths through63 on two vertex routes passed\n");
+}
+static void verify_polygon_stipple_consumers(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_DEPTH_MASK,0);
+    method(NV097_SET_SURFACE_PITCH,256);method(NV097_SET_SURFACE_CLIP_HORIZONTAL,64<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,64<<16);
+    method(NV097_SET_CLEAR_RECT_HORIZONTAL,63<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,63<<16);
+    method(NV097_SET_WINDOW_CLIP_HORIZONTAL,63<<16);method(NV097_SET_WINDOW_CLIP_VERTICAL,63<<16);
+    method(NV097_SET_POINT_SIZE,8);method(NV097_SET_LINE_WIDTH,8);
+    uint32_t reference[4096],actual[4096],pattern[32];
+    struct RasterVertexForTest quad[6]={{0,0,1,1,0xffff0000},{64,0,1,1,0xffff0000},{0,64,1,1,0xffff0000},{64,0,1,1,0xffff0000},{64,64,1,1,0xffff0000},{0,64,1,1,0xffff0000}};
+    raster_vertices_for_test(quad,6);
+    for(unsigned route=0;route<2;route++) {
+        method(NV097_SET_TRANSFORM_EXECUTION_MODE,route?0:2);
+        method(NV097_SET_POLYGON_STIPPLE_ENABLE,0);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(5,0,6);raster_pixels_for_test(reference);
+        for(unsigned kind=0;kind<5;kind++) {
+            for(unsigned row=0;row<32;row++) {
+                pattern[row]=kind==0?0:kind==1?~0u:kind==2?0xaaaaaaaa:kind==3?(row&4?0xf0f0f0f0:0x0f0f0f0f):(row<8?0xc0c0ffff:row<16?0x3030ffff:row<24?0x00008cef:0x0f000f0f);
+                method(NV097_SET_POLYGON_STIPPLE_PATTERN+row*4,pattern[row]);
+            }
+            method(NV097_SET_POLYGON_STIPPLE_ENABLE,1);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(5,0,6);raster_pixels_for_test(actual);
+            for(unsigned y=0;y<64;y++)for(unsigned x=0;x<64;x++){uint32_t expected=(pattern[31-(y&31)]&(1u<<((x&31)^7)))?reference[y*64+x]:s_gpu.clear_color;if(actual[y*64+x]!=expected)fprintf(stderr,"stipple mismatch route=%u kind=%u x=%u y=%u actual=%08x ref=%08x expected=%08x\n",route,kind,x,y,actual[y*64+x],reference[y*64+x],expected);assert(actual[y*64+x]==expected);}
+        }
+        /* Zero pattern affects filled polygons only; standing enable must not mask standalone points/lines. */
+        for(unsigned row=0;row<32;row++)method(NV097_SET_POLYGON_STIPPLE_PATTERN+row*4,0);
+        struct RasterVertexForTest line[2]={{8,8,1,1,0xffff0000},{56,48,1,1,0xffff0000}};raster_vertices_for_test(line,2);
+        for(unsigned prim=1;hw_enabled() && prim<=2;prim++) {
+            method(NV097_SET_POLYGON_STIPPLE_ENABLE,0);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(prim,0,2);raster_pixels_for_test(reference);
+            method(NV097_SET_POLYGON_STIPPLE_ENABLE,1);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(prim,0,2);raster_pixels_for_test(actual);assert(!memcmp(reference,actual,sizeof actual));
+        }
+        raster_vertices_for_test(quad,6);
+    }
+    method(NV097_SET_POLYGON_STIPPLE_ENABLE,0);
+    fprintf(stderr,"[POLYGON STIPPLE] 32-row pattern/enable, asymmetric hardware bit/row order, scale and standalone primitive isolation passed\n");
+}
+static void verify_polygon_point_params_consumers(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_DEPTH_MASK,0);
+    method(NV097_SET_SURFACE_PITCH,256|(256u<<16));method(NV097_SET_SURFACE_CLIP_HORIZONTAL,64<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,64<<16);
+    method(NV097_SET_CLEAR_RECT_HORIZONTAL,63<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,63<<16);
+    method(NV097_SET_WINDOW_CLIP_HORIZONTAL,63<<16);method(NV097_SET_WINDOW_CLIP_VERTICAL,63<<16);
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);method(NV097_SET_POINT_PARAMS_ENABLE,1);
+    skin_matrix_for_test(NV097_SET_COMPOSITE_MATRIX,0,0,1);
+    struct RasterVertexForTest triangle[3]={{12,12,1,1,0xffff0000},{48,12,1,1,0xffff0000},{12,48,1,1,0xffff0000}};raster_vertices_for_test(triangle,3);
+    uint32_t reference[4096],actual[4096];
+    for(unsigned kind=0;kind<3;kind++) {
+        float params[8]={1,kind==2?.01f:0,0,kind==0?2:6,0,0,0,1};
+        for(unsigned i=0;i<8;i++)polygon_offset_float(NV097_SET_POINT_PARAMS+i*4,params[i]);
+        raster_mode_for_test(0,0);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(1,0,3);raster_pixels_for_test(reference);
+        unsigned red=0;for(unsigned i=0;i<4096;i++)red+=reference[i]==0xffff0000;assert(red>3);
+        raster_mode_for_test(1,1);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(5,0,3);raster_pixels_for_test(actual);assert(!memcmp(reference,actual,sizeof actual));
+    }
+    fprintf(stderr,"[POLYGON POINT PARAMS] original fixed eye-distance/parameter size output matches standalone points\n");
+}
+static void verify_screen_output_packing_consumers(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_DEPTH_MASK,0);
+    method(NV097_SET_SURFACE_PITCH,256|(256u<<16));method(NV097_SET_SURFACE_CLIP_HORIZONTAL,64<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,64<<16);
+    method(NV097_SET_CLEAR_RECT_HORIZONTAL,63<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,63<<16);
+    method(NV097_SET_WINDOW_CLIP_HORIZONTAL,63<<16);method(NV097_SET_WINDOW_CLIP_VERTICAL,63<<16);
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);method(NV097_SET_POINT_SIZE,24);raster_mode_for_test(1,1);
+    skin_matrix_for_test(NV097_SET_COMPOSITE_MATRIX,0,0,1);
+    const float params[8]={1,0,0,2,0,0,0,1};for(unsigned i=0;i<8;i++)polygon_offset_float(NV097_SET_POINT_PARAMS+i*4,params[i]);
+    struct RasterVertexForTest triangle[3]={{12,12,1,1,0xffff0000},{48,12,1,1,0xffff0000},{12,48,1,1,0xffff0000}};raster_vertices_for_test(triangle,3);
+    const uint32_t texels[4]={0xffff0000,0xff00ff00,0xff0000ff,0xffffffff};memcpy((void *)(xbox_GetMemoryOffset()+0x80080000u),texels,sizeof texels);
+    method(NV097_SET_CONTEXT_DMA_A,0x100);method(NV097_SET_TEXTURE_OFFSET,0x80000);method(NV097_SET_TEXTURE_CONTROL0,NV_PGRAPH_TEXCTL0_0_ENABLE);
+    method(NV097_SET_TEXTURE_FORMAT,(6<<8)|(1<<16)|(1<<20)|(1<<24));method(NV097_SET_TEXTURE_ADDRESS,3|(3<<8));method(NV097_SET_TEXTURE_FILTER,0x01010000);
+    method(NV097_SET_SHADER_STAGE_PROGRAM,1);method(NV097_SET_COMBINER_COLOR_ICW,0x08200000);method(NV097_SET_COMBINER_ALPHA_ICW,0x18200000);
+    float coordinates[3][4]={{.75f,.25f,0,1},{.75f,.25f,0,1},{.75f,.25f,0,1}};memcpy((void *)(xbox_GetMemoryOffset()+0x80050000u),coordinates,sizeof coordinates);
+    method(NV097_SET_VERTEX_DATA_ARRAY_OFFSET+9*4,0x50000);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT+9*4,0x1042);
+    float fogs[3]={.25f,.25f,.25f};memcpy((void *)(xbox_GetMemoryOffset()+0x80051000u),fogs,sizeof fogs);
+    method(NV097_SET_VERTEX_DATA_ARRAY_OFFSET+5*4,0x51000);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT+5*4,0x0412);
+    method(NV097_SET_FOG_GEN_MODE,6);method(NV097_SET_FOG_MODE,0x804);method(NV097_SET_FOG_COLOR,0xffff0000);
+    polygon_offset_float(NV097_SET_FOG_PARAMS,1);polygon_offset_float(NV097_SET_FOG_PARAMS+4,1);
+    uint32_t reference[4096],actual[4096];
+    for(unsigned fog=0;fog<2;fog++) {
+        method(NV097_SET_FOG_ENABLE,fog);method(NV097_SET_POINT_PARAMS_ENABLE,1);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(5,0,3);raster_pixels_for_test(reference);
+        unsigned colored=0;for(unsigned i=0;i<4096;i++)colored+=reference[i]!=s_gpu.clear_color;assert(colored>0);
+        method(NV097_SET_POINT_PARAMS_ENABLE,0);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(5,0,3);raster_pixels_for_test(actual);assert(!memcmp(reference,actual,sizeof actual));
+    }
+    fprintf(stderr,"[SCREEN OUTPUT PACKING] original8-row rawvertexprotocol retains texture and fog across expanded interpreter output structs\n");
+}
+static void verify_software_point_consumers(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_CLEAR_RECT_HORIZONTAL,7<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,7<<16);method(NV097_SET_POINT_PARAMS_ENABLE,0);method(NV097_SET_POINT_SMOOTH_ENABLE,0);
+    skin_matrix_for_test(NV097_SET_COMPOSITE_MATRIX,0,0,1);
+    method(NV097_SET_CULL_FACE_ENABLE,1);method(NV097_SET_CULL_FACE,0x408);method(NV097_SET_LIGHT_TWO_SIDE_ENABLE,1);
+    method(NV097_SET_POLYGON_STIPPLE_ENABLE,1);for(unsigned row=0;row<32;row++)method(NV097_SET_POLYGON_STIPPLE_PATTERN+row*4,0);
+    method(NV097_SET_DEPTH_TEST_ENABLE,1);method(NV097_SET_DEPTH_MASK,1);method(NV097_SET_DEPTH_FUNC,0x207);
+    method(NV097_SET_STENCIL_TEST_ENABLE,1);method(NV097_SET_CONTROL0,NV097_SET_CONTROL0_STENCIL_WRITE_ENABLE);
+    method(NV097_SET_STENCIL_MASK,255);method(NV097_SET_STENCIL_FUNC,0x207);method(NV097_SET_STENCIL_FUNC_MASK,255);method(NV097_SET_STENCIL_OP_ZPASS,0x1e02);
+    method(NV097_SET_POLY_OFFSET_FILL_ENABLE,1);method(NV097_SET_POLY_OFFSET_POINT_ENABLE,1);polygon_offset_float(NV097_SET_POLYGON_OFFSET_BIAS,1000);
+    struct RasterVertexForTest point={4,4,1,1,0xffff0000};raster_vertices_for_test(&point,1);
+    const uint32_t color_instruction[4]={0,(1u<<21)|(3u<<9)|0x1b,2u<<26,(15u<<12)|(1u<<11)|(3u<<3)};
+    const uint32_t point_instruction[4]={0,(1u<<21)|(6u<<9)|0x1b,2u<<26,(15u<<12)|(1u<<11)|(6u<<3)|1};
+    nv2a_vsh_set_instruction(1,color_instruction);nv2a_vsh_set_instruction(2,point_instruction);
+    for(unsigned parameters=0;parameters<2;parameters++)for(unsigned route=0;route<2;route++)for(unsigned size=1;size<=6;size++) {
+        method(NV097_SET_TRANSFORM_EXECUTION_MODE,route?0:2);method(NV097_SET_POINT_SIZE,parameters?8:size*8);
+        method(NV097_SET_POINT_PARAMS_ENABLE,parameters);
+        const float params[8]={1,0,0,(float)size-1,0,0,0,1};for(unsigned i=0;i<8;i++)polygon_offset_float(NV097_SET_POINT_PARAMS+i*4,params[i]);
+        polygon_offset_float(NV097_SET_VERTEX_DATA4F_M+6*16,(float)size);
+        method(NV097_SET_ZSTENCIL_CLEAR_VALUE,(100<<8)|0xa5);method(NV097_CLEAR_SURFACE,0xf3);raster_draw_for_test(1,0,1);nv2a_pb_checkpoint_publish();
+        const uint32_t *colors=(const uint32_t *)(xbox_GetMemoryOffset()+s_gpu.color_base);
+        const uint32_t *depth=(const uint32_t *)(xbox_GetMemoryOffset()+0x80030000u);
+        unsigned begin=4-size/2,end=begin+size;
+        for(unsigned y=0;y<8;y++)for(unsigned x=0;x<8;x++) {
+            int inside=x>=begin && x<end && y>=begin && y<end;
+            if(colors[y*8+x]!=(inside?0xffff0000:s_gpu.clear_color))fprintf(stderr,"point mismatch route=%u size=%u xy=%u,%u actual=%08x expected=%08x\n",route,size,x,y,colors[y*8+x],inside?0xffff0000:s_gpu.clear_color);
+            assert(colors[y*8+x]==(inside?0xffff0000:s_gpu.clear_color));
+            assert(depth[y*8+x]==(inside?(1<<8)|0xa6:(100<<8)|0xa5));
+        }
+    }
+    method(NV097_SET_CULL_FACE_ENABLE,0);method(NV097_SET_LIGHT_TWO_SIDE_ENABLE,0);method(NV097_SET_POLYGON_STIPPLE_ENABLE,0);method(NV097_SET_POINT_PARAMS_ENABLE,0);
+    method(NV097_SET_STENCIL_TEST_ENABLE,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);
+    method(NV097_SET_POLY_OFFSET_FILL_ENABLE,0);method(NV097_SET_POLY_OFFSET_POINT_ENABLE,0);
+    /* Existing sprite consumer verifies four actual texture quadrants on fixed/program routes. */
+    verify_rectangle_point_sprite();
+    fprintf(stderr,"[SOFTWARE POINT] original square coverage, fixed/program routes, depth/stencil, cull/offset isolation and sprite sampling passed\n");
+}
+static void verify_point_setup_boundary(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_DEPTH_MASK,0);
+    method(NV097_SET_CLEAR_RECT_HORIZONTAL,7<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,7<<16);method(NV097_SET_POINT_SIZE,24);
+    struct RasterVertexForTest point={-.01f,4,1,1,0xffff0000};raster_vertices_for_test(&point,1);
+    method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(1,0,1);nv2a_pb_checkpoint_publish();
+    const uint32_t *pixels=(const uint32_t *)(xbox_GetMemoryOffset()+s_gpu.color_base);
+    for(unsigned y=0;y<8;y++)for(unsigned x=0;x<8;x++)assert(pixels[y*8+x]==(x<2 && y>=3 && y<6?0xffff0000:s_gpu.clear_color));
+    fprintf(stderr,"[POINT SETUP BOUNDARY] original setup truncation precedes point center clip\n");
+}
+static void verify_software_polygon_points(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_DEPTH_MASK,0);
+    method(NV097_SET_SURFACE_PITCH,256|(256u<<16));method(NV097_SET_SURFACE_CLIP_HORIZONTAL,64<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,64<<16);
+    method(NV097_SET_CLEAR_RECT_HORIZONTAL,63<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,63<<16);
+    method(NV097_SET_WINDOW_CLIP_HORIZONTAL,63<<16);method(NV097_SET_WINDOW_CLIP_VERTICAL,63<<16);
+    method(NV097_SET_POINT_PARAMS_ENABLE,0);method(NV097_SET_EDGE_FLAG,1);method(NV097_SET_FRONT_FACE,0x900);
+    skin_matrix_for_test(NV097_SET_COMPOSITE_MATRIX,0,0,1);
+    uint32_t reference[4096],actual[4096];
+    for(unsigned route=0;route<2;route++)for(unsigned size=1;size<=3;size+=2) {
+        method(NV097_SET_TRANSFORM_EXECUTION_MODE,route?0:2);method(NV097_SET_POINT_SIZE,size*8);
+        struct RasterVertexForTest triangle[3]={{16,16,1,1,0xffff0000},{48,16,1,1,0xffff0000},{16,48,1,1,0xffff0000}};
+        for(unsigned mask=0;mask<8;mask++) {
+            struct RasterVertexForTest points[3];unsigned n=0;for(unsigned i=0;i<3;i++)if(mask&(1u<<i))points[n++]=triangle[i];
+            method(NV097_CLEAR_SURFACE,0xf0);raster_mode_for_test(0,0);if(n){raster_vertices_for_test(points,n);raster_draw_for_test(1,0,n);}raster_pixels_for_test(reference);
+            raster_vertices_for_test(triangle,3);raster_mode_for_test(1,1);method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,5);
+            for(unsigned i=0;i<3;i++){method(NV097_SET_EDGE_FLAG,(mask>>i)&1);method(NV097_DRAW_ARRAYS,i);}
+            method(NV097_SET_BEGIN_END,0);raster_pixels_for_test(actual);assert(!memcmp(actual,reference,sizeof actual));
+        }
+        method(NV097_SET_EDGE_FLAG,1);
+        const struct RasterVertexForTest quad[4]={{16,16,1,1,0xffff0000},{48,16,1,1,0xffff0000},{48,48,1,1,0xffff0000},{16,48,1,1,0xffff0000}};
+        for(unsigned primitive=8;primitive<=10;primitive+=2) {
+            raster_vertices_for_test(quad,4);raster_mode_for_test(0,0);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(1,0,4);raster_pixels_for_test(reference);
+            raster_mode_for_test(1,1);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(primitive,0,4);raster_pixels_for_test(actual);assert(!memcmp(actual,reference,sizeof actual));
+        }
+        const struct RasterVertexForTest clip_source[3]={{-8,16,1,1,0xffff0000},{32,16,1,1,0xffff0000},{32,48,1,1,0xffff0000}};
+        const struct RasterVertexForTest clip_points[4]={{0,16,1,1,0xffff0000},{32,16,1,1,0xffff0000},{32,48,1,1,0xffff0000},{0,22.4f,1,1,0xffff0000}};
+        raster_vertices_for_test(clip_points,4);raster_mode_for_test(0,0);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(1,0,4);raster_pixels_for_test(reference);
+        raster_vertices_for_test(clip_source,3);raster_mode_for_test(1,1);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(5,0,3);raster_pixels_for_test(actual);assert(!memcmp(actual,reference,sizeof actual));
+        const float clip_scale[4]={1,1,1,0},clip_offset[4]={0,0,0,0};nv2a_vsh_set_constant(58,clip_scale);nv2a_vsh_set_constant(59,clip_offset);
+        const struct RasterVertexForTest w_source[3]={{0,0,1,-1,0xffff0000},{32,0,1,1,0xffff0000},{0,32,1,1,0xffff0000}};
+        const struct RasterVertexForTest w_points[5]={{64,0,1,1,0xffff0000},{32,0,1,1,0xffff0000},{0,32,1,1,0xffff0000},{0,64,1,1,0xffff0000},{64,64,1,1,0xffff0000}};
+        raster_vertices_for_test(w_points,5);raster_mode_for_test(0,0);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(1,0,5);raster_pixels_for_test(reference);
+        raster_vertices_for_test(w_source,3);raster_mode_for_test(1,1);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(5,0,3);raster_pixels_for_test(actual);assert(!memcmp(actual,reference,sizeof actual));
+        struct RasterVertexForTest mixed[6]={{16,16,1,1,0x80ff0000},{48,16,1,1,0x80ff0000},{16,48,1,1,0x80ff0000},{16,16,1,1,0x8000ff00},{16,48,1,1,0x8000ff00},{48,16,1,1,0x8000ff00}};
+        raster_vertices_for_test(mixed,6);method(NV097_SET_BLEND_ENABLE,1);method(NV097_SET_BLEND_FUNC_SFACTOR,0x302);method(NV097_SET_BLEND_FUNC_DFACTOR,0x303);
+        for(unsigned front=0;front<2;front++)for(unsigned back=0;back<2;back++) {
+            method(NV097_CLEAR_SURFACE,0xf0);raster_mode_for_test(front,front);raster_draw_for_test(5,0,3);raster_mode_for_test(back,back);raster_draw_for_test(5,3,3);raster_pixels_for_test(reference);
+            method(NV097_CLEAR_SURFACE,0xf0);raster_mode_for_test(front,back);raster_draw_for_test(5,0,6);raster_pixels_for_test(actual);assert(!memcmp(actual,reference,sizeof actual));
+        }
+        method(NV097_SET_BLEND_ENABLE,0);
+    }
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,2);raster_mode_for_test(1,1);method(NV097_SET_POINT_SIZE,8);
+    method(NV097_SET_SURFACE_ZETA_OFFSET,0x60000);method(NV097_SET_DEPTH_TEST_ENABLE,1);method(NV097_SET_DEPTH_MASK,1);method(NV097_SET_DEPTH_FUNC,0x207);
+    polygon_offset_float(NV097_SET_POLYGON_OFFSET_BIAS,3);polygon_offset_float(NV097_SET_POLYGON_OFFSET_SCALE_FACTOR,0);
+    struct RasterVertexForTest triangle[3]={{16,16,1,1,0xffff0000},{48,16,1,1,0xffff0000},{16,48,1,1,0xffff0000}};raster_vertices_for_test(triangle,3);
+    method(NV097_SET_POLYGON_STIPPLE_ENABLE,1);for(unsigned row=0;row<32;row++)method(NV097_SET_POLYGON_STIPPLE_PATTERN+row*4,0);
+    for(unsigned point=0;point<2;point++) {
+        method(NV097_SET_POLY_OFFSET_POINT_ENABLE,point);method(NV097_SET_POLY_OFFSET_FILL_ENABLE,!point);
+        method(NV097_SET_ZSTENCIL_CLEAR_VALUE,(100<<8)|0xa5);method(NV097_CLEAR_SURFACE,0xf3);raster_draw_for_test(5,0,3);nv2a_pb_checkpoint_publish();
+        uint32_t raw=BRIDGE_MEM32(0x80060000u+(16*64+16)*4);assert((raw>>8)==(point?4:1));assert(BRIDGE_MEM32(s_gpu.color_base+(16*64+16)*4)==0xffff0000);
+    }
+    fprintf(stderr,"[SOFTWARE POLYGON POINTS] boundary masks, whole quads/polygon fans, generated clipped points, mixed face order/blending, POINT offset and stipple isolation passed\n");
+}
+
+static void verify_legacy_texfog(unsigned entry) {
+    static const uint32_t methods[4][4]={{NV097_SET_TEXCOORD0_2F,NV097_SET_TEXCOORD0_4F,NV097_SET_TEXCOORD0_2S,NV097_SET_TEXCOORD0_4S},{NV097_SET_TEXCOORD1_2F,NV097_SET_TEXCOORD1_4F,NV097_SET_TEXCOORD1_2S,NV097_SET_TEXCOORD1_4S},{NV097_SET_TEXCOORD2_2F,NV097_SET_TEXCOORD2_4F,NV097_SET_TEXCOORD2_2S,NV097_SET_TEXCOORD2_4S},{NV097_SET_TEXCOORD3_2F,NV097_SET_TEXCOORD3_4F,NV097_SET_TEXCOORD3_2S,NV097_SET_TEXCOORD3_4S}};
+    assert(entry<17);unsigned kind=entry%4,attr=entry==16?5:9+entry/4,base=entry==16?NV097_SET_FOG_COORD:methods[entry/4][kind],words=entry==16?1:kind==0?2:kind==1?4:kind==2?1:2;
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_CLEAR_RECT_HORIZONTAL,7<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,7<<16);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_POINT_SIZE,32);
+    uint32_t ins[4]={0,(1u<<21)|(attr<<9)|0x1b,2u<<26,(15u<<12)|(1u<<11)|(3u<<3)|1};nv2a_vsh_set_instruction(1,ins);
+    method(NV097_SET_COMBINER_COLOR_ICW,0x04200000);method(NV097_SET_COMBINER_ALPHA_ICW,0x14200000);
+    const float values[4]={.25f,.5f,.75f,.125f},initial[4]={.9f,.8f,.7f,.2f};const uint32_t packed[2][2]={{0xffff0000u,0x00010002u},{0x7fff8000u,0x80017ffeu}};
+    for(unsigned sample=0;sample<2;sample++)for(unsigned partial=1;partial<=words;partial++) {
+        uint32_t reference[64],actual[64];float final[4];
+        for(unsigned legacy=0;legacy<2;legacy++) {
+            float expected[4];memcpy(expected,initial,sizeof expected);
+            for(unsigned c=0;c<4;c++){uint32_t bits;memcpy(&bits,&initial[c],4);method(NV097_SET_VERTEX_DATA4F_M+attr*16+c*4,bits);}
+            for(unsigned word=0;word<partial;word++) {
+                uint32_t param;float value=sample?1-values[word]:values[word];memcpy(&param,&value,4);
+                if(entry==16)for(unsigned c=0;c<4;c++)expected[c]=value;
+                else if(kind>=2){param=packed[sample][word];for(unsigned c=0;c<2;c++)expected[word*2+c]=(float)(int16_t)(param>>(16*c));if(kind==2){expected[2]=0;expected[3]=1;}}
+                else {expected[word]=value;if(kind==0){expected[2]=0;expected[3]=1;}}
+                if(legacy)method(base+word*4,param);
+                else for(unsigned c=0;c<4;c++){uint32_t bits;memcpy(&bits,&expected[c],4);method(NV097_SET_VERTEX_DATA4F_M+attr*16+c*4,bits);}
+                assert(s_gpu.imm_used&(1u<<attr));assert(!memcmp(s_gpu.imm_attr[attr],expected,sizeof expected));
+            }
+            memcpy(final,expected,sizeof final);method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,1);
+            const float position[3]={4,4,1};for(unsigned c=0;c<3;c++){uint32_t bits;memcpy(&bits,&position[c],4);method(NV097_SET_VERTEX3F+c*4,bits);}
+            method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();memcpy(legacy?actual:reference,(void *)(xbox_GetMemoryOffset()+s_gpu.color_base),sizeof actual);
+        }
+        assert(!memcmp(actual,reference,sizeof actual));unsigned covered=0;
+        for(unsigned i=0;i<64;i++)if(actual[i]!=s_gpu.clear_color){covered++;for(unsigned c=0;c<4;c++){unsigned expected=(unsigned)(fminf(1,fmaxf(0,final[c]))*255+.5f);int observed=(actual[i]>>(c==3?24:(2-c)*8))&255;assert(abs((int)expected-observed)<=1);if(expected==0||expected==255)assert(observed==expected);}}assert(covered);
+    }
+    fprintf(stderr,"[LEGACY TEXFOG] entry=%u method=%04X attr=%u passed\n",entry,base,attr);
+}
+
+static void verify_legacy_attribute_group(unsigned entry) {
+    static const uint32_t methods[]={NV097_SET_DIFFUSE_COLOR3F,NV097_SET_SPECULAR_COLOR4F,NV097_SET_SPECULAR_COLOR3F,NV097_SET_SPECULAR_COLOR4UB,NV097_SET_NORMAL3F,NV097_SET_WEIGHT1F,NV097_SET_WEIGHT2F,NV097_SET_WEIGHT3F,NV097_SET_WEIGHT4F,NV097_SET_NORMAL3S};
+    static const unsigned attrs[]={3,4,4,4,2,1,1,1,1,2},counts[]={3,4,3,1,3,1,2,3,4,2};
+    assert(entry<10);unsigned attr=attrs[entry];
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_CLEAR_RECT_HORIZONTAL,7<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,7<<16);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_POINT_SIZE,32);method(NV097_SET_SPECULAR_ENABLE,1);
+    uint32_t ins[4]={0,(1u<<21)|(attr<<9)|0x1b,2u<<26,(15u<<12)|(1u<<11)|((attr==4?4u:3u)<<3)|1};nv2a_vsh_set_instruction(1,ins);
+    method(NV097_SET_COMBINER_COLOR_ICW,attr==4?0x05200000:0x04200000);method(NV097_SET_COMBINER_ALPHA_ICW,attr==4?0x15200000:0x14200000);
+    const float values[4]={.25f,.5f,.75f,.125f},initial[4]={.9f,.8f,.7f,.2f};
+    const uint32_t packed[4][2]={{0x80008001u,0x7fff0000u},{0x4000c000u,0x20007fffu},{0x7fff8000u,0x80004000u},{0x4000c000u,0x00004000u}};
+    for(unsigned sample=0;sample<(entry==9?4u:1u);sample++) {
+        uint32_t reference[64],actual[64];float final[4];
+        for(unsigned legacy=0;legacy<2;legacy++) {
+            float expected[4];memcpy(expected,initial,sizeof expected);
+            for(unsigned c=0;c<4;c++){uint32_t bits;memcpy(&bits,&initial[c],4);method(NV097_SET_VERTEX_DATA4F_M+attr*16+c*4,bits);}
+            for(unsigned word=0;word<counts[entry];word++) {
+                uint32_t param;memcpy(&param,&values[word],4);
+                if(entry==3){param=0x80402010;for(unsigned c=0;c<4;c++)expected[c]=(float)((param>>(c*8))&255)/255;}
+                else if(entry==9){param=packed[sample][word];for(unsigned c=0;c<2;c++)expected[word*2+c]=fmaxf(-1,(float)(int16_t)(param>>(16*c))/32767.0f);}
+                else {expected[word]=values[word];if(entry==0||entry==2||entry==7)expected[3]=1;if(entry==5){expected[1]=0;expected[2]=0;expected[3]=1;}if(entry==6){expected[2]=0;expected[3]=1;}}
+                if(legacy)method(methods[entry]+word*4,param);
+                else for(unsigned c=0;c<4;c++){uint32_t bits;memcpy(&bits,&expected[c],4);method(NV097_SET_VERTEX_DATA4F_M+attr*16+c*4,bits);}
+                assert(s_gpu.imm_used&(1u<<attr));assert(!memcmp(s_gpu.imm_attr[attr],expected,sizeof expected));
+            }
+            memcpy(final,expected,sizeof final);
+            method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,1);
+            const float position[3]={4,4,1};for(unsigned c=0;c<3;c++){uint32_t bits;memcpy(&bits,&position[c],4);method(NV097_SET_VERTEX3F+c*4,bits);}
+            method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();memcpy(legacy?actual:reference,(void *)(xbox_GetMemoryOffset()+s_gpu.color_base),sizeof actual);
+        }
+        assert(!memcmp(actual,reference,sizeof actual));unsigned channels[4];for(unsigned c=0;c<4;c++)channels[c]=(unsigned)(fminf(1,fmaxf(0,final[c]))*255+.5f);
+        uint32_t argb=(channels[3]<<24)|(channels[0]<<16)|(channels[1]<<8)|channels[2];unsigned covered=0;
+        for(unsigned i=0;i<64;i++)if(actual[i]!=s_gpu.clear_color){covered++;for(unsigned c=0;c<4;c++){int expected=(argb>>(8*c))&255,observed=(actual[i]>>(8*c))&255;if(abs(expected-observed)>1 || ((expected==0||expected==255)&&observed!=expected))fprintf(stderr,"[LEGACY BYTE] entry=%u pixel=%u actual=%08x expected=%08x\n",entry,i,actual[i],argb);assert(abs(expected-observed)<=1);if(expected==0||expected==255)assert(observed==expected);}}assert(covered>0);
+        fprintf(stderr,"[LEGACY GROUP] entry=%u method=%04x attr=%u sample=%u ideal_argb=%08x actual=%08x covered=%u\n",entry,methods[entry],attr,sample,argb,actual[36],covered);
+    }
+}
+
+static void verify_legacy_diffuse_4ub_consumer(void) {
+    seed();method(NV097_SET_CLEAR_RECT_HORIZONTAL,7<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,7<<16);method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_POINT_SIZE,8);method(NV097_SET_LINE_WIDTH,8);
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,2);method(NV097_SET_SHADE_MODE,0x1d01);
+    const float positions[3][4]={{2,2,1,1},{6,2,1,1},{2,6,1,1}};const uint32_t colours[2]={0xff204080,0x80402010};uint32_t reference[64],actual[64];
+    for(unsigned prim=0;prim<3;prim++)for(unsigned colour=0;colour<2;colour++) {
+        unsigned primitive=prim==0?1:prim==1?2:5,count=prim+1;
+        for(unsigned legacy=0;legacy<2;legacy++) {
+            method(NV097_CLEAR_SURFACE,0xf0);method(NV097_SET_BEGIN_END,primitive);
+            for(unsigned i=0;i<count;i++) {
+                method(legacy?NV097_SET_DIFFUSE_COLOR4UB:NV097_SET_VERTEX_DATA4UB+3*4,colours[colour]);
+                for(unsigned c=0;c<4;c++){uint32_t bits;memcpy(&bits,&positions[i][c],4);method(NV097_SET_VERTEX4F+c*4,bits);}
+            }
+            method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();memcpy(legacy?actual:reference,(void *)(xbox_GetMemoryOffset()+s_gpu.color_base),sizeof reference);
+        }
+        assert(!memcmp(actual,reference,sizeof actual));unsigned covered=0;uint32_t c=colours[colour],argb=(c&0xff00ff00u)|((c&255u)<<16)|((c>>16)&255u);
+        for(unsigned i=0;i<64;i++)if(actual[i]!=s_gpu.clear_color){covered++;if(actual[i]!=argb)fprintf(stderr,"[LEGACY PIXEL] prim=%u colour=%u pixel=%u actual=%08x expected=%08x clear=%08x\n",primitive,colour,i,actual[i],argb,s_gpu.clear_color);assert(actual[i]==argb);}assert(covered>0);
+    }
+    fprintf(stderr,"[LEGACY DIFFUSE] original156C producer reaches existinggeneric4UB state and immediate point/line/triangle colours\n");
+}
+static void verify_constant_w_slope_consumers(unsigned reject,unsigned screen) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_SURFACE_PITCH,256|(256u<<16));method(NV097_SET_SURFACE_CLIP_HORIZONTAL,64<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,64<<16);
+    method(NV097_SET_CLEAR_RECT_HORIZONTAL,63<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,63<<16);method(NV097_SET_WINDOW_CLIP_HORIZONTAL,63<<16);method(NV097_SET_WINDOW_CLIP_VERTICAL,63<<16);
+    method(NV097_SET_SURFACE_ZETA_OFFSET,0x60000);method(NV097_SET_DEPTH_TEST_ENABLE,1);method(NV097_SET_DEPTH_MASK,1);method(NV097_SET_DEPTH_FUNC,0x207);method(NV097_SET_TRANSFORM_EXECUTION_MODE,screen?0:2);
+    method(NV097_SET_CONTROL0,NV097_SET_CONTROL0_Z_PERSPECTIVE_ENABLE);method(NV097_SET_LINE_WIDTH,16);method(NV097_SET_POINT_SIZE,24);
+    method(NV097_SET_POLY_OFFSET_POINT_ENABLE,1);method(NV097_SET_POLY_OFFSET_LINE_ENABLE,1);method(NV097_SET_POLY_OFFSET_FILL_ENABLE,1);polygon_offset_float(NV097_SET_POLYGON_OFFSET_BIAS,0);
+    const float w_values[]={1,16,325};uint32_t before[4096],after[4096];
+    for(unsigned k=0;k<3;k++)for(unsigned mode=0;mode<3;mode++) {
+        struct RasterVertexForTest triangle[3]={{8,8,40,w_values[k],0xffff0000},{48,8,120,w_values[k],0xffff0000},{8,48,160,w_values[k],0xffff0000}};
+        if(reject)triangle[2].w*=2;
+        raster_vertices_for_test(triangle,3);raster_mode_for_test(mode,mode);
+        for(unsigned factor=0;factor<3;factor++) {
+            polygon_offset_float(NV097_SET_POLYGON_OFFSET_SCALE_FACTOR,factor==0?0:factor==1?65536:-65536);
+            method(NV097_SET_ZSTENCIL_CLEAR_VALUE,1000<<8);method(NV097_CLEAR_SURFACE,0xf3);raster_draw_for_test(5,0,3);nv2a_pb_checkpoint_publish();
+            memcpy(factor?after:before,(void *)(xbox_GetMemoryOffset()+0x80060000u),sizeof before);
+            if(factor)assert(!memcmp(before,after,sizeof before));
+        }
+        unsigned covered=0;for(unsigned i=0;i<4096;i++)covered+=(before[i]>>8)!=1000;assert(covered>0);
+    }
+    if(!reject) {
+        /* An inactive FILL enable must not force W slope on POINT draws. */
+        method(NV097_SET_POLY_OFFSET_POINT_ENABLE,0);method(NV097_SET_POLY_OFFSET_LINE_ENABLE,0);raster_mode_for_test(1,1);
+        struct RasterVertexForTest varying[3]={{8,8,40,16,0xffff0000},{48,8,120,32,0xffff0000},{8,48,160,64,0xffff0000}};raster_vertices_for_test(varying,3);
+        for(unsigned factor=0;factor<2;factor++) {
+            polygon_offset_float(NV097_SET_POLYGON_OFFSET_SCALE_FACTOR,factor?65536:0);
+            method(NV097_SET_ZSTENCIL_CLEAR_VALUE,1000<<8);method(NV097_CLEAR_SURFACE,0xf3);raster_draw_for_test(5,0,3);nv2a_pb_checkpoint_publish();
+            memcpy(factor?after:before,(void *)(xbox_GetMemoryOffset()+0x80060000u),sizeof before);
+        }
+        assert(!memcmp(before,after,sizeof before));
+    }
+    assert(!reject);fprintf(stderr,"[CONSTANT W] finite original W plane has exactzero slope for FILL/POINT/LINE at factors±65536; nonconstant W remains explicit\n");
+}
+static void verify_smoothing_control_consumers(unsigned rejected) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);
+    method(NV097_SET_SURFACE_PITCH,256|(256u<<16));method(NV097_SET_SURFACE_CLIP_HORIZONTAL,64<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,64<<16);
+    method(NV097_SET_CLEAR_RECT_HORIZONTAL,63<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,63<<16);method(NV097_SET_WINDOW_CLIP_HORIZONTAL,63<<16);method(NV097_SET_WINDOW_CLIP_VERTICAL,63<<16);
+    if(rejected==2){method(NV097_SET_ANTI_ALIASING_CONTROL,0x00010001);assert(0);}
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,2);method(NV097_SET_LINE_WIDTH,16);method(NV097_SET_POINT_SIZE,24);
+    struct RasterVertexForTest vertices[3]={{8,8,1,1,0xffff0000},{48,16,1,1,0xffff0000},{16,48,1,1,0xffff0000}};raster_vertices_for_test(vertices,3);
+    uint32_t expected[4096],actual[4096];struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
+    for(unsigned primitive=0;primitive<4;primitive++) {
+        unsigned prim=primitive==0?1:primitive==1?2:5,count=primitive==0?1:primitive==1?2:3;
+        raster_mode_for_test(primitive==3?2:0,primitive==3?2:0);
+        method(NV097_SET_LINE_SMOOTH_ENABLE,0);method(NV097_SET_POLY_SMOOTH_ENABLE,0);method(NV097_SET_ANTI_ALIASING_CONTROL,0xffff0000);
+        method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(prim,0,count);raster_pixels_for_test(expected);
+        method(NV097_SET_LINE_SMOOTH_ENABLE,1);method(NV097_SET_POLY_SMOOTH_ENABLE,1);method(NV097_SET_ANTI_ALIASING_CONTROL,rejected?0xffff0000:0xffff0001);
+        assert((pg->regs[NV_PGRAPH_SETUPRASTER]&(NV_PGRAPH_SETUPRASTER_LINESMOOTHENABLE|NV_PGRAPH_SETUPRASTER_POLYSMOOTHENABLE))==(NV_PGRAPH_SETUPRASTER_LINESMOOTHENABLE|NV_PGRAPH_SETUPRASTER_POLYSMOOTHENABLE));
+        if(!rejected && primitive==0) {
+            FILE *saved=tmpfile();assert(saved && nv2a_save_checkpoint(saved));rewind(saved);
+            method(NV097_SET_ANTI_ALIASING_CONTROL,0);method(NV097_SET_LINE_SMOOTH_ENABLE,0);method(NV097_SET_POLY_SMOOTH_ENABLE,0);
+            void *loaded=nv2a_prepare_checkpoint(saved);assert(loaded);nv2a_apply_checkpoint(loaded);free(loaded);fclose(saved);
+            assert(pg->regs[NV_PGRAPH_ANTIALIASING]&NV_PGRAPH_ANTIALIASING_ENABLE);
+            assert(pg->regs[NV_PGRAPH_SETUPRASTER]&NV_PGRAPH_SETUPRASTER_LINESMOOTHENABLE);assert(pg->regs[NV_PGRAPH_SETUPRASTER]&NV_PGRAPH_SETUPRASTER_POLYSMOOTHENABLE);
+        }
+        method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(prim,0,count);raster_pixels_for_test(actual);assert(!memcmp(expected,actual,sizeof actual));
+    }
+    assert(!rejected);fprintf(stderr,"[SMOOTH CONTROL] original control1 masks LINE/POLY smooth in1x mode; state/checkpoint and aliased point/line/fill/wire output retained\n");
+}
+static void verify_software_polygon_line_slope(void) {
+    seed();method(NV097_SET_BEGIN_END,0);
+    method(NV097_SET_SURFACE_PITCH,256|(256u<<16));method(NV097_SET_SURFACE_CLIP_HORIZONTAL,64<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,64<<16);
+    method(NV097_SET_CLEAR_RECT_HORIZONTAL,63<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,63<<16);method(NV097_SET_WINDOW_CLIP_HORIZONTAL,63<<16);method(NV097_SET_WINDOW_CLIP_VERTICAL,63<<16);
+    method(NV097_SET_SURFACE_ZETA_OFFSET,0x60000);method(NV097_SET_DEPTH_TEST_ENABLE,1);method(NV097_SET_DEPTH_MASK,1);method(NV097_SET_DEPTH_FUNC,0x207);
+    method(NV097_SET_LINE_WIDTH,16);method(NV097_SET_TRANSFORM_EXECUTION_MODE,2);
+    method(NV097_SET_POLY_OFFSET_POINT_ENABLE,1);method(NV097_SET_POINT_SIZE,24);method(NV097_SET_POLY_OFFSET_LINE_ENABLE,1);method(NV097_SET_POLY_OFFSET_FILL_ENABLE,1);polygon_offset_float(NV097_SET_POLYGON_OFFSET_BIAS,0);
+    uint32_t before[4096],after[4096];
+    skin_matrix_for_test(NV097_SET_COMPOSITE_MATRIX,0,0,1);
+    for(unsigned route=0;route<3;route++)for(unsigned clipped=0;clipped<2;clipped++)for(unsigned sign=0;sign<2;sign++)for(unsigned reverse=0;reverse<2;reverse++)for(unsigned mode=0;mode<3;mode++) {
+        method(NV097_SET_TRANSFORM_EXECUTION_MODE,route==0?2:0);
+        method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT,route==2?0x1432:0x1442);
+        struct RasterVertexForTest triangle[3]={{8,8,40,1,0xffff0000},{48,8,120,1,0xffff0000},{8,48,160,1,0xffff0000}};
+        if(clipped){triangle[0]=(struct RasterVertexForTest){-8,8,8,1,0xffff0000};triangle[2]=(struct RasterVertexForTest){-8,64,176,1,0xffff0000};}
+        if(reverse){struct RasterVertexForTest t=triangle[1];triangle[1]=triangle[2];triangle[2]=t;}
+        raster_vertices_for_test(triangle,3);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT,route==2?0x1432:0x1442);raster_mode_for_test(mode==2?1:mode?2:0,mode==2?1:mode?2:0);
+        for(unsigned factor=0;factor<2;factor++) {
+            polygon_offset_float(NV097_SET_POLYGON_OFFSET_SCALE_FACTOR,factor?(sign?-2:2):0);
+            method(NV097_SET_ZSTENCIL_CLEAR_VALUE,1000<<8);method(NV097_CLEAR_SURFACE,0xf3);raster_draw_for_test(5,0,3);nv2a_pb_checkpoint_publish();
+            memcpy(factor?after:before,(void *)(xbox_GetMemoryOffset()+0x80060000u),sizeof before);
+        }
+        unsigned covered=0;
+        for(unsigned i=0;i<4096;i++) {
+            if(before[i]>>8==1000){assert(after[i]==before[i]);continue;}
+            covered++;if((int)(after[i]>>8)-(int)(before[i]>>8)!=(sign?-6:6))fprintf(stderr,"[LINE SLOPE] clip=%u mode=%u reverse=%u pixel=%u raw=%u ->%u expected delta%u\n",clipped,mode,reverse,i,before[i]>>8,after[i]>>8,sign?-6:6);
+            assert((int)(after[i]>>8)-(int)(before[i]>>8)==(sign?-6:6));
+        }
+        assert(covered>0);
+    }
+    fprintf(stderr,"[LINE SLOPE] original FILL plane factor reaches all polygon boundary lines, both orientations and wide copies\n");
+}
+static void dump_software_line_consumers(const char *path) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);
+    method(NV097_SET_SURFACE_PITCH,(256u<<16)|256u);method(NV097_SET_SURFACE_CLIP_HORIZONTAL,64u<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,64u<<16);
+    method(NV097_SET_CLEAR_RECT_HORIZONTAL,63<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,63<<16);
+    method(NV097_SET_WINDOW_CLIP_HORIZONTAL,63<<16);method(NV097_SET_WINDOW_CLIP_VERTICAL,63<<16);
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,2);raster_mode_for_test(0,0);
+    FILE *out=fopen(path,"wb");assert(out);uint32_t pixels[4096];
+    const float ends[][4]={{8,8,48,8},{8,8,8,48},{8,8,48,48},{8,48,48,8},{8.5f,8.5f,48.5f,24.5f},{8.5f,8.5f,24.5f,48.5f},{8,8,48,24},{8,8,24,48},{8.25f,8.75f,48.125f,25.625f}};
+    for(unsigned width=1;width<=5;width++)for(unsigned i=0;i<sizeof(ends)/sizeof(ends[0]);i++)for(unsigned reverse=0;reverse<2;reverse++) {
+        struct RasterVertexForTest line[2]={{ends[i][reverse?2:0],ends[i][reverse?3:1],1,1,0xffff0000},{ends[i][reverse?0:2],ends[i][reverse?1:3],1,1,0xffff0000}};
+        method(NV097_SET_LINE_WIDTH,width*8);raster_vertices_for_test(line,2);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(2,0,2);raster_pixels_for_test(pixels);assert(fwrite(pixels,sizeof pixels,1,out)==1);
+    }
+    method(NV097_SET_LINE_WIDTH,8);method(NV097_SET_SURFACE_ZETA_OFFSET,0x60000);
+    method(NV097_SET_DEPTH_TEST_ENABLE,1);method(NV097_SET_DEPTH_FUNC,0x207);method(NV097_SET_DEPTH_MASK,1);
+    method(NV097_SET_STENCIL_TEST_ENABLE,1);method(NV097_SET_CONTROL0,NV097_SET_CONTROL0_STENCIL_WRITE_ENABLE);
+    method(NV097_SET_STENCIL_MASK,255);method(NV097_SET_STENCIL_FUNC,0x207);method(NV097_SET_STENCIL_FUNC_MASK,255);method(NV097_SET_STENCIL_OP_ZPASS,0x1e02);
+    const uint32_t position[4]={0,(1u<<21)|0x1b,2u<<26,(15u<<12)|(1u<<11)};
+    const uint32_t color[4]={0,(1u<<21)|(3u<<9)|0x1b,2u<<26,(15u<<12)|(1u<<11)|(3u<<3)|1};
+    nv2a_vsh_set_instruction(0,position);nv2a_vsh_set_instruction(1,color);
+    for(unsigned program=0;program<2;program++)for(unsigned smooth=0;smooth<2;smooth++)for(unsigned reverse=0;reverse<2;reverse++) {
+        method(NV097_SET_TRANSFORM_EXECUTION_MODE,program?2:0);method(NV097_SET_SHADE_MODE,smooth?0x1d01:0x1d00);
+        struct RasterVertexForTest line[2]={{8.5f,8.5f,16,1,0xffff0000},{48.5f,28.5f,96,2,0xff0000ff}};
+        if(reverse){struct RasterVertexForTest t=line[0];line[0]=line[1];line[1]=t;}
+        raster_vertices_for_test(line,2);method(NV097_SET_ZSTENCIL_CLEAR_VALUE,(1000<<8)|0xa5);method(NV097_CLEAR_SURFACE,0xf3);raster_draw_for_test(2,0,2);raster_pixels_for_test(pixels);assert(fwrite(pixels,sizeof pixels,1,out)==1);
+        nv2a_pb_checkpoint_publish();assert(fwrite((void *)(xbox_GetMemoryOffset()+0x80060000u),sizeof pixels,1,out)==1);
+    }
+    fclose(out);
+}
+static void verify_short_primitive_submission(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);
+    method(NV097_SET_POINT_SIZE,8);
+    uint32_t reference[64];
+    struct {float x,y,z,w;uint32_t color;} data[2]={{2,2,1,1,0xffff0000},{6,2,1,1,0xffff0000}};
+    memcpy((void *)(xbox_GetMemoryOffset()+0x80040000u),data,sizeof data);
+    for(unsigned primitive=1;primitive<=2;primitive++) {
+        for(unsigned submit=0;submit<3;submit++) {
+            method(NV097_CLEAR_SURFACE,0xf0);
+            method(NV097_SET_BEGIN_END,primitive);
+            if(!submit) method(NV097_DRAW_ARRAYS,(primitive-1)<<24);
+            else if(submit==1) {
+                const uint32_t *words=(const uint32_t *)data;
+                for(unsigned i=0;i<primitive*5;i++) method(NV097_INLINE_ARRAY,words[i]);
+            } else {
+                for(unsigned i=0;i<primitive;i++) {
+                    float color[4]={1,0,0,1};
+                    for(unsigned c=0;c<4;c++) {uint32_t bits;memcpy(&bits,&color[c],4);method(NV097_SET_DIFFUSE_COLOR4F+c*4,bits);}
+                    for(unsigned c=0;c<4;c++) {uint32_t bits;memcpy(&bits,((float *)&data[i])+c,4);method(NV097_SET_VERTEX4F+c*4,bits);}
+                }
+            }
+            method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+            const uint32_t *pixels=(const uint32_t *)(xbox_GetMemoryOffset()+s_gpu.color_base);
+            if(!submit) {
+                memcpy(reference,pixels,sizeof reference);
+                unsigned red=0;for(unsigned i=0;i<64;i++)red+=pixels[i]==0xffff0000;
+                assert(red>0);
+            } else assert(!memcmp(reference,pixels,sizeof reference));
+        }
+    }
+    fprintf(stderr,"[SHORT PRIMITIVES] one point and two line vertices match array, inline and immediate output\n");
+}
+static void verify_subchannel_kelvin(void) {
+    seed();
+    for(unsigned channel=1;channel<8;channel++) {
+        pgraph_method(nv2a_get_state(),channel,NV_SET_OBJECT,0x200);
+        pgraph_method(nv2a_get_state(),channel,NV097_SET_COLOR_CLEAR_VALUE,0xff334455);
+        pgraph_method(nv2a_get_state(),channel,NV097_CLEAR_SURFACE,0xf3);
+        pgraph_method(nv2a_get_state(),channel,NV097_SET_DEPTH_TEST_ENABLE,0);
+        pgraph_method(nv2a_get_state(),channel,NV097_SET_TRANSFORM_CONSTANT_LOAD,21);
+        pgraph_method(nv2a_get_state(),channel,NV097_SET_TRANSFORM_CONSTANT,0x3f000000);
+        assert(nv2a_vsh_constant(21)[0]==0.5f);
+        vertices(0.25f);
+        pgraph_method(nv2a_get_state(),channel,NV097_SET_BEGIN_END,5);
+        pgraph_method(nv2a_get_state(),channel,NV097_DRAW_ARRAYS,2u<<24);
+        pgraph_method(nv2a_get_state(),channel,NV097_SET_BEGIN_END,0);
+        nv2a_pb_checkpoint_publish();
+        assert(BRIDGE_MEM32(s_gpu.color_base)==0xffff0000);
+    }
+    fprintf(stderr,"[SUBCHANNEL] all seven bound Kelvin contexts rendered and uploaded constants\n");
+}
+static void verify_depth_encodings(void) {
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_STENCIL_TEST_ENABLE,0);
+    method(NV097_SET_ZMIN_MAX_CONTROL,0x10);
+    for(unsigned format=1;format<=2;format++) {
+        method(NV097_SET_SURFACE_ZETA_OFFSET,0x60000+format*0x10000);
+        method(NV097_SET_SURFACE_FORMAT,8|(format<<4));
+        for(unsigned floating=0;floating<2;floating++)for(unsigned route=0;route<2;route++) {
+            unsigned control=floating?NV097_SET_CONTROL0_Z_FORMAT:0;
+            method(NV097_SET_CONTROL0,control);method(NV097_SET_TRANSFORM_EXECUTION_MODE,route*2);
+            polygon_offset_float(NV097_SET_CLIP_MAX,floating?(format==1?511.9375f:1e30f):(format==1?65535.0f:16777215.0f));
+            const float values[]={0,0.5f,1.0f,1.125f,1.375f,4.0f,511.9375f};
+            const unsigned f16[]={0,0x6000,0x7000,0x7200,0x7600,0x9000,0xffff};
+            const unsigned f24[]={0,0x7e0000,0x7f0000,0x7f2000,0x7f6000,0x810000,0x87fff0};
+            for(unsigned i=0;i<sizeof(values)/sizeof(*values);i++) {
+                unsigned encoded=floating?(format==1?f16[i]:f24[i]):(unsigned)values[i];
+                method(NV097_SET_ZSTENCIL_CLEAR_VALUE,format==1?encoded:encoded<<8);
+                method(NV097_CLEAR_SURFACE,NV097_CLEAR_SURFACE_Z|0xf0);
+                struct {float x,y,z,w;uint32_t color;} data[3]={
+                    {0,0,values[i],1,0xffff0000},{8,0,values[i],1,0xffff0000},{0,8,values[i],1,0xffff0000}};
+                memcpy((void *)(xbox_GetMemoryOffset()+0x80040000u),data,sizeof data);
+                /* Equality against a raw clear must work without relying on
+                 * round trips through the same shader conversion. */
+                method(NV097_SET_DEPTH_FUNC,0x202);
+                method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
+                float actual=polygon_offset_depth();
+                if(BRIDGE_MEM32(s_gpu.color_base)!=0xffff0000u || fabsf(actual-encoded)>1)
+                    fprintf(stderr,"depth encoding mismatch format=%u float=%u route=%u index=%u actual=%g encoded=%u colour=%08x\n",format,floating,route,i,actual,encoded,BRIDGE_MEM32(s_gpu.color_base));
+                assert(BRIDGE_MEM32(s_gpu.color_base)==0xffff0000u && fabsf(actual-encoded)<=1);
+            }
+            /* A mode switch reinterprets the existing bits without clearing;
+             * the encoded 1.125 value is the integer comparison reference. */
+            if(floating) {
+                unsigned code=format==1?0x7200:0x7f2000;
+                method(NV097_SET_ZSTENCIL_CLEAR_VALUE,format==1?code:code<<8);
+                method(NV097_CLEAR_SURFACE,NV097_CLEAR_SURFACE_Z|0xf0);
+                method(NV097_SET_CONTROL0,0);
+                polygon_offset_float(NV097_SET_CLIP_MAX,16777215.0f);
+                struct {float x,y,z,w;uint32_t color;} data[3]={
+                    {0,0,(float)code,1,0xffff0000},{8,0,(float)code,1,0xffff0000},{0,8,(float)code,1,0xffff0000}};
+                memcpy((void *)(xbox_GetMemoryOffset()+0x80040000u),data,sizeof data);
+                method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
+                polygon_offset_depth();assert(BRIDGE_MEM32(s_gpu.color_base)==0xffff0000u);
+            }
+            method(NV097_SET_CONTROL0,control|NV097_SET_CONTROL0_Z_PERSPECTIVE_ENABLE);
+            method(NV097_SET_DEPTH_FUNC,0x207);method(NV097_SET_POLY_OFFSET_FILL_ENABLE,1);
+            polygon_offset_float(NV097_SET_POLYGON_OFFSET_SCALE_FACTOR,0.0f);
+            polygon_offset_float(NV097_SET_POLYGON_OFFSET_BIAS,-0.5f);
+            struct {float x,y,z,w;uint32_t color;} data[3]={
+                {0,0,17,4,0xffff0000},{8,0,17,4,0xffff0000},{0,8,17,4,0xffff0000}};
+            memcpy((void *)(xbox_GetMemoryOffset()+0x80040000u),data,sizeof data);
+            method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
+            unsigned expected=floating?(format==1?0x8c00:0x80c000):3;
+            float actual=polygon_offset_depth();
+            if(fabsf(actual-expected)>1)fprintf(stderr,"W depth mismatch format=%u float=%u route=%u actual=%g expected=%u\n",format,floating,route,actual,expected);
+            assert(fabsf(actual-expected)<=1);
+            method(NV097_SET_POLY_OFFSET_FILL_ENABLE,0);
+        }
+    }
+    fprintf(stderr,"[DEPTH ENCODING] integer and floating depth, raw clears, equal comparisons, format reinterpretation, W depth, bias and both vertex routes passed\n");
+}
+static void verify_polygon_offset(void) {
+    seed();method(NV097_SET_BEGIN_END,0);
+    method(NV097_SET_DEPTH_FUNC,0x207);
+    method(NV097_SET_POLY_OFFSET_POINT_ENABLE,1);
+    method(NV097_SET_POLY_OFFSET_LINE_ENABLE,1);
+    for(unsigned format=1;format<=2;format++) {
+        method(NV097_SET_SURFACE_ZETA_OFFSET,0x60000+format*0x10000);
+        method(NV097_SET_SURFACE_FORMAT,8|(format<<4));
+        float base=format==1?4096.0f:4194304.0f,step=format==1?32.0f:65536.0f;
+        polygon_offset_float(NV097_SET_CLIP_MAX,format==1?65535.0f:16777215.0f);
+        for(unsigned route=0;route<2;route++) {
+            method(NV097_SET_TRANSFORM_EXECUTION_MODE,route*2);
+            struct {float x,y,z,w;uint32_t color;} data[3]={
+                {0,0,base,1,0xffff0000},{8,0,base+8*step,1,0xffff0000},{0,8,base+16*step,1,0xffff0000}};
+            memcpy((void *)(xbox_GetMemoryOffset()+0x80040000u),data,sizeof data);
+            const float factors[]={-4,2,0,-4,0};
+            const float biases[]={-16,32,16,-16,-2*base};
+            const unsigned enables[]={1,1,1,0,1};
+            for(unsigned i=0;i<5;i++) {
+                method(NV097_SET_ZMIN_MAX_CONTROL,0x10);
+                polygon_offset_float(NV097_SET_POLYGON_OFFSET_SCALE_FACTOR,factors[i]);
+                polygon_offset_float(NV097_SET_POLYGON_OFFSET_BIAS,biases[i]);
+                method(NV097_SET_POLY_OFFSET_FILL_ENABLE,enables[i]);
+                method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
+                float sample=0.5f/(hw_enabled()?d3d8_RenderScale():1);
+                float expected=base+3*step*sample;
+                if(enables[i])expected+=biases[i]+factors[i]*2*step;
+                expected=fmaxf(0,expected);
+                float actual=polygon_offset_depth();
+                if(fabsf(actual-expected)>2)fprintf(stderr,"offset mismatch format=%u route=%u case=%u actual=%g expected=%g\n",format,route,i,actual,expected);
+                assert(fabsf(actual-expected)<=2);
+            }
+            method(NV097_SET_ZMIN_MAX_CONTROL,0);
+            polygon_offset_float(NV097_SET_POLYGON_OFFSET_BIAS,-2*base);
+            method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
+            assert(polygon_offset_depth()==0);
+        }
+    }
+    fprintf(stderr,"[POLYGON OFFSET] original -4 factor, positive/negative bias, disable, independent mode flags, clipping range, both depth formats and vertex routes passed\n");
+}
+
 int main(int argc,char **argv) {
     assert(argc==6 || (argc==7 && !strncmp(argv[1],"fifo-worker",11) &&
         (!strcmp(argv[6],"partial") || !strcmp(argv[6],"complete"))));_putenv_s("RECOMP_GUEST_LOCK","1");_putenv_s("RECOMP_GPU_D3D11",argv[5]);
@@ -1791,12 +3539,98 @@ int main(int argc,char **argv) {
         verify_batch_boundary(argv[1]+9);
     } else if(!strncmp(argv[1],"large-",6)) {
         verify_large_batch(argv[1]+6);
+    } else if(!strcmp(argv[1],"normal-reflection-texgen")) {
+        verify_normal_reflection_texgen();
+    } else if(!strcmp(argv[1],"invalid-texgen-view")) {
+        method(NV097_SET_TEXGEN_VIEW_MODEL,2);assert(0);
+    } else if(!strcmp(argv[1],"blit-overlap-direction")) {
+        verify_blit_overlap_direction();
+    } else if(!strcmp(argv[1],"blit-exact-self-alias")) {
+        verify_blit_exact_self_alias();
+    } else if(!strncmp(argv[1],"blit-copy-and-",14)) {
+        verify_blit_copy_and(argv[1]);
+    } else if(!strncmp(argv[1],"blit-rop-",9)) {
+        verify_blit_rop(argv[1]);
+    } else if(!strncmp(argv[1],"m2mf-increment-",15)) {
+        verify_m2mf_increment_state(argv[1]);
+    } else if(!strncmp(argv[1],"m2mf-ordinary-",14)) {
+        verify_m2mf_ordinary(argv[1]);
+    } else if(!strcmp(argv[1],"m2mf-old-layout")) {
+        verify_m2mf_old_gpu_layout();
+    } else if(!strncmp(argv[1],"m2mf-",5)) {
+        verify_m2mf_copy(argv[1]);
     } else if(!strcmp(argv[1],"fixed-texgen")) {
         verify_fixed_texgen_route();
     } else if(!strcmp(argv[1],"vertex-reuse")) {
         verify_vertex_conversion_reuse(argv[3],argv[4]);
     } else if(!strcmp(argv[1],"clear-ownership")) {
         verify_clear_page_ownership();
+    } else if(!strcmp(argv[1],"colour-logic")) {
+        verify_colour_logic();
+    } else if(!strcmp(argv[1],"image-blit-copy")) {
+        verify_original_image_blit_copy();
+    } else if(!strcmp(argv[1],"software-polygon-points")) {
+        verify_software_polygon_points();
+    } else if(!strcmp(argv[1],"point-setup-boundary")) {
+        verify_point_setup_boundary();
+    } else if(!strncmp(argv[1],"legacy-attribute-",17)) {
+        verify_legacy_attribute_group((unsigned)strtoul(argv[1]+17,NULL,10));
+    } else if(!strncmp(argv[1],"legacy-texfog-",14)) {
+        verify_legacy_texfog((unsigned)strtoul(argv[1]+14,NULL,10));
+    } else if(!strcmp(argv[1],"legacy-diffuse-4ub")) {
+        verify_legacy_diffuse_4ub_consumer();
+    } else if(!strcmp(argv[1],"native-constant-w-slope")) {
+        verify_constant_w_slope_consumers(0,1);
+    } else if(!strncmp(argv[1],"constant-w-slope",16)) {
+        verify_constant_w_slope_consumers(!strcmp(argv[1],"constant-w-slope-reject"),0);
+    } else if(!strncmp(argv[1],"smoothing-control",17)) {
+        verify_smoothing_control_consumers(!strcmp(argv[1],"smoothing-control-active")?1:!strcmp(argv[1],"smoothing-control-mask")?2:0);
+    } else if(!strcmp(argv[1],"software-line-slope")) {
+        verify_software_polygon_line_slope();
+    } else if(!strcmp(argv[1],"software-lines")) {
+        dump_software_line_consumers(argv[3]);
+    } else if(!strcmp(argv[1],"software-points")) {
+        verify_software_point_consumers();
+    } else if(!strcmp(argv[1],"screen-output-packing")) {
+        verify_screen_output_packing_consumers();
+    } else if(!strcmp(argv[1],"polygon-point-params")) {
+        verify_polygon_point_params_consumers();
+    } else if(!strcmp(argv[1],"polygon-stipple")) {
+        verify_polygon_stipple_consumers();
+    } else if(!strcmp(argv[1],"polygon-raster")) {
+        verify_polygon_raster_consumers();
+    } else if(!strcmp(argv[1],"dependent-textures")) {
+        verify_dependent_texture_stages();
+    } else if(!strcmp(argv[1],"texture-color-keys")) {
+        verify_texture_color_keys();
+    } else if(!strcmp(argv[1],"resource-format-connections")) {
+        verify_existing_resource_format_connections();
+    } else if(!strcmp(argv[1],"rectangle-point-sprite")) {
+        verify_rectangle_point_sprite();
+    } else if(!strcmp(argv[1],"two-sided-colors")) {
+        verify_two_sided_vertex_colors();
+    } else if(!strcmp(argv[1],"fixed-lighting-coefficients")) {
+        verify_fixed_lighting_coefficients();
+    } else if(!strcmp(argv[1],"fixed-two-sided-lighting")) {
+        verify_fixed_two_sided_lighting();
+    } else if(!strcmp(argv[1],"fixed-specular-six")) {
+        verify_fixed_specular_six();
+    } else if(!strcmp(argv[1],"fixed-material-products")) {
+        verify_fixed_material_products();
+    } else if(!strcmp(argv[1],"fixed-skinning")) {
+        verify_fixed_skinning();
+    } else if(!strcmp(argv[1],"texture-addressing")) {
+        verify_texture_addressing();
+    } else if(!strcmp(argv[1],"short-primitives")) {
+        verify_short_primitive_submission();
+    } else if(!strcmp(argv[1],"subchannel-kelvin")) {
+        verify_subchannel_kelvin();
+    } else if(!strcmp(argv[1],"polygon-offset")) {
+        verify_polygon_offset();
+    } else if(!strcmp(argv[1],"stencil-operations")) {
+        verify_stencil_operations();
+    } else if(!strcmp(argv[1],"depth-encodings")) {
+        verify_depth_encodings();
     } else if(!strcmp(argv[1],"native-display")) {
         verify_native_finished_frame();
     } else if(!strcmp(argv[1],"vertex-payload")) {
@@ -1827,6 +3661,8 @@ int main(int argc,char **argv) {
         verify_swizzled_regions();
     } else if(!strcmp(argv[1],"clean-overlap")) {
         verify_clean_texture_overlap();
+    } else if(!strcmp(argv[1],"host-write-scope")) {
+        verify_host_write_scope(argv[4]);
     } else if(!strcmp(argv[1],"texture-reuse")) {
         verify_texture_content_reuse(argv[3],argv[4]);
     } else if(!strcmp(argv[1],"semaphore")) {
@@ -1871,7 +3707,13 @@ static HRESULT combiner_map_for_test(ID3D11DeviceContext *ctx,ID3D11Resource *re
 #undef ID3D11DeviceContext_Map
 #define ID3D11DeviceContext_Map combiner_map_for_test
 #include "d3d8_combiners.c"
+unsigned combiner_test_shader_count(void) { unsigned count=0;for(unsigned i=0;i<COMBINER_CACHE_SIZE;i++)count+=g_cache[i].in_use!=0;return count; }
 ''',encoding='utf-8')
+    depth_checks=(root/'tools/recomp/test_depth_coherence.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_software_depth.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_integer_shadow.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_luma16.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_tile_blit.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_bump.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_pair_texture.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_bump_luma_order.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_dot_stage.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_dot_cube.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_dot_reflection.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_dot_diffuse.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_dot_remap.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_dot_hilo.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_constant_eye.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_dot_str.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_volume_texture.c.inc').read_text(encoding='utf-8')+'\n'+(root/'tools/recomp/test_project3d_volume.c.inc').read_text(encoding='utf-8')
+    depth_checks+='\n'+(root/'tools/recomp/test_combiner_effective.c.inc').read_text(encoding='utf-8')
+    source=source.replace('int main(int argc,char **argv) {',depth_checks+'\nint main(int argc,char **argv) {')
+    source=source.replace('    if(!strncmp(argv[1],"fifo-worker",11)) {','    if(!strcmp(argv[1],"standing-volume-w")) { verify_standing_volume_w(); }\n    else if(!strncmp(argv[1],"volume-missing-palette-",23)) { verify_volume_missing_palette((unsigned)atoi(argv[1]+23)); }\n    else if(!strcmp(argv[1],"project3d-volume")) { verify_project3d_volume(); }\n    else if(!strcmp(argv[1],"volume-texture")) { verify_volume_texture(); }\n    else if(!strcmp(argv[1],"dot-str-texture")) { verify_dot_str_texture(); }\n    else if(!strcmp(argv[1],"constant-eye-texture")) { verify_constant_eye_texture(); }\n    else if(!strcmp(argv[1],"dot-hilo-texture")) { verify_dot_hilo_texture(); }\n    else if(!strcmp(argv[1],"dot-remap-texture")) { verify_dot_remap_texture(); }\n    else if(!strcmp(argv[1],"dot-diffuse-texture")) { verify_dot_diffuse_texture(); }\n    else if(!strcmp(argv[1],"dot-reflection-texture")) { verify_dot_reflection_texture(); }\n    else if(!strcmp(argv[1],"dot-cube-texture")) { verify_dot_cube_texture(); }\n    else if(!strcmp(argv[1],"dot-texture-stage")) { verify_dot_texture_stage(); }\n    else if(!strcmp(argv[1],"bump-luma-order")) { verify_bump_luma_order(); }\n    else if(!strcmp(argv[1],"pair-texture")) { verify_pair_texture(); }\n    else if(!strcmp(argv[1],"bump-texture")) { verify_bump_texture(); }\n    else if(!strcmp(argv[1],"tile-blit-guard")) { verify_tile_blit_guard(); }\n    else if(!strcmp(argv[1],"luma16-texture")) { verify_luma16_texture(); }\n    else if(!strcmp(argv[1],"integer-shadow-textures")) { verify_integer_shadow_textures(); }\n    else if(!strcmp(argv[1],"software-depth-ram")) { verify_software_depth_ram(); }\n    else if(!strcmp(argv[1],"depth-write-guards")) { verify_depth_write_guards(); }\n    else if(!strcmp(argv[1],"depth-ram-coherence")) { verify_depth_ram_coherence(); }\n    else if(!strncmp(argv[1],"fifo-worker",11)) {')
+    source=source.replace('    if(!strcmp(argv[1],"standing-volume-w")) {','    if(!strcmp(argv[1],"combiner-effective")) { verify_combiner_effective_key(); }\n    else if(!strcmp(argv[1],"standing-volume-w")) {')
     (work/'gpu.c').write_text(source,encoding='utf-8')
     (work/'resources_counted.c').write_text(r'''
 #include "d3d8_internal.h"
@@ -1898,6 +3740,8 @@ static HRESULT readback_map_for_test(ID3D11DeviceContext *context,ID3D11Resource
     result=subprocess.run([compiler,'/nologo','/O2','/Gy','/MD','/utf-8',
         '/DWIN32_LEAN_AND_MEAN','/DNOMINMAX','/D_CRT_SECURE_NO_WARNINGS','/D_USE_MATH_DEFINES',
         '/I'+str(root/'src'),'/I'+str(root/'src/kernel'),'/I'+str(root/'src/d3d'),str(work/'gpu.c'),str(work/'resources_counted.c'),str(work/'combiner_counted.c'),
+        str(root/'src/kernel/xbox_memory_layout.c'),str(root/'src/kernel/recomp_continuation.c'),
+        str(root/'src/kernel/kernel_hal.c'),str(root/'src/kernel/kernel_sync.c'),
         '/Fe:'+str(work/'gpu.exe'),'/link','/OPT:REF',*[str(p) for p in libraries],
         'kernel32.lib','user32.lib','gdi32.lib','advapi32.lib','ole32.lib','shell32.lib',
         'd3d11.lib','d3d12.lib','dxgi.lib','dxguid.lib','d3dcompiler.lib','winmm.lib','xaudio2_8.lib',
@@ -2222,3 +4066,479 @@ def test_clear_keeps_shared_page_and_unrelated_owners(native_gpu,tmp_path,backen
         capture_output=True,text=True,errors='replace',timeout=40)
     assert result.returncode==0,result.stdout+result.stderr
     assert '[CLEAR OWNERSHIP]' in result.stderr
+
+
+@pytest.mark.parametrize('hardware,backend,scale', [('0','D3D11',1)]+[
+    ('1',backend,scale) for backend in ('D3D11','D3D12','Vulkan','OpenGL') for scale in (1,2)])
+def test_polygon_offset_reaches_original_depth_consumer(native_gpu,tmp_path,hardware,backend,scale):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'polygon-offset',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[POLYGON OFFSET]' in result.stderr
+
+
+@pytest.mark.parametrize('hardware,backend,scale', [('0','D3D11',1)]+[
+    ('1',backend,scale) for backend in ('D3D11','D3D12','Vulkan','OpenGL') for scale in (1,2)])
+def test_stencil_operations_reach_existing_depth_consumer(native_gpu,tmp_path,hardware,backend,scale):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'stencil-operations',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=90)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[STENCIL]' in result.stderr
+
+
+@pytest.mark.parametrize('hardware,backend,scale', [('0','D3D11',1)]+[
+    ('1',backend,scale) for backend in ('D3D11','D3D12','Vulkan','OpenGL') for scale in (1,2)])
+def test_depth_encodings_match_raw_clear_and_original_comparison(native_gpu,tmp_path,hardware,backend,scale):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'depth-encodings',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=90)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[DEPTH ENCODING]' in result.stderr
+
+
+@pytest.mark.parametrize('hardware,backend,scale', [('0','D3D11',1)]+[
+    ('1',backend,scale) for backend in ('D3D11','D3D12','Vulkan','OpenGL') for scale in (1,2)])
+def test_colour_logic_operations_and_output_state_transitions(native_gpu,tmp_path,hardware,backend,scale):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'colour-logic',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=90)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[COLOUR LOGIC]' in result.stderr
+
+@pytest.mark.parametrize('hardware,backend', [('0','D3D11'),('1','D3D11'),('1','Vulkan'),('1','OpenGL')])
+def test_bound_kelvin_on_all_nonzero_subchannels(native_gpu,tmp_path,hardware,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'subchannel-kelvin',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=30)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[SUBCHANNEL]' in result.stderr
+
+@pytest.mark.parametrize('backend', ['D3D11','D3D12','Vulkan','OpenGL'])
+def test_single_point_and_two_vertex_line_submission(native_gpu,tmp_path,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'short-primitives',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=30)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[SHORT PRIMITIVES]' in result.stderr
+
+@pytest.mark.parametrize('hardware,backend', [('0','D3D11'),('1','D3D11'),('1','D3D12'),('1','Vulkan'),('1','OpenGL')])
+def test_texture_address_modes_and_border_updates(native_gpu,tmp_path,hardware,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'texture-addressing',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[TEXTURE ADDRESS]' in result.stderr
+
+@pytest.mark.parametrize('backend', ['D3D11','D3D12','Vulkan','OpenGL'])
+def test_fixed_skinning_uses_original_matrices_and_weights(native_gpu,tmp_path,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'fixed-skinning',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[SKINNING]' in result.stderr
+
+@pytest.mark.parametrize('backend', ['D3D11','D3D12','Vulkan','OpenGL'])
+def test_fixed_spot_and_specular_rational_coefficients(native_gpu,tmp_path,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'fixed-lighting-coefficients',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[LIGHTING COEFFICIENTS]' in result.stderr
+
+@pytest.mark.parametrize('backend', ['D3D11','D3D12','Vulkan','OpenGL'])
+def test_two_sided_program_and_unlit_fixed_vertex_colors(native_gpu,tmp_path,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'two-sided-colors',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[TWO SIDED COLORS]' in result.stderr
+
+@pytest.mark.parametrize('backend', ['D3D11','D3D12','Vulkan','OpenGL'])
+def test_rectangle_point_sprite_reuses_native_uv_generation(native_gpu,tmp_path,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'rectangle-point-sprite',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[RECTANGLE SPRITE]' in result.stderr
+
+@pytest.mark.parametrize('hardware,backend', [('0','D3D11'),('1','D3D11'),('1','D3D12'),('1','Vulkan'),('1','OpenGL')])
+def test_missing_formats_reuse_existing_resource_conversion(native_gpu,tmp_path,hardware,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'resource-format-connections',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[RESOURCE FORMATS]' in result.stderr
+
+@pytest.mark.parametrize('hardware,backend', [('0','D3D11'),('1','D3D11'),('1','D3D12'),('1','Vulkan'),('1','OpenGL')])
+def test_texture_color_keys_reach_original_fragment_consumers(native_gpu,tmp_path,hardware,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'texture-color-keys',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[COLOR KEYS]' in result.stderr
+
+@pytest.mark.parametrize('hardware,backend', [('0','D3D11'),('1','D3D11'),('1','D3D12'),('1','Vulkan'),('1','OpenGL')])
+def test_bound_image_blit_copy_uses_original_dma_and_memory_ownership(native_gpu,tmp_path,hardware,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'image-blit-copy',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[IMAGE BLIT]' in result.stderr
+
+@pytest.mark.parametrize('hardware,backend', [('0','D3D11'),('1','D3D11'),('1','D3D12'),('1','Vulkan'),('1','OpenGL')])
+def test_dependent_textures_use_original_earlier_stage_outputs(native_gpu,tmp_path,hardware,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'dependent-textures',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[DEPENDENT TEXTURES]' in result.stderr
+
+
+@pytest.mark.parametrize('backend', ['D3D11','D3D12','Vulkan','OpenGL'])
+def test_fixed_two_sided_material_lighting_consumes_original_back_state(native_gpu,tmp_path,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'fixed-two-sided-lighting',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[FIXED TWO SIDED LIGHTING]' in result.stderr
+
+@pytest.mark.parametrize('backend', ['D3D11','D3D12','Vulkan','OpenGL'])
+@pytest.mark.parametrize('scale', [1,2])
+def test_polygon_modes_edges_and_width_use_original_raster_consumers(native_gpu,tmp_path,backend,scale):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'polygon-raster',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=90)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[POLYGON RASTER]' in result.stderr
+
+
+@pytest.mark.parametrize('mode',['two-sided-colors','fixed-two-sided-lighting','fixed-skinning'])
+def test_software_original_vertex_back_outputs_and_fixed_skinning(native_gpu,tmp_path,mode):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),mode,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1'},capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+
+@pytest.mark.parametrize('hardware,backend',[('0','D3D11'),('1','D3D11'),('1','D3D12'),('1','Vulkan'),('1','OpenGL')])
+def test_original_fixed_material_scene_and_light_products(native_gpu,tmp_path,hardware,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'fixed-material-products',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[FIXED MATERIAL PRODUCTS]' in result.stderr
+
+@pytest.mark.parametrize('hardware,backend,scale', [('0','D3D11',1),('1','D3D11',1),('1','Vulkan',2)])
+def test_polygon_stipple_uses_original_fragment_consumers(native_gpu,tmp_path,hardware,backend,scale):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'polygon-stipple',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=90)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[POLYGON STIPPLE]' in result.stderr
+
+@pytest.mark.parametrize('backend,scale', [('D3D11',1),('Vulkan',2)])
+def test_polygon_point_params_use_original_fixed_vertex_output(native_gpu,tmp_path,backend,scale):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'polygon-point-params',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[POLYGON POINT PARAMS]' in result.stderr
+
+@pytest.mark.parametrize('backend,scale', [('D3D11',1),('Vulkan',2)])
+def test_screen_output_packing_retains_original_texture_and_fog(native_gpu,tmp_path,backend,scale):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'screen-output-packing',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[SCREEN OUTPUT PACKING]' in result.stderr
+
+@pytest.mark.parametrize('hardware', ['0','1'])
+def test_software_points_reuse_original_fragment_and_vertex_consumers(native_gpu,tmp_path,hardware):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'software-points',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[SOFTWARE POINT]' in result.stderr
+
+@pytest.mark.parametrize('hardware', ['0','1'])
+def test_point_setup_rounding_precedes_center_clip(native_gpu,tmp_path,hardware):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'point-setup-boundary',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[POINT SETUP BOUNDARY]' in result.stderr
+
+
+@pytest.mark.parametrize('hardware,backend',[('0','D3D11'),('1','D3D11'),('1','D3D12'),('1','Vulkan'),('1','OpenGL')])
+def test_original_six_specular_coefficients_follow_light_and_eye_mode(native_gpu,tmp_path,hardware,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'fixed-specular-six',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[SIX SPECULAR]' in result.stderr
+
+@pytest.mark.parametrize('hardware', ['0','1'])
+def test_software_polygon_points_share_original_fragment_consumers(native_gpu,tmp_path,hardware):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'software-polygon-points',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=90)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[SOFTWARE POLYGON POINTS]' in result.stderr
+
+def test_software_polygon_point_params_use_original_fixed_output(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'polygon-point-params',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1'},capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[POLYGON POINT PARAMS]' in result.stderr
+
+@pytest.mark.parametrize('backend',['D3D11','Vulkan'])
+@pytest.mark.parametrize('hardware',[0,1])
+def test_original_normal_reflection_texgen(native_gpu,tmp_path,backend,hardware):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'normal-reflection-texgen',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),str(hardware)],env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},capture_output=True,text=True,errors='replace',timeout=45)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[NORMAL REFLECTION TEXGEN] 192' in result.stderr
+
+def test_original_texgen_view_rejects_invalid(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'invalid-texgen-view',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],capture_output=True,text=True,errors='replace',timeout=30)
+    assert result.returncode==5,result.stdout+result.stderr
+    assert 'method=0x09cc parameter=0x00000002' in result.stderr.lower()
+
+
+def test_software_aliased_lines_match_native_fragment_coverage(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    outputs=[]
+    for hardware in ['1','0']:
+        path=tmp_path/('line-'+hardware+'.bin')
+        result=subprocess.run([str(executable),'software-lines',str(xbe),str(path),str(tmp_path/'memory.state'),hardware],
+            env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},
+            capture_output=True,text=True,errors='replace',timeout=60)
+        assert result.returncode==0,result.stdout+result.stderr
+        outputs.append(path.read_bytes())
+    if outputs[0]!=outputs[1]:
+        import struct
+        native=struct.unpack('<'+'I'*(len(outputs[0])//4),outputs[0]);software=struct.unpack('<'+'I'*(len(outputs[1])//4),outputs[1])
+        mismatch=[(i//4096,(i%4096)%64,(i%4096)//64,hex(a),hex(b)) for i,(a,b) in enumerate(zip(native,software)) if a!=b]
+        # Existing software color packing rounds floating point channels;
+        # native UNORM can differ by one byte at an interpolation half tie.
+        # Coverage/alpha and all raw depth/stencil bytes remain exact.
+        failures=[]
+        for i,(a,b) in enumerate(zip(native,software)):
+            case=i//4096
+            color=case>=90 and (case-90)%2==0
+            if a!=b and not (color and a>>24==b>>24 and all(abs(((a>>shift)&255)-((b>>shift)&255))<=1 for shift in (0,8,16))):
+                failures.append((case,(i%4096)%64,(i%4096)//64,hex(a),hex(b)))
+        assert not failures, str(failures[:40])+' total='+str(len(failures))
+
+
+def test_software_polygon_lines_use_original_boundary_fragment_consumer(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'polygon-raster',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1'},capture_output=True,text=True,errors='replace',timeout=90)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[POLYGON RASTER]' in result.stderr
+
+
+def test_software_polygon_line_slope_uses_original_fill_plane(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'software-line-slope',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1'},capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[LINE SLOPE]' in result.stderr
+
+@pytest.mark.parametrize('mode',['copy','format','awaken','overlap'])
+def test_original_m2mf_operational_subset(native_gpu,tmp_path,mode):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'m2mf-'+mode,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],capture_output=True,text=True,errors='replace',timeout=30)
+    if mode=='copy':
+        assert result.returncode==0,result.stdout+result.stderr
+        assert '[M2MF COPY]' in result.stderr
+    else:
+        assert result.returncode==5,result.stdout+result.stderr
+        assert '[STOP]' in result.stderr
+
+def test_original_m2mf_old_gpu_layout_rejected_before_apply(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'m2mf-old-layout',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],capture_output=True,text=True,errors='replace',timeout=30)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[M2MF OLD GPU LAYOUT]' in result.stderr
+
+
+@pytest.mark.parametrize('backend,scale',[('D3D11',1),('D3D11',2),('D3D12',1),('Vulkan',1),('OpenGL',1)])
+def test_native_polygon_line_slope_uses_original_fill_plane(native_gpu,tmp_path,backend,scale):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'software-line-slope',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},capture_output=True,text=True,errors='replace',timeout=90)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[LINE SLOPE]' in result.stderr
+
+@pytest.mark.parametrize('mode',['copy','parameter','double','dma','bind','subchannel','negative-pitch'])
+def test_original_m2mf_ordinary_notification(native_gpu,tmp_path,mode):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'m2mf-ordinary-'+mode,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],capture_output=True,text=True,errors='replace',timeout=30)
+    if mode=='copy':
+        assert result.returncode==0,result.stdout+result.stderr
+        assert '[M2MF ORDINARY]' in result.stderr
+    else:
+        assert result.returncode==5,result.stdout+result.stderr
+        assert '[STOP]' in result.stderr
+
+@pytest.mark.parametrize('mode',['legal','zero','three','reserved-low','reserved-high','bit11'])
+def test_original_m2mf_increment_setup_contract(native_gpu,tmp_path,mode):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'m2mf-increment-'+mode,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],capture_output=True,text=True,errors='replace',timeout=30)
+    if mode=='legal':
+        assert result.returncode==0,result.stdout+result.stderr
+        assert '[M2MF INCREMENT STATE]' in result.stderr
+    else:
+        assert result.returncode==5,result.stdout+result.stderr
+        assert 'method=0x0324' in result.stderr
+
+
+@pytest.mark.parametrize('hardware,backend',[('0','D3D11'),('1','D3D11'),('1','Vulkan')])
+def test_original_smoothing_control1_disables_smooth_consumers(native_gpu,tmp_path,hardware,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'smoothing-control',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[SMOOTH CONTROL]' in result.stderr
+
+@pytest.mark.parametrize('mode',['smoothing-control-active','smoothing-control-mask'])
+def test_uncertified_smoothing_and_sample_masks_remain_explicit(native_gpu,tmp_path,mode):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),mode,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1'},capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==5,result.stdout+result.stderr
+    assert '[STOP]' in result.stderr
+
+@pytest.mark.parametrize('mode',['copy','identity','alpha','pattern','key','overlap','patterned','partial-tile'])
+def test_original_blit_rop_logic_consumer(native_gpu,tmp_path,mode):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'blit-rop-'+mode,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],capture_output=True,text=True,errors='replace',timeout=30)
+    if mode in ('copy','identity'):
+        assert result.returncode==0,result.stdout+result.stderr
+        assert '[BLIT ROP]' in result.stderr
+    else:
+        assert result.returncode==5,result.stdout+result.stderr
+        assert 'class=0x9F' in result.stderr
+
+
+def test_software_constant_w_polygon_slope_is_exact_zero(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'constant-w-slope',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1'},capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[CONSTANT W]' in result.stderr
+
+def test_software_nonconstant_w_polygon_slope_remains_explicit(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'constant-w-slope-reject',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1'},capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==5,result.stdout+result.stderr
+    assert '[STOP] W-buffer polygon slope' in result.stderr
+
+
+@pytest.mark.parametrize('backend',['D3D11','D3D12','Vulkan','OpenGL'])
+def test_native_constant_w_slope_consumes_existing_screen_outputs(native_gpu,tmp_path,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'native-constant-w-slope',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1','DXVK_LOG_PATH':str(tmp_path)},capture_output=True,text=True,errors='replace',timeout=90)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[CONSTANT W]' in result.stderr
+
+@pytest.mark.parametrize('mode',['copy','alpha','pattern','key','overlap','partial-tile'])
+def test_original_blit_source_copy_and_consumer(native_gpu,tmp_path,mode):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'blit-copy-and-'+mode,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],capture_output=True,text=True,errors='replace',timeout=30)
+    if mode=='copy':
+        assert result.returncode==0,result.stdout+result.stderr
+        assert '[BLIT COPY AND]' in result.stderr
+    else:
+        assert result.returncode==5,result.stdout+result.stderr
+        assert 'class=0x9F' in result.stderr
+
+
+@pytest.mark.parametrize('hardware',['0','1'])
+def test_legacy_diffuse_4ub_reuses_existing_generic_register_consumer(native_gpu,tmp_path,hardware):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'legacy-diffuse-4ub',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],
+        env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1'},capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[LEGACY DIFFUSE]' in result.stderr
+
+
+@pytest.mark.parametrize('hardware',['0','1'])
+def test_legacy_attribute_group_reuses_original_generic_consumers(native_gpu,tmp_path,hardware):
+    executable,xbe=native_gpu
+    failures=[]
+    for entry in range(10):
+        result=subprocess.run([str(executable),'legacy-attribute-'+str(entry),str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1'},capture_output=True,text=True,errors='replace',timeout=60)
+        if result.returncode!=0:failures.append(f'entry={entry} return={result.returncode}\n{result.stderr}')
+        else:print(result.stderr[result.stderr.find('[LEGACY GROUP]'):])
+    assert not failures,'\n'.join(failures)
+
+@pytest.mark.parametrize('hardware',['0','1'])
+def test_legacy_texture_and_fog_use_original_generic_consumer(native_gpu,tmp_path,hardware):
+    executable,xbe=native_gpu
+    failures=[]
+    for entry in range(17):
+        result=subprocess.run([str(executable),'legacy-texfog-'+str(entry),str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],env={**os.environ,'RECOMP_GPU_BACKEND':'D3D11','RECOMP_RENDER_SCALE':'1'},capture_output=True,text=True,errors='replace',timeout=60)
+        if result.returncode!=0:failures.append(f'entry={entry} return={result.returncode}\n{result.stderr}')
+        else:print(result.stderr[result.stderr.find('[LEGACY TEXFOG]'):])
+    assert not failures,'\n'.join(failures)
+
+def test_blit_exact_self_alias_consumes_original_logic(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'blit-exact-self-alias',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],capture_output=True,text=True,errors='replace',timeout=30)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[BLIT SELF ALIAS]' in result.stderr
+
+@pytest.mark.parametrize('backend',['D3D11','Vulkan'])
+def test_host_file_write_publishes_only_overlapping_pages(native_gpu,tmp_path,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'host-write-scope',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1'},capture_output=True,text=True,errors='replace',timeout=45)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[HOST WRITE SCOPE]' in result.stderr
+
+
+def test_blit_same_pitch_linear_copy_selects_overlap_direction(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'blit-overlap-direction',str(xbe),'-','-','0'],
+                          capture_output=True,text=True,errors='replace',timeout=30)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[BLIT DIRECTION]' in result.stderr
+
+
+@pytest.mark.parametrize('backend,scale',[('D3D11',1),('D3D11',2),('Vulkan',1),('D3D12',1),('OpenGL',1)])
+def test_combiner_effective_fields_reuse_original_shader_cache(native_gpu,tmp_path,backend,scale):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'combiner-effective',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},capture_output=True,text=True,errors='replace',timeout=90)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[COMBINER EFFECTIVE] byte-identical' in result.stderr

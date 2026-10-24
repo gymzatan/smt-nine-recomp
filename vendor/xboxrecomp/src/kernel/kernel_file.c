@@ -33,10 +33,13 @@
 /* Get the ANSI path from OBJECT_ATTRIBUTES (platform-independent). */
 static const char* get_xbox_path(PXBOX_OBJECT_ATTRIBUTES ObjectAttributes)
 {
+    static XBOX_THREAD_LOCAL char path[UINT16_MAX+1];
     if (!ObjectAttributes || !ObjectAttributes->ObjectName ||
         !ObjectAttributes->ObjectName->Buffer)
         return NULL;
-    return ObjectAttributes->ObjectName->Buffer;
+    const XBOX_ANSI_STRING *name=ObjectAttributes->ObjectName;
+    memcpy(path,name->Buffer,name->Length);path[name->Length]=0;
+    return path;
 }
 
 /* Xbox volume geometry.
@@ -71,16 +74,16 @@ uint32_t xbox_LastFileError(void)
 #if defined(_WIN32)
 /* ====================  Win32 backend  =================================== */
 /* ======================================================================== */
-typedef struct FileOpenPolicy { HANDLE handle;DWORD access,share,flags; } FileOpenPolicy;
+typedef struct FileOpenPolicy { HANDLE handle;DWORD access,share,flags,options,device; } FileOpenPolicy;
 static FileOpenPolicy s_file_open_policy[16384];
 static SRWLOCK s_file_policy_lock=SRWLOCK_INIT;
-static int file_policy_store(HANDLE handle,DWORD access,DWORD share,DWORD flags) {
+static int file_policy_store(HANDLE handle,DWORD access,DWORD share,DWORD flags,DWORD options,DWORD device) {
     int ok=0;AcquireSRWLockExclusive(&s_file_policy_lock);
     unsigned index=16384;
     for (unsigned i=0;i<16384;i++) if (s_file_open_policy[i].handle==handle) { index=i;break; }
     if (index==16384) for (unsigned i=0;i<16384;i++) if (!s_file_open_policy[i].handle) { index=i;break; }
     if (index<16384) {
-        s_file_open_policy[index]=(FileOpenPolicy){handle,access,share,flags};ok=1;
+        s_file_open_policy[index]=(FileOpenPolicy){handle,access,share,flags,options,device};ok=1;
     }
     ReleaseSRWLockExclusive(&s_file_policy_lock);return ok;
 }
@@ -91,12 +94,23 @@ static void file_policy_drop(HANDLE handle) {
     ReleaseSRWLockExclusive(&s_file_policy_lock);
 }
 void xbox_FileHandleClosed(HANDLE handle) { file_policy_drop(handle); }
+uint32_t xbox_FileHandleDevice(HANDLE handle) {
+    uint32_t device=0;AcquireSRWLockShared(&s_file_policy_lock);
+    for(unsigned i=0;i<16384;i++)if(s_file_open_policy[i].handle==handle){device=s_file_open_policy[i].device;break;}
+    ReleaseSRWLockShared(&s_file_policy_lock);return device;
+}
 void xbox_FileHandleDuplicated(HANDLE source,HANDLE target,int close_source) {
     FileOpenPolicy policy={0};AcquireSRWLockShared(&s_file_policy_lock);
     for (unsigned i=0;i<16384;i++) if (s_file_open_policy[i].handle==source) { policy=s_file_open_policy[i];break; }
     ReleaseSRWLockShared(&s_file_policy_lock);
     if (close_source) file_policy_drop(source);
-    if (policy.handle) file_policy_store(target,policy.access,policy.share,policy.flags);
+    if (policy.handle) file_policy_store(target,policy.access,policy.share,policy.flags,policy.options,policy.device);
+}
+
+static NTSTATUS file_volume_status(HANDLE handle,PXBOX_IO_STATUS_BLOCK ios) {
+    NTSTATUS status=xbox_kernel_file_volume_status(handle);
+    if(status<0 && ios){ios->Status=status;ios->Information=0;}
+    return status;
 }
 
 /* Convert Xbox create disposition to Win32 */
@@ -127,8 +141,6 @@ static DWORD xbox_access_to_win32(ACCESS_MASK Access)
     if (Access & XBOX_FILE_WRITE_ATTRIBUTES)  result |= FILE_WRITE_ATTRIBUTES;
     if (Access & XBOX_SYNCHRONIZE)            result |= SYNCHRONIZE;
     if (Access & XBOX_DELETE)                  result |= DELETE;
-    if (result == 0 || result == SYNCHRONIZE)
-        result |= GENERIC_READ;
     return result;
 }
 
@@ -143,7 +155,7 @@ static DWORD xbox_share_to_win32(ULONG Share)
 }
 
 /* Translate an Xbox OBJECT_ATTRIBUTES path to a Win32 wide path */
-static BOOL translate_obj_path(PXBOX_OBJECT_ATTRIBUTES ObjectAttributes,
+BOOL xbox_FileObjectPath(PXBOX_OBJECT_ATTRIBUTES ObjectAttributes,
                                WCHAR* win_path, DWORD buf_size)
 {
     const char* xbox_path = get_xbox_path(ObjectAttributes);
@@ -177,13 +189,16 @@ NTSTATUS __stdcall xbox_NtCreateFile(
     if (!FileHandle || !ObjectAttributes)
         return STATUS_INVALID_PARAMETER;
 
-    if (!translate_obj_path(ObjectAttributes, win_path, MAX_PATH)) {
-        xbox_log(XBOX_LOG_ERROR, XBOX_LOG_FILE, "NtCreateFile: path translation failed");
-        return STATUS_OBJECT_PATH_NOT_FOUND;
-    }
+    int handled=0;
+    NTSTATUS driver_status=xbox_kernel_create_driver_file(FileHandle,DesiredAccess,ObjectAttributes,IoStatusBlock,
+        AllocationSize,FileAttributes,ShareAccess,CreateDisposition,CreateOptions,&handled);
+    if(handled)return driver_status;
+    uint32_t device=0;int volume=0;
+    NTSTATUS prepared=xbox_kernel_prepare_file_open(ObjectAttributes,win_path,MAX_PATH,&device,&volume);
+    if(prepared<0)return prepared;
 
-    if (CreateOptions & XBOX_FILE_DIRECTORY_FILE) {
-        if (CreateDisposition == XBOX_FILE_CREATE || CreateDisposition == XBOX_FILE_OPEN_IF)
+    if (volume || (CreateOptions & XBOX_FILE_DIRECTORY_FILE)) {
+        if (!volume && (CreateDisposition == XBOX_FILE_CREATE || CreateDisposition == XBOX_FILE_OPEN_IF))
             CreateDirectoryW(win_path, NULL);
         h = CreateFileW(win_path, xbox_access_to_win32(DesiredAccess),
             xbox_share_to_win32(ShareAccess), NULL, OPEN_EXISTING,
@@ -200,6 +215,7 @@ NTSTATUS __stdcall xbox_NtCreateFile(
 
     if (h == INVALID_HANDLE_VALUE) {
         DWORD err = GetLastError();
+        xbox_kernel_release_file_device(device);
         /* Kept for the caller's trace. An NTSTATUS says "it did not open";
          * only the Win32 error distinguishes a title probing for a file that
          * is genuinely absent from one it cannot open because this runtime
@@ -224,9 +240,11 @@ NTSTATUS __stdcall xbox_NtCreateFile(
         }
     }
 
+    if(!file_policy_store(h,xbox_access_to_win32(DesiredAccess),xbox_share_to_win32(ShareAccess),
+            (volume || (CreateOptions & XBOX_FILE_DIRECTORY_FILE))?FILE_FLAG_BACKUP_SEMANTICS:flags_and_attrs,CreateOptions,device)) {
+        CloseHandle(h);xbox_kernel_release_file_device(device);return STATUS_INSUFFICIENT_RESOURCES;
+    }
     *FileHandle = h;
-    file_policy_store(h,xbox_access_to_win32(DesiredAccess),xbox_share_to_win32(ShareAccess),
-                      (CreateOptions & XBOX_FILE_DIRECTORY_FILE)?FILE_FLAG_BACKUP_SEMANTICS:flags_and_attrs);
     if (IoStatusBlock) {
         IoStatusBlock->Status = STATUS_SUCCESS;
         IoStatusBlock->Information = (CreateDisposition == XBOX_FILE_CREATE) ? 2 : 1;
@@ -240,6 +258,9 @@ NTSTATUS __stdcall xbox_NtReadFile(
     PXBOX_IO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length,
     PLARGE_INTEGER ByteOffset)
 {
+    NTSTATUS volume_status=file_volume_status(FileHandle,IoStatusBlock);
+    if(volume_status<0)return volume_status;
+
     DWORD bytes_read = 0;
     BOOL result;
     OVERLAPPED ov;
@@ -283,6 +304,9 @@ NTSTATUS __stdcall xbox_NtWriteFile(
     PXBOX_IO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length,
     PLARGE_INTEGER ByteOffset)
 {
+    NTSTATUS volume_status=file_volume_status(FileHandle,IoStatusBlock);
+    if(volume_status<0)return volume_status;
+
     DWORD bytes_written = 0;
     BOOL result;
     OVERLAPPED ov;
@@ -314,33 +338,30 @@ NTSTATUS __stdcall xbox_NtWriteFile(
     return STATUS_UNSUCCESSFUL;
 }
 
+extern NTSTATUS NTAPI NtClose(HANDLE Handle);
 NTSTATUS __stdcall xbox_NtClose(HANDLE Handle)
 {
     XBOX_TRACE(XBOX_LOG_FILE, "NtClose(handle=%p)", Handle);
-    if (Handle && Handle != INVALID_HANDLE_VALUE) {
-        xbox_dir_context_drop(Handle);
-        file_policy_drop(Handle);
-        CloseHandle(Handle);
-        return STATUS_SUCCESS;
-    }
-    return STATUS_INVALID_HANDLE;
+    return xbox_kernel_close_handle(Handle);
 }
 
 NTSTATUS __stdcall xbox_NtDeleteFile(PXBOX_OBJECT_ATTRIBUTES ObjectAttributes)
 {
-    WCHAR win_path[MAX_PATH];
-    if (!translate_obj_path(ObjectAttributes, win_path, MAX_PATH))
-        return STATUS_OBJECT_PATH_NOT_FOUND;
+    WCHAR win_path[MAX_PATH];uint32_t device=0;int volume=0;
+    NTSTATUS status=xbox_kernel_prepare_file_open(ObjectAttributes,win_path,MAX_PATH,&device,&volume);
+    if(status<0)return status;
     XBOX_TRACE(XBOX_LOG_FILE, "NtDeleteFile: %S", win_path);
-    if (DeleteFileW(win_path))    return STATUS_SUCCESS;
-    if (RemoveDirectoryW(win_path)) return STATUS_SUCCESS;
-    return STATUS_OBJECT_NAME_NOT_FOUND;
+    status=(DeleteFileW(win_path) || RemoveDirectoryW(win_path))?STATUS_SUCCESS:STATUS_OBJECT_NAME_NOT_FOUND;
+    xbox_kernel_release_file_device(device);return status;
 }
 
 NTSTATUS __stdcall xbox_NtQueryInformationFile(
     HANDLE FileHandle, PXBOX_IO_STATUS_BLOCK IoStatusBlock,
     PVOID FileInformation, ULONG Length, XBOX_FILE_INFORMATION_CLASS FileInformationClass)
 {
+    NTSTATUS volume_status=file_volume_status(FileHandle,IoStatusBlock);
+    if(volume_status<0)return volume_status;
+
     (void)Length;
     if (!IoStatusBlock || !FileInformation)
         return STATUS_INVALID_PARAMETER;
@@ -419,6 +440,9 @@ NTSTATUS __stdcall xbox_NtSetInformationFile(
     HANDLE FileHandle, PXBOX_IO_STATUS_BLOCK IoStatusBlock,
     PVOID FileInformation, ULONG Length, XBOX_FILE_INFORMATION_CLASS FileInformationClass)
 {
+    NTSTATUS volume_status=file_volume_status(FileHandle,IoStatusBlock);
+    if(volume_status<0)return volume_status;
+
     (void)Length;
     if (!IoStatusBlock || !FileInformation)
         return STATUS_INVALID_PARAMETER;
@@ -517,6 +541,9 @@ NTSTATUS __stdcall xbox_NtQueryVolumeInformationFile(
     HANDLE FileHandle, PXBOX_IO_STATUS_BLOCK IoStatusBlock,
     PVOID FsInformation, ULONG Length, XBOX_FS_INFORMATION_CLASS FsInformationClass)
 {
+    NTSTATUS volume_status=file_volume_status(FileHandle,IoStatusBlock);
+    if(volume_status<0)return volume_status;
+
     (void)FileHandle; (void)Length;
     if (!IoStatusBlock || !FsInformation)
         return STATUS_INVALID_PARAMETER;
@@ -550,12 +577,17 @@ NTSTATUS __stdcall xbox_NtQueryVolumeInformationFile(
 
 NTSTATUS __stdcall xbox_NtFlushBuffersFile(HANDLE FileHandle, PXBOX_IO_STATUS_BLOCK IoStatusBlock)
 {
-    FlushFileBuffers(FileHandle);
+    NTSTATUS volume_status=file_volume_status(FileHandle,IoStatusBlock);
+    if(volume_status<0)return volume_status;
+
+    BOOL flushed = FlushFileBuffers(FileHandle);
+    NTSTATUS status = flushed ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL;
+    if (!flushed) g_xbox_last_file_error = GetLastError();
     if (IoStatusBlock) {
-        IoStatusBlock->Status = STATUS_SUCCESS;
+        IoStatusBlock->Status = status;
         IoStatusBlock->Information = 0;
     }
-    return STATUS_SUCCESS;
+    return status;
 }
 
 NTSTATUS __stdcall xbox_NtQueryFullAttributesFile(
@@ -567,11 +599,13 @@ NTSTATUS __stdcall xbox_NtQueryFullAttributesFile(
 
     if (!FileInformation)
         return STATUS_INVALID_PARAMETER;
-    if (!translate_obj_path(ObjectAttributes, win_path, MAX_PATH))
-        return STATUS_OBJECT_PATH_NOT_FOUND;
+    uint32_t device=0;int volume=0;
+    NTSTATUS status=xbox_kernel_prepare_file_open(ObjectAttributes,win_path,MAX_PATH,&device,&volume);
+    if(status<0)return status;
 
-    if (!GetFileAttributesExW(win_path, GetFileExInfoStandard, &fad)) {
-        DWORD err = GetLastError();
+    BOOL queried=GetFileAttributesExW(win_path,GetFileExInfoStandard,&fad);
+    DWORD err=queried?0:GetLastError();xbox_kernel_release_file_device(device);
+    if (!queried) {
         if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND)
             return STATUS_OBJECT_NAME_NOT_FOUND;
         return STATUS_UNSUCCESSFUL;
@@ -614,7 +648,7 @@ int xbox_CaptureFileOpenState(HANDLE handle,XboxFileOpenState *state) {
         LeaveCriticalSection(&s_dir_cs);
         if (searching) return 0;
     }
-    memset(state,0,sizeof *state);state->access=policy.access;state->share=policy.share;state->flags=policy.flags;
+    memset(state,0,sizeof *state);state->access=policy.access;state->share=policy.share;state->flags=policy.flags;state->options=policy.options;state->device=policy.device;
     DWORD count=GetFinalPathNameByHandleW(handle,state->path,MAX_PATH,FILE_NAME_NORMALIZED|VOLUME_NAME_DOS);
     if (!count || count>=MAX_PATH) return 0;
     if (!(policy.flags & FILE_FLAG_BACKUP_SEMANTICS)) {
@@ -634,7 +668,7 @@ HANDLE xbox_RestoreFileOpenState(const XboxFileOpenState *state) {
     if (handle==INVALID_HANDLE_VALUE) return NULL;
     LARGE_INTEGER position;position.QuadPart=state->position;
     if ((!(state->flags & FILE_FLAG_BACKUP_SEMANTICS) && !SetFilePointerEx(handle,position,NULL,FILE_BEGIN)) ||
-        !file_policy_store(handle,state->access,state->share,state->flags)) { CloseHandle(handle);return NULL; }
+        !file_policy_store(handle,state->access,state->share,state->flags,state->options,state->device)) { CloseHandle(handle);return NULL; }
     return handle;
 }
 
@@ -689,6 +723,9 @@ NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
     XBOX_FILE_INFORMATION_CLASS FileInformationClass,
     PXBOX_ANSI_STRING FileName, BOOLEAN RestartScan)
 {
+    NTSTATUS volume_status=file_volume_status(FileHandle,IoStatusBlock);
+    if(volume_status<0)return volume_status;
+
     DIR_CONTEXT* ctx;
     PXBOX_FILE_DIRECTORY_INFORMATION entry;
     (void)Event; (void)ApcRoutine; (void)ApcContext;
@@ -1153,12 +1190,13 @@ NTSTATUS __stdcall xbox_NtQueryVolumeInformationFile(
 NTSTATUS __stdcall xbox_NtFlushBuffersFile(HANDLE FileHandle, PXBOX_IO_STATUS_BLOCK IoStatusBlock)
 {
     int fd = w32_handle_fd(FileHandle);
-    if (fd >= 0) fsync(fd);
+    NTSTATUS status = fd < 0 ? STATUS_INVALID_HANDLE :
+        (fsync(fd) == 0 ? STATUS_SUCCESS : errno_to_status(errno));
     if (IoStatusBlock) {
-        IoStatusBlock->Status = STATUS_SUCCESS;
+        IoStatusBlock->Status = status;
         IoStatusBlock->Information = 0;
     }
-    return STATUS_SUCCESS;
+    return status;
 }
 
 NTSTATUS __stdcall xbox_NtQueryFullAttributesFile(
@@ -1322,67 +1360,4 @@ NTSTATUS __stdcall xbox_IoCreateFile(
     (void)Options;
     return xbox_NtCreateFile(FileHandle, DesiredAccess, ObjectAttributes, IoStatusBlock,
         AllocationSize, FileAttributes, ShareAccess, Disposition, CreateOptions);
-}
-
-NTSTATUS __stdcall xbox_NtFsControlFile(
-    HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
-    PXBOX_IO_STATUS_BLOCK IoStatusBlock, ULONG FsControlCode,
-    PVOID InputBuffer, ULONG InputBufferLength,
-    PVOID OutputBuffer, ULONG OutputBufferLength)
-{
-    (void)FileHandle; (void)Event; (void)ApcRoutine; (void)ApcContext;
-    (void)InputBuffer; (void)InputBufferLength; (void)OutputBuffer; (void)OutputBufferLength;
-    xbox_log(XBOX_LOG_WARN, XBOX_LOG_FILE, "NtFsControlFile(0x%X) - stub", FsControlCode);
-    if (IoStatusBlock) {
-        IoStatusBlock->Status = STATUS_NOT_IMPLEMENTED;
-        IoStatusBlock->Information = 0;
-    }
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-NTSTATUS __stdcall xbox_NtDeviceIoControlFile(
-    HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
-    PXBOX_IO_STATUS_BLOCK IoStatusBlock, ULONG IoControlCode,
-    PVOID InputBuffer, ULONG InputBufferLength,
-    PVOID OutputBuffer, ULONG OutputBufferLength)
-{
-    (void)FileHandle; (void)Event; (void)ApcRoutine; (void)ApcContext;
-    (void)InputBuffer; (void)InputBufferLength; (void)OutputBuffer; (void)OutputBufferLength;
-    xbox_log(XBOX_LOG_WARN, XBOX_LOG_FILE, "NtDeviceIoControlFile(0x%X) - stub", IoControlCode);
-    if (IoStatusBlock) {
-        IoStatusBlock->Status = STATUS_NOT_IMPLEMENTED;
-        IoStatusBlock->Information = 0;
-    }
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-NTSTATUS __stdcall xbox_NtOpenSymbolicLinkObject(
-    PHANDLE LinkHandle, PXBOX_OBJECT_ATTRIBUTES ObjectAttributes)
-{
-    /*
-     * Xbox uses symbolic links for drive-letter mapping (D: -> \Device\CdRom0).
-     * Path translation handles this transparently, so return a dummy handle.
-     */
-    if (LinkHandle)
-        *LinkHandle = (HANDLE)(ULONG_PTR)0xDEAD0001;
-    XBOX_TRACE(XBOX_LOG_FILE, "NtOpenSymbolicLinkObject(%s) - stub",
-        get_xbox_path(ObjectAttributes) ? get_xbox_path(ObjectAttributes) : "?");
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS __stdcall xbox_NtQuerySymbolicLinkObject(
-    HANDLE LinkHandle, PXBOX_ANSI_STRING LinkTarget, PULONG ReturnedLength)
-{
-    (void)LinkHandle;
-    const char* target = "\\Device\\CdRom0";
-    if (LinkTarget && LinkTarget->Buffer) {
-        USHORT len = (USHORT)strlen(target);
-        if (len < LinkTarget->MaximumLength) {
-            memcpy(LinkTarget->Buffer, target, len + 1);
-            LinkTarget->Length = len;
-        }
-    }
-    if (ReturnedLength)
-        *ReturnedLength = (ULONG)strlen(target);
-    return STATUS_SUCCESS;
 }

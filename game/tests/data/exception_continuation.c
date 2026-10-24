@@ -1,8 +1,8 @@
 #include "kernel/recomp_continuation.h"
 #include <assert.h>
 #include <string.h>
-static int leaves;
-static void left(RecompContFrame *f) { (void)f; ++leaves; }
+static int leaves,retained;
+static void left(RecompContFrame *f) { ++leaves;retained+=f->retained; }
 int main(int argc,char **argv) {
     RecompContFrame root,owner,fragment,helper;
     uint32_t outer_ebp=0x9000,owner_ebp=0x8000,tail_ebp=0x8000;
@@ -21,7 +21,7 @@ int main(int argc,char **argv) {
     assert(!recomp_cont_enter(&helper,0x13000,h,1));helper.on_leave=left;
     recomp_cont_site(&helper,0x300013040ULL);
     recomp_cont_prepare_transfer(argc>1 ? 0x1234 : 0x8000,0x14000);
-    assert(leaves==4 && !recomp_cont_active());
+    assert(leaves==4 && retained==2 && !recomp_cont_active());
     outer_ebp=owner_ebp=value=0;
     assert(recomp_cont_enter(&root,0x10000,r,1)==0x100010010ULL);
     assert(outer_ebp==0x9000);

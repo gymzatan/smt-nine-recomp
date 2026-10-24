@@ -192,6 +192,8 @@ extern RECOMP_TLS uint32_t g_fs_base;
 #define XBOX_FS_BASE g_fs_base
 
 extern RECOMP_TLS uint32_t g_seh_ebp;
+uint32_t xbox_CpuException(uint32_t code, uint32_t instruction, uint32_t frame_ebp);
+void xbox_ExceptionContinue(uint32_t target, uint32_t frame_ebp);
 
 /* ---- non-local jumps (setjmp / longjmp) --------------------------------
  *
@@ -223,9 +225,17 @@ extern RECOMP_TLS uint32_t g_seh_ebp;
  */
 #if defined(_MSC_VER)
 #include <intrin.h>
+#define RECOMP_ATOMIC_ADD8(p,v) ((uint8_t)_InterlockedExchangeAdd8((volatile char *)(p),(char)(v)))
+#define RECOMP_ATOMIC_ADD16(p,v) ((uint16_t)_InterlockedExchangeAdd16((volatile short *)(p),(short)(v)))
+#define RECOMP_ATOMIC_CAS8(p,c,v) ((uint8_t)_InterlockedCompareExchange8((volatile char *)(p),(char)(v),(char)(c)))
+#define RECOMP_ATOMIC_CAS16(p,c,v) ((uint16_t)_InterlockedCompareExchange16((volatile short *)(p),(short)(v),(short)(c)))
 #define RECOMP_ATOMIC_ADD32(p, v)     ((uint32_t)_InterlockedExchangeAdd((volatile long *)(p), (long)(v)))
 #define RECOMP_ATOMIC_CAS32(p, cmp, val)     ((uint32_t)_InterlockedCompareExchange((volatile long *)(p),                                            (long)(val), (long)(cmp)))
 #else
+#define RECOMP_ATOMIC_ADD8(p,v) ((uint8_t)__sync_fetch_and_add((volatile uint8_t *)(p),(uint8_t)(v)))
+#define RECOMP_ATOMIC_ADD16(p,v) ((uint16_t)__sync_fetch_and_add((volatile uint16_t *)(p),(uint16_t)(v)))
+#define RECOMP_ATOMIC_CAS8(p,c,v) ((uint8_t)__sync_val_compare_and_swap((volatile uint8_t *)(p),(uint8_t)(c),(uint8_t)(v)))
+#define RECOMP_ATOMIC_CAS16(p,c,v) ((uint16_t)__sync_val_compare_and_swap((volatile uint16_t *)(p),(uint16_t)(c),(uint16_t)(v)))
 #define RECOMP_ATOMIC_ADD32(p, v)     ((uint32_t)__sync_fetch_and_add((volatile uint32_t *)(p), (uint32_t)(v)))
 #define RECOMP_ATOMIC_CAS32(p, cmp, val)     ((uint32_t)__sync_val_compare_and_swap((volatile uint32_t *)(p),                                            (uint32_t)(cmp), (uint32_t)(val)))
 #endif
@@ -248,6 +258,20 @@ extern RECOMP_TLS uint32_t g_ebp;
  * memmove's overlapping case is the same instruction and the same bug.
  */
 extern RECOMP_TLS int g_df;
+extern RECOMP_TLS uint32_t g_eflags;
+int xbox_CpuInterruptFlag(void);
+void xbox_CpuLeaveInterrupt(int state);
+static inline uint32_t recomp_read_eflags(void) {
+    return (g_eflags & ~0x30600u) | 2u | ((uint32_t)g_df << 10)
+        | ((uint32_t)xbox_CpuInterruptFlag() << 9);
+}
+static inline void recomp_write_eflags(uint32_t value, unsigned width) {
+    const uint32_t writable=width==16 ? 0x7fd5u : 0x247fd5u;
+    g_eflags=(g_eflags & ~writable) | (value & writable) | 2u;
+    g_df=(int)((value>>10)&1u);
+    xbox_CpuLeaveInterrupt((int)((value>>9)&1u));
+}
+
 void xbox_CpuCli(void);
 void xbox_CpuSti(void);
 void xbox_CpuCompleteStiShadow(void);
@@ -261,6 +285,25 @@ void guest_cpu_yield(void);
 extern RECOMP_TLS uint16_t g_fp_control_word;
 extern RECOMP_TLS int g_fp_cmp;
 extern RECOMP_TLS uint16_t g_fp_cc;
+extern RECOMP_TLS uint16_t g_fp_status_word, g_fp_tag_word;
+extern RECOMP_TLS uint16_t g_fp_opcode, g_fp_code_selector, g_fp_data_selector;
+extern RECOMP_TLS uint32_t g_fp_instruction_pointer, g_fp_data_pointer, g_mxcsr;
+extern RECOMP_TLS uint8_t g_fp_raw[8][10];
+extern RECOMP_TLS uint8_t g_fp_alias_dirty;
+#include "kernel/recomp_fpu_state.h"
+static inline uint16_t recomp_fp_status(void) {
+    return (uint16_t)((g_fp_status_word & ~0x7f00u) | g_fp_cc | ((g_fp_top & 7u)<<11));
+}
+static inline void recomp_fp_reset(void) {
+    g_fp_top=0; g_fp_control_word=0x037fu; g_fp_status_word=0;
+    g_fp_cc=0; g_fp_cmp=1; g_fp_tag_word=0xffffu;
+    g_fp_instruction_pointer=g_fp_data_pointer=0;
+    g_fp_opcode=g_fp_code_selector=g_fp_data_selector=0;
+}
+static inline void recomp_fp_set_tag(unsigned slot, unsigned tag) {
+    unsigned shift=(slot&7u)*2;
+    g_fp_tag_word=(uint16_t)((g_fp_tag_word & ~(3u<<shift)) | (tag<<shift));
+}
 /* x87 precision control (control word bits 8-9). The stack is double-backed,
  * which matches PC=53 and is close enough for PC=64, but PC=24 -- what the
  * Xbox runs with -- rounds every arithmetic result to float. A title that
@@ -398,6 +441,20 @@ void recomp_icall_not_code_log(uint32_t va);
  * make that division wrong by the ratio of the two clocks; the runtime scales
  * to the console's rate instead. */
 uint64_t xbox_ReadTimeStampCounter(void);
+
+/* The console's Pentium III identity is independent of the host CPU.
+ * Unsupported leaves return the maximum basic leaf, as on this processor. */
+static inline void recomp_cpuid(uint32_t leaf, uint32_t *a, uint32_t *b,
+                                uint32_t *c, uint32_t *d)
+{
+    if (leaf == 0) {
+        *a=2; *b=0x756E6547u; *c=0x6C65746Eu; *d=0x49656E69u;
+    } else if (leaf == 1) {
+        *a=0x0000068Au; *b=0; *c=0; *d=0x0383FBFFu;
+    } else {
+        *a=0x03020101u; *b=0; *c=0; *d=0x0C040841u;
+    }
+}
 void xbox_WriteBackInvalidate(void);
 uint32_t xbox_PortRead(uint16_t port, unsigned width, uint32_t instruction_va);
 void xbox_PortWrite(uint16_t port, uint32_t value, unsigned width,
@@ -474,6 +531,123 @@ typedef union RecompXmm {
 
 extern RECOMP_TLS RecompXmm g_xmm0, g_xmm1, g_xmm2, g_xmm3;
 extern RECOMP_TLS RecompXmm g_xmm4, g_xmm5, g_xmm6, g_xmm7;
+
+#ifndef RECOMP_MMX_DEFINED
+#define RECOMP_MMX_DEFINED
+typedef union RecompMmx {
+    int8_t   b[8];
+    uint8_t  ub[8];
+    int16_t  w[4];
+    uint16_t uw[4];
+    int32_t  d[2];
+    uint32_t ud[2];
+    uint64_t q;
+} RecompMmx;
+#endif
+
+extern RECOMP_TLS RecompMmx g_mm0, g_mm1, g_mm2, g_mm3;
+extern RECOMP_TLS RecompMmx g_mm4, g_mm5, g_mm6, g_mm7;
+/* Raw/MMX aliases are derived only when an observer requests them. */
+static inline void recomp_fp_sync(unsigned mask) {
+    if(!(g_fp_alias_dirty & mask))return;
+    uint64_t *mm[]={&g_mm0.q,&g_mm1.q,&g_mm2.q,&g_mm3.q,&g_mm4.q,&g_mm5.q,&g_mm6.q,&g_mm7.q};
+    recomp_fp_sync_slots(&g_fp_alias_dirty,g_fp_stack,g_fp_raw,mm,mask);
+}
+static inline void recomp_fp_commit(unsigned slot) {
+    slot&=7u;g_fp_alias_dirty|=(uint8_t)(1u<<slot);
+    recomp_fp_set_tag(slot,recomp_fp_tag(g_fp_stack[slot]));
+}
+static inline void recomp_fp_store_raw(void *destination,unsigned slot) {
+    slot&=7u;recomp_fp_sync(1u<<slot);memcpy(destination,g_fp_raw[slot],10);
+}
+static inline void recomp_fp_copy(unsigned destination,unsigned source) {
+    RecompMmx *mm[]={&g_mm0,&g_mm1,&g_mm2,&g_mm3,&g_mm4,&g_mm5,&g_mm6,&g_mm7};
+    destination&=7u;source&=7u;g_fp_stack[destination]=g_fp_stack[source];
+    unsigned dirty=(g_fp_alias_dirty>>source)&1u;
+    g_fp_alias_dirty=(uint8_t)((g_fp_alias_dirty&~(1u<<destination))|(dirty<<destination));
+    memcpy(g_fp_raw[destination],g_fp_raw[source],10);mm[destination]->q=mm[source]->q;
+    recomp_fp_set_tag(destination,(g_fp_tag_word>>(source*2))&3u);
+}
+static inline void recomp_fp_push_copy(int *top,unsigned source) {
+    unsigned destination=(*top+7u)&7u;recomp_fp_copy(destination,source);*top=(int)destination;
+}
+static inline void recomp_fp_push_raw(int *top,const void *source) {
+    RecompMmx *mm[]={&g_mm0,&g_mm1,&g_mm2,&g_mm3,&g_mm4,&g_mm5,&g_mm6,&g_mm7};
+    uint8_t value[10];memcpy(value,source,10);unsigned destination=(*top+7u)&7u;
+    memcpy(g_fp_raw[destination],value,10);g_fp_stack[destination]=recomp_fp80_load(value);
+    g_fp_alias_dirty&=(uint8_t)~(1u<<destination);
+    memcpy(&mm[destination]->q,value,8);recomp_fp_set_tag(destination,recomp_fp_raw_tag(value));*top=(int)destination;
+}
+static inline void recomp_fp_exchange(unsigned a,unsigned b) {
+    double value;uint8_t raw[10];uint64_t mmvalue;
+    RecompMmx *mm[]={&g_mm0,&g_mm1,&g_mm2,&g_mm3,&g_mm4,&g_mm5,&g_mm6,&g_mm7};
+    a&=7u;b&=7u;unsigned dirty_a=(g_fp_alias_dirty>>a)&1u,dirty_b=(g_fp_alias_dirty>>b)&1u;
+    g_fp_alias_dirty=(uint8_t)((g_fp_alias_dirty&~((1u<<a)|(1u<<b)))|(dirty_a<<b)|(dirty_b<<a));
+    value=g_fp_stack[a];g_fp_stack[a]=g_fp_stack[b];g_fp_stack[b]=value;
+    memcpy(raw,g_fp_raw[a],10);memcpy(g_fp_raw[a],g_fp_raw[b],10);memcpy(g_fp_raw[b],raw,10);
+    mmvalue=mm[a]->q;mm[a]->q=mm[b]->q;mm[b]->q=mmvalue;
+    unsigned tag=(g_fp_tag_word>>(2*a))&3u;recomp_fp_set_tag(a,(g_fp_tag_word>>(2*b))&3u);recomp_fp_set_tag(b,tag);
+}
+static inline void recomp_mmx_enter(void) {
+    recomp_fp_sync(0xffu);
+    g_fp_tag_word=0;g_fp_top=0;
+}
+static inline void recomp_mmx_commit(unsigned slot) {
+    RecompMmx *mm[]={&g_mm0,&g_mm1,&g_mm2,&g_mm3,&g_mm4,&g_mm5,&g_mm6,&g_mm7};
+    slot&=7u;memcpy(g_fp_raw[slot],&mm[slot]->q,8);recomp_fp_put16(g_fp_raw[slot]+8,0xffffu);
+    g_fp_stack[slot]=recomp_fp80_load(g_fp_raw[slot]);
+    g_fp_alias_dirty&=(uint8_t)~(1u<<slot);
+}
+static inline void recomp_fp_capture(RecompFpuState *s) {
+    recomp_fp_sync(0xffu);
+    memcpy(s->stack,g_fp_stack,sizeof s->stack);
+    s->control=g_fp_control_word;s->status=recomp_fp_status();s->tag=g_fp_tag_word;
+    s->opcode=g_fp_opcode;s->code_selector=g_fp_code_selector;s->data_selector=g_fp_data_selector;
+    s->instruction_pointer=g_fp_instruction_pointer;s->data_pointer=g_fp_data_pointer;s->mxcsr=g_mxcsr;memcpy(s->raw,g_fp_raw,sizeof s->raw);
+    const RecompMmx *mm[]={&g_mm0,&g_mm1,&g_mm2,&g_mm3,&g_mm4,&g_mm5,&g_mm6,&g_mm7};
+    for(unsigned i=0;i<8;i++)s->mm[i]=mm[i]->q;
+    const RecompXmm *x[]={&g_xmm0,&g_xmm1,&g_xmm2,&g_xmm3,&g_xmm4,&g_xmm5,&g_xmm6,&g_xmm7};
+    for(unsigned i=0;i<8;i++)memcpy(s->xmm[i],x[i],16);
+}
+static inline void recomp_fp_restore(const RecompFpuState *s,int extended) {
+    memcpy(g_fp_stack,s->stack,sizeof s->stack);
+    memcpy(g_fp_raw,s->raw,sizeof s->raw);g_fp_alias_dirty=0;
+    RecompMmx *mm[]={&g_mm0,&g_mm1,&g_mm2,&g_mm3,&g_mm4,&g_mm5,&g_mm6,&g_mm7};
+    for(unsigned i=0;i<8;i++)mm[i]->q=s->mm[i];
+    g_fp_control_word=s->control;g_fp_top=(s->status>>11)&7u;g_fp_cc=s->status&0x4700u;
+    g_fp_status_word=s->status&~0x7f00u;g_fp_tag_word=s->tag;
+    g_fp_cmp=(g_fp_cc&0x400u)?2:(g_fp_cc&0x100u)?-1:(g_fp_cc&0x4000u)?0:1;
+    g_fp_opcode=s->opcode;g_fp_code_selector=s->code_selector;g_fp_data_selector=s->data_selector;
+    g_fp_instruction_pointer=s->instruction_pointer;g_fp_data_pointer=s->data_pointer;
+    if(extended) {
+        RecompXmm *x[]={&g_xmm0,&g_xmm1,&g_xmm2,&g_xmm3,&g_xmm4,&g_xmm5,&g_xmm6,&g_xmm7};
+        g_mxcsr=s->mxcsr;for(unsigned i=0;i<8;i++)memcpy(x[i],s->xmm[i],16);
+    }
+}
+static inline void recomp_fnsave(void *destination,int narrow) {
+    RecompFpuState s;recomp_fp_capture(&s);recomp_fp_save_legacy(destination,&s,narrow);recomp_fp_reset();
+}
+static inline void recomp_frstor(const void *source,int narrow) {
+    RecompFpuState s;recomp_fp_capture(&s);recomp_fp_load_legacy(source,&s,narrow);recomp_fp_restore(&s,0);
+}
+static inline void recomp_fnstenv(void *destination,int narrow) {
+    RecompFpuState s;recomp_fp_capture(&s);recomp_fp_save_environment(destination,&s,narrow);g_fp_control_word|=0x3fu;
+}
+static inline void recomp_fldenv(const void *source,int narrow) {
+    RecompFpuState s;recomp_fp_capture(&s);recomp_fp_load_environment(source,&s,narrow);recomp_fp_restore(&s,0);
+}
+static inline void recomp_fxsave(void *destination) {
+    RecompFpuState s;recomp_fp_capture(&s);recomp_fp_save_extended(destination,&s);
+}
+static inline void recomp_fxrstor(const void *source) {
+    RecompFpuState s;recomp_fp_load_extended(source,&s);recomp_fp_restore(&s,1);
+}
+
+
+
+
+
+
 
 /* -- construction -- */
 
@@ -1209,28 +1383,9 @@ extern volatile uint64_t g_icall_guard_misses;
  * because that is what the instructions are: the same bits read as bytes,
  * words or dwords.
  *
- * mm0..mm7 alias the x87 stack on real hardware. Nothing here does, and
- * nothing needs to: a title that interleaves the two calls emms between, and
- * emms is a no-op for us. Modelling the aliasing would mean giving up the
- * separate x87 model that the FPU work depends on, to reproduce a hazard the
- * hardware exists to let software avoid.
+ * MMX saves use the same physical x87 register encoding. EMMS marks every
+ * x87 slot empty; the existing arithmetic helpers retain their lane views.
  * ================================================================ */
-
-#ifndef RECOMP_MMX_DEFINED
-#define RECOMP_MMX_DEFINED
-typedef union RecompMmx {
-    int8_t   b[8];
-    uint8_t  ub[8];
-    int16_t  w[4];
-    uint16_t uw[4];
-    int32_t  d[2];
-    uint32_t ud[2];
-    uint64_t q;
-} RecompMmx;
-#endif
-
-extern RECOMP_TLS RecompMmx g_mm0, g_mm1, g_mm2, g_mm3;
-extern RECOMP_TLS RecompMmx g_mm4, g_mm5, g_mm6, g_mm7;
 
 static inline RecompMmx MMX_ZERO(void) { RecompMmx r; r.q = 0; return r; }
 

@@ -287,15 +287,23 @@ typedef struct NV2ANativeGeometry {
     uint32_t flags[4];
     float point_params[2][4], point_size[4];
     uint32_t point_flags[4];
+    uint32_t polygon[4];
+    float raster[4];
 } NV2ANativeGeometry;
 typedef struct NV2ANativeFixed {
     float scene[4], emission[4];
     float ambient[8][4], diffuse[8][4], specular[8][4];
     float half_vector[8][4], direction[8][4], position[8][4], attenuation[8][4];
+    float spot_falloff[8][4], spot_direction[8][4];
     float material[4];
     uint32_t flags[4], sources[4], light_modes[2][4];
-    uint32_t texgen[4][4], texture_matrix[4];
+    uint32_t texgen[4][4], texture_matrix[4], skinning[4];
+    float back_scene[4], back_emission[4], back_material[4];
+    float back_ambient[8][4], back_diffuse[8][4], back_specular[8][4];
+    uint32_t back_sources[4];
+    float specular_second[4],back_specular_second[4];
 } NV2ANativeFixed;
+HRESULT d3d8_vsh_bind_geometry(const float *constants,const NV2ANativeGeometry *geometry,unsigned kind);
 HRESULT d3d8_vsh_bind_native(const DWORD *microcode, int length, const float *constants, const NV2ANativeGeometry *geometry, D3D11_PRIMITIVE_TOPOLOGY topology, uint32_t *inputs_read);
 HRESULT d3d8_vsh_bind_fixed(const float *constants, const NV2ANativeGeometry *geometry, const NV2ANativeFixed *fixed, D3D11_PRIMITIVE_TOPOLOGY topology);
 

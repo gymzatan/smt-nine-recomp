@@ -31,8 +31,7 @@ void nv2a_fifo_kick(NV2AState *d)
         nv2a_fifo_run(d);
         return;
     }
-    if (!ReadAcquire(&d->pfifo.fifo_kick) &&
-        !InterlockedExchange(&d->pfifo.fifo_kick, 1)) SetEvent(s_fifo_wake);
+    if (!InterlockedOr(&d->pfifo.fifo_kick, 1)) SetEvent(s_fifo_wake);
 }
 
 static DWORD WINAPI nv2a_fifo_worker(LPVOID opaque)
@@ -57,9 +56,11 @@ static DWORD WINAPI nv2a_fifo_worker(LPVOID opaque)
         /* Never hold the device lock while waiting for checkpoint thaw. */
         xbox_CheckpointDeviceEnter(XBOX_CHECKPOINT_GPU);
         qemu_mutex_lock(&d->pfifo.lock);
-        InterlockedExchange(&d->pfifo.fifo_kick, 0);
+        InterlockedExchange(&d->pfifo.fifo_kick, 2);
         nv2a_fifo_run(d);
         nv2a_pb_progress();
+        /* A request during this pass retains 3 for the next pass. */
+        InterlockedCompareExchange(&d->pfifo.fifo_kick, 0, 2);
         qemu_cond_broadcast(&d->pfifo.fifo_idle_cond);
         qemu_mutex_unlock(&d->pfifo.lock);
         xbox_CheckpointDeviceLeave(XBOX_CHECKPOINT_GPU);

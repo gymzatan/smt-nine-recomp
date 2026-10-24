@@ -14,8 +14,8 @@
     },
     {
       "name": "wined3d",
-      "archive": "wined3d.zip",
-      "url": "https://downloads.fdossena.com/Projects/WineD3D/Builds/WineD3DForWindows_11.19-x86_64.zip",
+      "archive": "wined3d-native-opengl-455e3509.zip",
+      "url": "https://github.com/gymzatan/smt-nine-recomp/releases/download/wined3d-native-opengl-455e3509/wined3d-native-opengl.zip",
       "files": [
         "d3d11.dll",
         "dxgi.dll",

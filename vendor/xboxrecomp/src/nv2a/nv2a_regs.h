@@ -506,6 +506,7 @@
 #   define NV_PGRAPH_SETUPRASTER_POFFSETPOINTENABLE             (1 << 6)
 #   define NV_PGRAPH_SETUPRASTER_POFFSETLINEENABLE              (1 << 7)
 #   define NV_PGRAPH_SETUPRASTER_POFFSETFILLENABLE              (1 << 8)
+#   define NV_PGRAPH_SETUPRASTER_STIPPLEENABLE                 (1 << 4)
 #   define NV_PGRAPH_SETUPRASTER_POINTSMOOTHENABLE              (1 << 9)
 #   define NV_PGRAPH_SETUPRASTER_LINESMOOTHENABLE               (1 << 10)
 #   define NV_PGRAPH_SETUPRASTER_POLYSMOOTHENABLE               (1 << 11)
@@ -815,7 +816,16 @@
 #   define NV012_SET_OBJECT                                   0x00000000
 #   define NV012_SET_BETA                                     0x00000300
 
+#define NV_CONTEXT_CLIP_RECTANGLE                         0x0019
+#   define NV019_SET_POINT                                0x00000300
+#   define NV019_SET_SIZE                                 0x00000304
+#define NV_NULL                                           0x0030
+
 #define NV_MEMORY_TO_MEMORY_FORMAT                       0x0039
+
+#define NV_CONTEXT_ROP                                   0x0043
+#   define NV043_SET_ROP5                                    0x00000300
+#define NV_PGRAPH_ROP3                                   0x00000B00
 
 #define NV_CONTEXT_PATTERN                               0x0044
 #   define NV044_SET_MONOCHROME_COLOR0                        0x00000310
@@ -839,6 +849,8 @@
 #   define NV09F_SET_OBJECT                                   0x00000000
 #   define NV09F_SET_CONTEXT_SURFACES                         0x0000019C
 #   define NV09F_SET_OPERATION                                0x000002FC
+#       define NV09F_SET_OPERATION_SRCCOPY_AND                    0
+#       define NV09F_SET_OPERATION_ROP_AND                        1
 #       define NV09F_SET_OPERATION_BLEND_AND                      2
 #       define NV09F_SET_OPERATION_SRCCOPY                        3
 #   define NV09F_CONTROL_POINT_IN                             0x00000300
@@ -1032,6 +1044,7 @@
 #   define NV097_SET_LINE_WIDTH                              0x00000380
 #       define NV097_SET_LINE_WIDTH_MAX_VALUE                    (63 << 3)
 #   define NV097_SET_POLYGON_STIPPLE_ENABLE                    0x0000147C
+#   define NV097_SET_POLYGON_STIPPLE_PATTERN                   0x00001480
 #   define NV097_SET_POLYGON_OFFSET_BIAS                      0x00000388
 #   define NV097_SET_FRONT_POLYGON_MODE                       0x0000038C
 #       define NV097_SET_FRONT_POLYGON_MODE_V_POINT               0x1B00
@@ -1300,6 +1313,9 @@
 #   define NV097_SET_CLEAR_RECT_HORIZONTAL                    0x00001D98
 #   define NV097_SET_CLEAR_RECT_VERTICAL                      0x00001D9C
 #   define NV097_SET_SPECULAR_FOG_FACTOR                      0x00001E20
+#   define NV097_SET_BACK_SCENE_AMBIENT_COLOR                  0x000017A0
+#   define NV097_SET_BACK_MATERIAL_ALPHA                       0x000017AC
+#   define NV097_SET_BACK_MATERIAL_EMISSION                    0x000017B0
 #   define NV097_SET_SPECULAR_PARAMS_BACK                     0x00001E28
 #   define NV097_SET_COMBINER_COLOR_OCW                       0x00001E40
 #   define NV097_SET_COMBINER_CONTROL                         0x00001E60

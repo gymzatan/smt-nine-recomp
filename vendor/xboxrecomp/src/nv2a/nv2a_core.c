@@ -9,6 +9,7 @@
  */
 
 #include "nv2a_state.h"
+#include "nv2a_color_logic.h"
 
 /* ============================================================
  * Global state
@@ -609,6 +610,191 @@ static void pgraph_stop(uint32_t subchannel, uint32_t graphics_class,
     exit(5);
 }
 
+static uint32_t pgraph_context_class(NV2AState *d,uint32_t instance)
+{
+    if(!instance)return NV_NULL;
+    if((hwaddr)instance+16>memory_region_size(&d->ramin)) {
+        fprintf(stderr,"[STOP] PGRAPH context outside RAMIN: 0x%08X\n",instance);
+        exit(5);
+    }
+    return ldl_le_p(d->ramin_ptr+instance)&NV_PGRAPH_CTX_SWITCH1_GRCLASS;
+}
+
+/* Existing xemu nv_clip_gpu_tile_blit contract: an enabled inclusive tile
+ * limit clips a blit span crossing it. Consecutive-tile behavior remains
+ * outside this consumer's established contract. */
+static hwaddr nv_clip_gpu_tile_blit(NV2AState *d,hwaddr start,hwaddr bytes)
+{
+    for(unsigned i=0;i<NV_NUM_GPU_TILES;i++) {
+        if(!(d->pfb.regs[NV_PFB_TILE_BASE_ADDRESS_AND_FLAGS(i)]&NV_PFB_TILE_FLAGS_VALID))continue;
+        hwaddr limit=d->pfb.regs[NV_PFB_TILE_LIMIT(i)];
+        if(start<limit && start+bytes>limit)return limit+1-start;
+    }
+    return bytes;
+}
+
+/* NV09F consumes the existing surfaces object and DMA spans. Guest
+ * memory access retains the original physical aliases and graphics ownership
+ * fault handler, including publication of pending render targets. */
+static void pgraph_image_blit_copy(NV2AState *d,uint32_t subchannel,uint32_t parameter)
+{
+    struct PGRAPHState *pg=&d->pgraph;
+    int blend=pg->image_blit.operation==NV09F_SET_OPERATION_BLEND_AND;
+    int rop=pg->image_blit.operation==NV09F_SET_OPERATION_ROP_AND;
+    int copy_and=pg->image_blit.operation==NV09F_SET_OPERATION_SRCCOPY_AND;
+    if((pg->image_blit.operation!=NV09F_SET_OPERATION_SRCCOPY && !blend && !rop && !copy_and) ||
+       pg->image_blit.context_surfaces!=pg->context_surfaces_2d.object_instance ||
+       pgraph_context_class(d,pg->image_blit.color_key)!=NV_NULL) {
+        pgraph_stop(subchannel,NV_IMAGE_BLIT,NV09F_SIZE,parameter);return;
+    }
+    unsigned bpp;
+    switch(pg->context_surfaces_2d.color_format) {
+    case NV062_SET_COLOR_FORMAT_LE_Y8:bpp=1;break;
+    case NV062_SET_COLOR_FORMAT_LE_R5G6B5:bpp=2;break;
+    case NV062_SET_COLOR_FORMAT_LE_X8R8G8B8_Z8R8G8B8:
+    case NV062_SET_COLOR_FORMAT_LE_X8R8G8B8:
+    case NV062_SET_COLOR_FORMAT_LE_A8R8G8B8:
+    case NV062_SET_COLOR_FORMAT_LE_Y32:bpp=4;break;
+    default:pgraph_stop(subchannel,NV_IMAGE_BLIT,NV09F_SIZE,parameter);return;
+    }
+    if(blend && (bpp!=4 || pgraph_context_class(d,pg->image_blit.beta)!=NV_BETA ||
+                  pg->image_blit.beta!=pg->beta.object_instance)) {
+        pgraph_stop(subchannel,NV_IMAGE_BLIT,NV09F_SIZE,parameter);return;
+    }
+    /* SRCCOPY_AND discards zero-alpha source pixels. X8 conversion makes
+     * alpha opaque, so this established subset uses the original copy path. */
+    if(copy_and && (pg->context_surfaces_2d.color_format!=NV062_SET_COLOR_FORMAT_LE_X8R8G8B8 ||
+                    pgraph_context_class(d,pg->image_blit.pattern)!=NV_NULL)) {
+        pgraph_stop(subchannel,NV_IMAGE_BLIT,NV09F_SIZE,parameter);return;
+    }
+    unsigned rop3=pg->regs[NV_PGRAPH_ROP3]&0xff;
+    if(rop && (pg->context_surfaces_2d.color_format!=NV062_SET_COLOR_FORMAT_LE_X8R8G8B8 ||
+               pgraph_context_class(d,pg->image_blit.rop)!=NV_CONTEXT_ROP ||
+               pgraph_context_class(d,pg->image_blit.pattern)!=NV_NULL ||
+               (rop3>>4)!=(rop3&15))) {
+        pgraph_stop(subchannel,NV_IMAGE_BLIT,NV09F_SIZE,parameter);return;
+    }
+    /* ROP3 indexes (P,S,D), while the existing GL logic enum numbers the
+     * same sixteen P-independent functions in reverse truth-bit order. */
+    unsigned nibble=rop3&15;
+    unsigned logic=((nibble&1)<<3)|((nibble&2)<<1)|((nibble&4)>>1)|((nibble&8)>>3);
+    unsigned width=pg->image_blit.width,height=pg->image_blit.height;
+    unsigned in_x=pg->image_blit.in_x,in_y=pg->image_blit.in_y;
+    int out_x=(int16_t)pg->image_blit.out_x,out_y=(int16_t)pg->image_blit.out_y;
+    uint32_t clip_class=pgraph_context_class(d,pg->image_blit.clip);
+    if(clip_class!=NV_NULL) {
+        if(clip_class!=NV_CONTEXT_CLIP_RECTANGLE || pg->image_blit.clip!=pg->clip_rectangle.object_instance) {
+            pgraph_stop(subchannel,NV_IMAGE_BLIT,NV09F_SIZE,parameter);return;
+        }
+        int left=(int16_t)pg->clip_rectangle.point,top=(int16_t)(pg->clip_rectangle.point>>16);
+        int right=left+(int)(pg->clip_rectangle.size&0xffff),bottom=top+(int)(pg->clip_rectangle.size>>16);
+        int x0=out_x>left?out_x:left,y0=out_y>top?out_y:top;
+        int x1=out_x+(int)width<right?out_x+(int)width:right;
+        int y1=out_y+(int)height<bottom?out_y+(int)height:bottom;
+        if(x0>=x1 || y0>=y1)return;
+        in_x+=(unsigned)(x0-out_x);in_y+=(unsigned)(y0-out_y);
+        out_x=x0;out_y=y0;width=(unsigned)(x1-x0);height=(unsigned)(y1-y0);
+    }
+    if(out_x<0 || out_y<0) {pgraph_stop(subchannel,NV_IMAGE_BLIT,NV09F_SIZE,parameter);return;}
+    unsigned row_pixels=pg->context_surfaces_2d.source_pitch<pg->context_surfaces_2d.dest_pitch?
+        pg->context_surfaces_2d.source_pitch/bpp:pg->context_surfaces_2d.dest_pitch/bpp;
+    if(width<row_pixels)row_pixels=width;
+    if(!row_pixels)return;
+    hwaddr source_offset=(hwaddr)pg->context_surfaces_2d.source_offset+
+        (hwaddr)in_y*pg->context_surfaces_2d.source_pitch+(hwaddr)in_x*bpp;
+    hwaddr destination_offset=(hwaddr)pg->context_surfaces_2d.dest_offset+
+        (hwaddr)out_y*pg->context_surfaces_2d.dest_pitch+(hwaddr)out_x*bpp;
+    size_t row_bytes=(size_t)row_pixels*bpp;
+    hwaddr source_bytes=(hwaddr)(height-1)*pg->context_surfaces_2d.source_pitch+row_bytes;
+    hwaddr destination_bytes=(hwaddr)(height-1)*pg->context_surfaces_2d.dest_pitch+row_bytes;
+    uint8_t *destination=nv_dma_span(d,pg->context_surfaces_2d.dma_image_dest,destination_offset,1);
+    hwaddr physical_destination=(hwaddr)(destination-d->vram_ptr);
+    destination_bytes=nv_clip_gpu_tile_blit(d,physical_destination,destination_bytes);
+    height=(unsigned)((destination_bytes-1)/pg->context_surfaces_2d.dest_pitch)+1;
+    size_t last_row_bytes=(size_t)(destination_bytes-(hwaddr)(height-1)*pg->context_surfaces_2d.dest_pitch);
+    if(last_row_bytes>row_bytes)last_row_bytes=row_bytes;
+    source_bytes=(hwaddr)(height-1)*pg->context_surfaces_2d.source_pitch+last_row_bytes;
+    uint8_t *source=nv_dma_span(d,pg->context_surfaces_2d.dma_image_source,source_offset,source_bytes);
+    destination=nv_dma_span(d,pg->context_surfaces_2d.dma_image_dest,destination_offset,destination_bytes);
+    /* Ordinary same-pitch linear copies choose their overlap direction in
+     * hardware; compare the resolved RAM identities, not DMA handles. */
+    int overlapping=source<destination+destination_bytes && destination<source+source_bytes;
+    int linear_copy=overlapping && (!blend && !copy_and && (!rop || rop3==0xcc)) &&
+        pg->context_surfaces_2d.source_pitch==pg->context_surfaces_2d.dest_pitch;
+    hwaddr physical_source=(hwaddr)(source-d->vram_ptr);
+    for(unsigned i=0;linear_copy && i<NV_NUM_GPU_TILES;i++) {
+        uint32_t flags=d->pfb.regs[NV_PFB_TILE_BASE_ADDRESS_AND_FLAGS(i)];
+        if(!(flags&NV_PFB_TILE_FLAGS_VALID))continue;
+        hwaddr base=flags&NV_PFB_TILE_BASE_ADDRESS,limit=d->pfb.regs[NV_PFB_TILE_LIMIT(i)];
+        if((physical_source<=limit && base<physical_source+source_bytes) ||
+           (physical_destination<=limit && base<physical_destination+destination_bytes))linear_copy=0;
+    }
+    int reverse_rows=linear_copy && destination>source;
+    /* Identical pixel mappings have no inter-pixel ordering dependency. */
+    int exact_self=source==destination && pg->context_surfaces_2d.source_pitch==pg->context_surfaces_2d.dest_pitch;
+    if((rop || copy_and) && ((last_row_bytes&3) ||
+       (!exact_self && !linear_copy && overlapping))) {
+        pgraph_stop(subchannel,NV_IMAGE_BLIT,NV09F_SIZE,parameter);return;
+    }
+    /* Keep original per-row memmove; retire lower destination rows first. */
+    for(unsigned step=0;step<height;step++) {
+        unsigned row=reverse_rows?height-1-step:step;
+        uint8_t *src=source+(size_t)row*pg->context_surfaces_2d.source_pitch;
+        uint8_t *dst=destination+(size_t)row*pg->context_surfaces_2d.dest_pitch;
+        size_t copy_bytes=row+1==height?last_row_bytes:row_bytes;
+        if(rop && !linear_copy) {
+            for(size_t x=0;x<copy_bytes;x+=4)
+                stl_le_p(dst+x,color_logic(logic,ldl_le_p(src+x),ldl_le_p(dst+x)));
+        } else if(!blend)memmove(dst,src,copy_bytes);
+        else {
+            unsigned weight=pg->beta.value>>23;
+            for(unsigned x=0;x<copy_bytes/bpp;x++)for(unsigned channel=0;channel<3;channel++)
+                dst[x*4+channel]=(uint8_t)((src[x*4+channel]*weight+dst[x*4+channel]*(255-weight))/255);
+        }
+    }
+    unsigned format=pg->context_surfaces_2d.color_format;
+    if(format==NV062_SET_COLOR_FORMAT_LE_X8R8G8B8 || format==NV062_SET_COLOR_FORMAT_LE_X8R8G8B8_Z8R8G8B8)
+        for(unsigned row=0;row<height;row++)for(unsigned x=0;x<(row+1==height?last_row_bytes:row_bytes)/bpp;x++)
+            destination[(size_t)row*pg->context_surfaces_2d.dest_pitch+x*4+3]=(uint8_t)(format==NV062_SET_COLOR_FORMAT_LE_X8R8G8B8?255:0);
+}
+
+static void pgraph_m2mf_write_record(NV2AState *d,uint8_t *notification)
+{
+    uint64_t timestamp=ptimer_get_clock(d)<<5;
+    stl_le_p(notification,(uint32_t)timestamp);
+    stl_le_p(notification+4,(uint32_t)(timestamp>>32));
+    stl_le_p(notification+8,0);
+    /* The completion word publishes preceding RAM and record writes. */
+    InterlockedExchange((volatile LONG *)(notification+12),0);
+}
+
+/* Class0039 format101 transfer, as submitted by the original NV04 M2MF
+ * producer. Other increments, awaken and overlapping layouts need their own
+ * established operational contract and retain an explicit stop. */
+static void pgraph_m2mf_copy(NV2AState *d,uint32_t subchannel,uint32_t parameter)
+{
+    struct PGRAPHState *pg=&d->pgraph;
+    if(parameter!=0 || pg->memory_to_memory.valid!=0x3ff ||
+       pg->memory_to_memory.format!=0x101 ||
+       !pg->memory_to_memory.line_count || !pg->memory_to_memory.line_length ||
+       !pg->memory_to_memory.pitch_in || !pg->memory_to_memory.pitch_out ||
+       pg->memory_to_memory.line_length>pg->memory_to_memory.pitch_in ||
+       pg->memory_to_memory.line_length>pg->memory_to_memory.pitch_out)
+        pgraph_stop(subchannel,NV_MEMORY_TO_MEMORY_FORMAT,0x328,parameter);
+    hwaddr rows=pg->memory_to_memory.line_count,bytes=pg->memory_to_memory.line_length;
+    hwaddr source_bytes=(rows-1)*pg->memory_to_memory.pitch_in+bytes;
+    hwaddr destination_bytes=(rows-1)*pg->memory_to_memory.pitch_out+bytes;
+    uint8_t *source=nv_dma_span(d,pg->memory_to_memory.dma_in,pg->memory_to_memory.offset_in,source_bytes);
+    uint8_t *destination=nv_dma_span(d,pg->memory_to_memory.dma_out,pg->memory_to_memory.offset_out,destination_bytes);
+    uint8_t *notification=nv_dma_span(d,pg->memory_to_memory.dma_notifies,0x10,16);
+    if(((uintptr_t)notification&3) ||
+       (source<destination+destination_bytes && destination<source+source_bytes))
+        pgraph_stop(subchannel,NV_MEMORY_TO_MEMORY_FORMAT,0x328,parameter);
+    for(hwaddr row=0;row<rows;row++)
+        memcpy(destination+row*pg->memory_to_memory.pitch_out,source+row*pg->memory_to_memory.pitch_in,(size_t)bytes);
+    pgraph_m2mf_write_record(d,notification);
+}
+
 static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
                                 uint32_t method, uint32_t param,
                                 uint32_t graphics_class);
@@ -630,6 +816,13 @@ void pgraph_method(NV2AState *d, uint32_t subchannel,
 {
     if (subchannel >= 8)
         pgraph_stop(subchannel, 0, method, param);
+    struct PGRAPHState *pg=&d->pgraph;
+    int ordinary_notify=pg->memory_to_memory.notify_pending;
+    if(ordinary_notify &&
+       (subchannel!=pg->memory_to_memory.notify_subchannel || method==NV_SET_OBJECT ||
+        method==0x104 || method==0x180 ||
+        pg->regs[NV_PGRAPH_CTX_CACHE5+subchannel*4]!=pg->memory_to_memory.notify_instance))
+        pgraph_stop(subchannel,NV_MEMORY_TO_MEMORY_FORMAT,method,param);
     if (method == NV_SET_OBJECT) {
         pgraph_class_method(d, subchannel, method, param, 0);
         return;
@@ -637,7 +830,8 @@ void pgraph_method(NV2AState *d, uint32_t subchannel,
     uint32_t graphics_class = pgraph_publish_context(d, subchannel);
     if (graphics_class == NV_KELVIN_PRIMITIVE &&
         ((method >= NV097_SET_TRANSFORM_PROGRAM && method < NV097_SET_TRANSFORM_CONSTANT + 128) ||
-         (method >= NV097_ARRAY_ELEMENT16 && method < NV097_SET_TEXTURE_OFFSET + 256))) {
+         (method >= NV097_ARRAY_ELEMENT16 && method < NV097_SET_TEXTURE_OFFSET + 256 &&
+          !(method >= NV097_SET_EYE_VECTOR && method < NV097_SET_EYE_VECTOR+12)))) {
         if (d->pfifo.method_consumer)
             d->pfifo.method_consumer(subchannel, method, param, NULL);
         else
@@ -645,6 +839,16 @@ void pgraph_method(NV2AState *d, uint32_t subchannel,
         return;
     }
     pgraph_class_method(d, subchannel, method, param, graphics_class);
+    if(ordinary_notify) {
+        uint8_t *record=nv_dma_span(d,pg->memory_to_memory.dma_notifies,0,16);
+        pgraph_m2mf_write_record(d,record);
+        uint32_t awaken=pg->memory_to_memory.notify_type;
+        pg->memory_to_memory.notify_pending=0;
+        if(awaken) {
+            pg->pending_interrupts|=NV_PGRAPH_INTR_NOTIFY;
+            nv2a_update_irq(d);
+        }
+    }
 }
 
 static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
@@ -664,16 +868,59 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
         uint32_t bound_class = pgraph_publish_context(d, subchannel);
         if (bound_class == NV_CONTEXT_SURFACES_2D)
             pg->context_surfaces_2d.object_instance = param;
+        else if(bound_class == NV_CONTEXT_CLIP_RECTANGLE)pg->clip_rectangle.object_instance=param;
+        else if(bound_class == NV_BETA)pg->beta.object_instance=param;
         return;
     }
     switch (graphics_class) {
+    case NV_CONTEXT_ROP:
+        if(method==NV043_SET_ROP5){pg->regs[NV_PGRAPH_ROP3]=param&0xff;return;}
+        break;
+    case NV_BETA:
+        if(method==NV012_SET_BETA) {pg->beta.value=(param&0x80000000u)?0:param&0x7f800000u;return;}
+        break;
+    case NV_CONTEXT_CLIP_RECTANGLE:
+        if(method==NV019_SET_POINT) {pg->clip_rectangle.point=param;return;}
+        if(method==NV019_SET_SIZE) {pg->clip_rectangle.size=param;return;}
+        break;
     case NV_MEMORY_TO_MEMORY_FORMAT:
         /* NVIDIA cl0039.h: contexts name real DMA instances. */
         switch (method) {
         case 0x100: return; /* NO_OPERATION is defined as ignored. */
-        case 0x180: pg->memory_to_memory.dma_notifies = param; return;
-        case 0x184: pg->memory_to_memory.dma_in = param; return;
-        case 0x188: pg->memory_to_memory.dma_out = param; return;
+        case 0x104: {
+            if(param>1 || !(pg->memory_to_memory.valid&1))
+                pgraph_stop(subchannel,graphics_class,method,param);
+            uint8_t *record=nv_dma_span(d,pg->memory_to_memory.dma_notifies,0,16);
+            if((uintptr_t)record&3)pgraph_stop(subchannel,graphics_class,method,param);
+            pg->memory_to_memory.notify_pending=1;pg->memory_to_memory.notify_type=param;
+            pg->memory_to_memory.notify_subchannel=subchannel;
+            pg->memory_to_memory.notify_instance=pg->regs[NV_PGRAPH_CTX_CACHE5+subchannel*4];
+            return;
+        }
+        case 0x180: pg->memory_to_memory.dma_notifies = param; pg->memory_to_memory.valid|=1; return;
+        case 0x184: pg->memory_to_memory.dma_in = param; pg->memory_to_memory.valid|=2; return;
+        case 0x188: pg->memory_to_memory.dma_out = param; pg->memory_to_memory.valid|=4; return;
+        case 0x30c: pg->memory_to_memory.offset_in=param;pg->memory_to_memory.valid|=8;return;
+        case 0x310: pg->memory_to_memory.offset_out=param;pg->memory_to_memory.valid|=16;return;
+        case 0x314: case 0x318:
+            if(param>0x7fff)pgraph_stop(subchannel,graphics_class,method,param);
+            if(method==0x314){pg->memory_to_memory.pitch_in=param;pg->memory_to_memory.valid|=32;}
+            else {pg->memory_to_memory.pitch_out=param;pg->memory_to_memory.valid|=64;}return;
+        case 0x31c:
+            if(param>=0x400000)pgraph_stop(subchannel,graphics_class,method,param);
+            pg->memory_to_memory.line_length=param;pg->memory_to_memory.valid|=128;return;
+        case 0x320:
+            if(param>=0x800)pgraph_stop(subchannel,graphics_class,method,param);
+            pg->memory_to_memory.line_count=param;pg->memory_to_memory.valid|=256;return;
+        case 0x324: {
+            uint32_t input=param&7,output=(param>>8)&7;
+            if((param&~0x7ffu) || (param&0xf8) ||
+               (input!=1 && input!=2 && input!=4) ||
+               (output!=1 && output!=2 && output!=4))
+                pgraph_stop(subchannel,graphics_class,method,param);
+            pg->memory_to_memory.format=param;pg->memory_to_memory.valid|=512;return;
+        }
+        case 0x328:pgraph_m2mf_copy(d,subchannel,param);return;
         default: break;
         }
         break;
@@ -710,18 +957,36 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
         case NV09F_SIZE:
             pg->image_blit.width = param & 0xFFFF; pg->image_blit.height = param >> 16;
             if (!pg->image_blit.width || !pg->image_blit.height) return;
-            /* A nonempty transfer requires its pixel consumer. */
-            break;
+            pgraph_image_blit_copy(d,subchannel,param);
+            return;
         default: break;
         }
         break;
     case NV_KELVIN_PRIMITIVE:
         /* Original LT context products arrive independently of D3D8 API state. */
+        if(method>=NV097_SET_POLYGON_STIPPLE_PATTERN && method<NV097_SET_POLYGON_STIPPLE_PATTERN+128) {
+            pg->polygon_stipple[(method-NV097_SET_POLYGON_STIPPLE_PATTERN)/4]=param;return;
+        }
         if (method >= NV097_SET_SCENE_AMBIENT_COLOR && method < NV097_SET_SCENE_AMBIENT_COLOR + 12) {
             pg->ltctxa[NV_IGRAPH_XF_LTCTXA_FR_AMB][(method-NV097_SET_SCENE_AMBIENT_COLOR)/4]=param; return;
         }
         if (method >= NV097_SET_MATERIAL_EMISSION && method < NV097_SET_MATERIAL_EMISSION + 12) {
             pg->ltctxa[NV_IGRAPH_XF_LTCTXA_CM_COL][(method-NV097_SET_MATERIAL_EMISSION)/4]=param; return;
+        }
+        if (method >= NV097_SET_BACK_SCENE_AMBIENT_COLOR && method < NV097_SET_BACK_SCENE_AMBIENT_COLOR + 12) {
+            pg->ltctxa[NV_IGRAPH_XF_LTCTXA_BR_AMB][(method-NV097_SET_BACK_SCENE_AMBIENT_COLOR)/4]=param; return;
+        }
+        if (method >= NV097_SET_BACK_MATERIAL_EMISSION && method < NV097_SET_BACK_MATERIAL_EMISSION + 12) {
+            pg->ltctxa[NV_IGRAPH_XF_LTCTXA_BCM_COL][(method-NV097_SET_BACK_MATERIAL_EMISSION)/4]=param; return;
+        }
+        if (method >= NV097_SET_SPECULAR_PARAMS_BACK && method < NV097_SET_SPECULAR_PARAMS_BACK + 24) {
+            memcpy(&pg->back_specular_params[(method-NV097_SET_SPECULAR_PARAMS_BACK)/4],&param,4); return;
+        }
+        if (method >= NV097_SET_BACK_LIGHT_AMBIENT_COLOR && method < NV097_SET_BACK_LIGHT_AMBIENT_COLOR + 8*64) {
+            unsigned light=(method-NV097_SET_BACK_LIGHT_AMBIENT_COLOR)/64;
+            unsigned part=(method-NV097_SET_BACK_LIGHT_AMBIENT_COLOR)%64;
+            if (part >= 36) pgraph_stop(subchannel,graphics_class,method,param);
+            pg->ltctxb[NV_IGRAPH_XF_LTCTXB_L0_BAMB+light*6+part/12][(part%12)/4]=param; return;
         }
         if (method >= NV097_SET_SPECULAR_PARAMS && method < NV097_SET_SPECULAR_PARAMS + 24) {
             memcpy(&pg->specular_params[(method-NV097_SET_SPECULAR_PARAMS)/4],&param,4); return;
@@ -772,13 +1037,10 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
         case NV097_SET_CLIP_MIN: pg->regs[NV_PGRAPH_ZCLIPMIN] = param; return;
         case NV097_SET_CLIP_MAX: pg->regs[NV_PGRAPH_ZCLIPMAX] = param; return;
         case NV097_SET_CONTROL0:
-            /* Float depth encoding is outside the connected decoded-depth
-             * consumer. Integer Z/W depth and stencil-write state are shared. */
-            if (param & NV097_SET_CONTROL0_Z_FORMAT)
-                pgraph_stop(subchannel, graphics_class, method, param);
             SET_MASK(pg->regs[NV_PGRAPH_CONTROL_0], NV_PGRAPH_CONTROL_0_STENCIL_WRITE_ENABLE,
                      (param & NV097_SET_CONTROL0_STENCIL_WRITE_ENABLE) != 0);
-            SET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER], NV_PGRAPH_SETUPRASTER_Z_FORMAT, 0);
+            SET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER], NV_PGRAPH_SETUPRASTER_Z_FORMAT,
+                     (param & NV097_SET_CONTROL0_Z_FORMAT) != 0);
             SET_MASK(pg->regs[NV_PGRAPH_CONTROL_0], NV_PGRAPH_CONTROL_0_Z_PERSPECTIVE_ENABLE,
                      (param & NV097_SET_CONTROL0_Z_PERSPECTIVE_ENABLE) != 0);
             return;
@@ -813,13 +1075,15 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
             return;
         case NV097_SET_FRONT_POLYGON_MODE: case NV097_SET_BACK_POLYGON_MODE:
             if (param != NV097_SET_FRONT_POLYGON_MODE_V_FILL &&
-                param != NV097_SET_FRONT_POLYGON_MODE_V_LINE)
+                param != NV097_SET_FRONT_POLYGON_MODE_V_LINE &&
+                param != NV097_SET_FRONT_POLYGON_MODE_V_POINT)
                 pgraph_stop(subchannel, graphics_class, method, param);
             SET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER],
                      method == NV097_SET_FRONT_POLYGON_MODE ? NV_PGRAPH_SETUPRASTER_FRONTFACEMODE :
                                                             NV_PGRAPH_SETUPRASTER_BACKFACEMODE,
                      param == NV097_SET_FRONT_POLYGON_MODE_V_LINE ?
-                     NV_PGRAPH_SETUPRASTER_FRONTFACEMODE_LINE : NV_PGRAPH_SETUPRASTER_FRONTFACEMODE_FILL);
+                     NV_PGRAPH_SETUPRASTER_FRONTFACEMODE_LINE : param == NV097_SET_FRONT_POLYGON_MODE_V_POINT ?
+                     NV_PGRAPH_SETUPRASTER_FRONTFACEMODE_POINT : NV_PGRAPH_SETUPRASTER_FRONTFACEMODE_FILL);
             return;
         case NV097_SET_DITHER_ENABLE:
             if (param > 1) pgraph_stop(subchannel, graphics_class, method, param);
@@ -830,8 +1094,8 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
             if (param > 1) pgraph_stop(subchannel, graphics_class, method, param);
             SET_MASK(pg->regs[NV_PGRAPH_CONTROL_1], NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE, param); return;
         case NV097_SET_SKIN_MODE:
-            if (param) pgraph_stop(subchannel, graphics_class, method, param);
-            SET_MASK(pg->regs[NV_PGRAPH_CSV0_D], NV_PGRAPH_CSV0_D_SKIN, 0); return;
+            if (param > NV097_SET_SKIN_MODE_4) pgraph_stop(subchannel, graphics_class, method, param);
+            SET_MASK(pg->regs[NV_PGRAPH_CSV0_D], NV_PGRAPH_CSV0_D_SKIN, param); return;
         case NV097_SET_FOG_GEN_MODE:
             if (param > NV097_SET_FOG_GEN_MODE_V_ABS_PLANAR &&
                 param != NV097_SET_FOG_GEN_MODE_V_FOG_X)
@@ -843,6 +1107,8 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
         case NV097_SET_NORMALIZATION_ENABLE:
             if (param > 1) pgraph_stop(subchannel, graphics_class, method, param);
             SET_MASK(pg->regs[NV_PGRAPH_CSV0_C], NV_PGRAPH_CSV0_C_NORMALIZATION_ENABLE, param); return;
+        case NV097_SET_BACK_MATERIAL_ALPHA:
+            memcpy(&pg->back_material_alpha,&param,4); return;
         case NV097_SET_MATERIAL_ALPHA:
             memcpy(&pg->material_alpha,&param,4); return;
         case NV097_SET_LIGHT_ENABLE_MASK:
@@ -851,11 +1117,9 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
                 SET_MASK(pg->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_LIGHT0<<(light*2),(param>>(light*2))&3u);
             return;
         case NV097_SET_LIGHT_TWO_SIDE_ENABLE:
-            if (param) pgraph_stop(subchannel, graphics_class, method, param);
-            /* Kelvin hardware tests place this in raster bit 24 and XF mode
-             * bit 29. Active back-face colour selection remains unsupported. */
-            SET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER], 1u << 24, 0);
-            SET_MASK(pg->regs[NV_PGRAPH_CSV0_C], NV_PGRAPH_CSV0_C_LIGHT_TWO_SIDE_ENABLE, 0);
+            if (param > 1) pgraph_stop(subchannel, graphics_class, method, param);
+            SET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER], 1u << 24, param);
+            SET_MASK(pg->regs[NV_PGRAPH_CSV0_C], NV_PGRAPH_CSV0_C_LIGHT_TWO_SIDE_ENABLE, param);
             return;
         case NV097_SET_LIGHT_CONTROL:
             SET_MASK(pg->regs[NV_PGRAPH_CSV0_C], NV_PGRAPH_CSV0_C_SEPARATE_SPECULAR,
@@ -866,13 +1130,16 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
                      !!(param & NV097_SET_LIGHT_CONTROL_ALPHA_FROM_MATERIAL_SPECULAR));
             return;
         case NV097_SET_COLOR_MATERIAL:
-            if ((param & ~0xFFu) || (param & 3u) > 2 || ((param >> 2) & 3u) > 2 ||
-                    ((param >> 4) & 3u) > 2 || ((param >> 6) & 3u) > 2)
+            if ((param & ~0xFFFFu) || (param & 3u) > 2 || ((param >> 2) & 3u) > 2 ||
+                    ((param >> 4) & 3u) > 2 || ((param >> 6) & 3u) > 2 ||
+                    ((param >> 8) & 3u) > 2 || ((param >> 10) & 3u) > 2 ||
+                    ((param >> 12) & 3u) > 2 || ((param >> 14) & 3u) > 2)
                 pgraph_stop(subchannel, graphics_class, method, param);
             SET_MASK(pg->regs[NV_PGRAPH_CSV0_C], NV_PGRAPH_CSV0_C_EMISSION, (param >> 0) & 3u);
             SET_MASK(pg->regs[NV_PGRAPH_CSV0_C], NV_PGRAPH_CSV0_C_AMBIENT, (param >> 2) & 3u);
             SET_MASK(pg->regs[NV_PGRAPH_CSV0_C], NV_PGRAPH_CSV0_C_DIFFUSE, (param >> 4) & 3u);
             SET_MASK(pg->regs[NV_PGRAPH_CSV0_C], NV_PGRAPH_CSV0_C_SPECULAR, (param >> 6) & 3u);
+            pg->back_material_sources=(param>>8)&0xffu;
             return;
         case NV097_SET_LIGHTING_ENABLE:
             if (param > 1) pgraph_stop(subchannel, graphics_class, method, param);
@@ -889,16 +1156,27 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
             SET_MASK(pg->regs[NV_PGRAPH_CONTROL_1], NV_PGRAPH_CONTROL_1_STENCIL_REF, param); return;
         case NV097_SET_STENCIL_FUNC_MASK:
             SET_MASK(pg->regs[NV_PGRAPH_CONTROL_1], NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ, param); return;
-        case NV097_SET_STENCIL_OP_FAIL: case NV097_SET_STENCIL_OP_ZFAIL: case NV097_SET_STENCIL_OP_ZPASS:
-            if (param != NV097_SET_STENCIL_OP_V_KEEP) pgraph_stop(subchannel, graphics_class, method, param);
+        case NV097_SET_STENCIL_OP_FAIL: case NV097_SET_STENCIL_OP_ZFAIL: case NV097_SET_STENCIL_OP_ZPASS: {
+            unsigned operation;
+            switch (param) {
+            case NV097_SET_STENCIL_OP_V_KEEP: operation=NV_PGRAPH_CONTROL_2_STENCIL_OP_V_KEEP; break;
+            case NV097_SET_STENCIL_OP_V_ZERO: operation=NV_PGRAPH_CONTROL_2_STENCIL_OP_V_ZERO; break;
+            case NV097_SET_STENCIL_OP_V_REPLACE: operation=NV_PGRAPH_CONTROL_2_STENCIL_OP_V_REPLACE; break;
+            case NV097_SET_STENCIL_OP_V_INCRSAT: operation=NV_PGRAPH_CONTROL_2_STENCIL_OP_V_INCRSAT; break;
+            case NV097_SET_STENCIL_OP_V_DECRSAT: operation=NV_PGRAPH_CONTROL_2_STENCIL_OP_V_DECRSAT; break;
+            case NV097_SET_STENCIL_OP_V_INVERT: operation=NV_PGRAPH_CONTROL_2_STENCIL_OP_V_INVERT; break;
+            case NV097_SET_STENCIL_OP_V_INCR: operation=NV_PGRAPH_CONTROL_2_STENCIL_OP_V_INCR; break;
+            case NV097_SET_STENCIL_OP_V_DECR: operation=NV_PGRAPH_CONTROL_2_STENCIL_OP_V_DECR; break;
+            default: pgraph_stop(subchannel, graphics_class, method, param); return;
+            }
             SET_MASK(pg->regs[NV_PGRAPH_CONTROL_2],
                      method == NV097_SET_STENCIL_OP_FAIL ? NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL :
                      method == NV097_SET_STENCIL_OP_ZFAIL ? NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL :
                                                           NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS,
-                     NV_PGRAPH_CONTROL_2_STENCIL_OP_V_KEEP);
+                     operation);
             return;
+        }
         case NV097_SET_POLYGON_OFFSET_SCALE_FACTOR: case NV097_SET_POLYGON_OFFSET_BIAS:
-            if (param & 0x7FFFFFFF) pgraph_stop(subchannel, graphics_class, method, param);
             pg->regs[method == NV097_SET_POLYGON_OFFSET_SCALE_FACTOR ? NV_PGRAPH_ZOFFSETFACTOR :
                                                                        NV_PGRAPH_ZOFFSETBIAS] = param;
             return;
@@ -906,15 +1184,18 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
             if (param > 1) pgraph_stop(subchannel, graphics_class, method, param);
             SET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER], NV_PGRAPH_SETUPRASTER_POINTSMOOTHENABLE, param);
             return;
-        case NV097_SET_LINE_SMOOTH_ENABLE: case NV097_SET_POLY_SMOOTH_ENABLE:
         case NV097_SET_POLY_OFFSET_POINT_ENABLE: case NV097_SET_POLY_OFFSET_LINE_ENABLE: case NV097_SET_POLY_OFFSET_FILL_ENABLE:
-            if (param) pgraph_stop(subchannel, graphics_class, method, param);
+            if (param > 1) pgraph_stop(subchannel, graphics_class, method, param);
             SET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER],
-                     method == NV097_SET_LINE_SMOOTH_ENABLE ? NV_PGRAPH_SETUPRASTER_LINESMOOTHENABLE :
-                     method == NV097_SET_POLY_SMOOTH_ENABLE ? NV_PGRAPH_SETUPRASTER_POLYSMOOTHENABLE :
                      method == NV097_SET_POLY_OFFSET_POINT_ENABLE ? NV_PGRAPH_SETUPRASTER_POFFSETPOINTENABLE :
                      method == NV097_SET_POLY_OFFSET_LINE_ENABLE ? NV_PGRAPH_SETUPRASTER_POFFSETLINEENABLE :
-                                                                NV_PGRAPH_SETUPRASTER_POFFSETFILLENABLE, 0);
+                                                                NV_PGRAPH_SETUPRASTER_POFFSETFILLENABLE, param);
+            return;
+        case NV097_SET_LINE_SMOOTH_ENABLE: case NV097_SET_POLY_SMOOTH_ENABLE:
+            if (param > 1) pgraph_stop(subchannel, graphics_class, method, param);
+            SET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER],
+                     method == NV097_SET_LINE_SMOOTH_ENABLE ? NV_PGRAPH_SETUPRASTER_LINESMOOTHENABLE :
+                                                           NV_PGRAPH_SETUPRASTER_POLYSMOOTHENABLE, param);
             return;
         case NV097_SET_POINT_SIZE:
             if (param <= NV097_SET_POINT_SIZE_V_MAX)
@@ -927,8 +1208,7 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
             return;
         case NV097_SET_EDGE_FLAG:
             if (param > 1) pgraph_stop(subchannel, graphics_class, method, param);
-            /* Boundary flags do not change filled polygon pixels. Wireframe
-             * modes remain unsupported by the connected pixel consumer. */
+            /* Vertex submission captures this standing boundary identity. */
             pg->edge_flag = param;
             return;
         case NV097_SET_LINE_WIDTH:
@@ -936,9 +1216,11 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
             SET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER], NV_PGRAPH_SETUPRASTER_LINEWIDTH, param);
             return;
         case NV097_SET_ANTI_ALIASING_CONTROL:
-            /* Observed disabled mode, including its all-samples mask. */
-            if (param != 0 && param != 0xFFFF0000) pgraph_stop(subchannel, graphics_class, method, param);
-            SET_MASK(pg->regs[NV_PGRAPH_ANTIALIASING], NV_PGRAPH_ANTIALIASING_ENABLE, 0);
+            /* With a single-sample surface, control1 suppresses analytic
+             * LINE/POLY smoothing. Other masks/flags have no established consumer. */
+            if (param != 0 && param != 0xFFFF0000 && param != 0xFFFF0001) pgraph_stop(subchannel, graphics_class, method, param);
+            SET_MASK(pg->regs[NV_PGRAPH_ANTIALIASING], NV_PGRAPH_ANTIALIASING_ENABLE,
+                     (param & NV097_SET_ANTI_ALIASING_CONTROL_ENABLE)!=0);
             return;
         case NV097_SET_SWATH_WIDTH:
             /* Envytools' class-97 hardware method test maps the low nibble
@@ -951,11 +1233,12 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
             SET_MASK(pg->regs[NV_PGRAPH_ZCOMPRESSOCCLUDE], NV_PGRAPH_ZCOMPRESSOCCLUDE_OCCLUDE_ENABLE, param);
             return;
         case NV097_SET_POLYGON_STIPPLE_ENABLE:
-            if (param) pgraph_stop(subchannel, graphics_class, method, param);
+            if (param > 1) pgraph_stop(subchannel, graphics_class, method, param);
+            SET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER], NV_PGRAPH_SETUPRASTER_STIPPLEENABLE, param);
             return;
         case NV097_SET_LOGIC_OP_ENABLE:
-            if (param) pgraph_stop(subchannel, graphics_class, method, param);
-            SET_MASK(pg->regs[NV_PGRAPH_BLEND], NV_PGRAPH_BLEND_LOGICOP_ENABLE, 0); return;
+            if (param > 1) pgraph_stop(subchannel, graphics_class, method, param);
+            SET_MASK(pg->regs[NV_PGRAPH_BLEND], NV_PGRAPH_BLEND_LOGICOP_ENABLE, param); return;
         case NV097_SET_LOGIC_OP:
             if (param < 0x1500 || param > 0x150F) pgraph_stop(subchannel, graphics_class, method, param);
             SET_MASK(pg->regs[NV_PGRAPH_BLEND], NV_PGRAPH_BLEND_LOGICOP, param & 0xF); return;
@@ -964,6 +1247,14 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
             /* The original pixel backend keeps logical depth decoded. Its
              * surface cache retains this storage mode with the DMA identity. */
             SET_MASK(pg->regs[NV_PGRAPH_ZCOMPRESSOCCLUDE], NV_PGRAPH_ZCOMPRESSOCCLUDE_COMPRESS_ENABLE, param);
+            return;
+        case NV097_SET_EYE_VECTOR:
+        case NV097_SET_EYE_VECTOR+4:
+        case NV097_SET_EYE_VECTOR+8:
+            pg->regs[NV_PGRAPH_EYEVEC0+(method-NV097_SET_EYE_VECTOR)]=param;
+            return;
+        case NV097_SET_DOT_RGBMAPPING:
+            SET_MASK(pg->regs[NV_PGRAPH_SHADERCTL],0xFFF,GET_MASK(param,0xFFF));
             return;
         case NV097_SET_SHADER_OTHER_STAGE_INPUT:
             SET_MASK(pg->regs[NV_PGRAPH_SHADERCTL], 0xFFFF000, GET_MASK(param, 0xFFFF000));
@@ -1017,6 +1308,13 @@ static void pgraph_class_method(NV2AState *d, uint32_t subchannel,
         }
         if (method >= NV097_SET_COLOR_KEY_COLOR && method < NV097_SET_COLOR_KEY_COLOR + 16) {
             pg->regs[NV_PGRAPH_COLORKEYCOLOR0 + method - NV097_SET_COLOR_KEY_COLOR] = param;
+            return;
+        }
+        if (method == NV097_SET_TEXGEN_VIEW_MODEL) {
+            if (param > NV097_SET_TEXGEN_VIEW_MODEL_INFINITE_VIEWER) {
+                pgraph_stop(subchannel,graphics_class,method,param);
+            }
+            SET_MASK(pg->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_TEXGEN_REF,param);
             return;
         }
         if (method >= NV097_SET_TEXGEN_S && method < NV097_SET_TEXGEN_S + 64) {
@@ -1327,6 +1625,8 @@ NV2AState *nv2a_init_standalone(uint8_t *vram_ptr, uint32_t vram_size,
     /* Default PLL: 233 MHz core clock (Xbox default) */
     d->pramdac.core_clock_coeff = 0x00011C01; /* n=0x1C, m=1, p=0 */
     d->pramdac.core_clock_freq = NV2A_CRYSTAL_FREQ * 0x1C; /* ~233 MHz */
+
+    d->pgraph.edge_flag = 1;
 
     /* Default timer divisors */
     d->ptimer.numerator = 1;

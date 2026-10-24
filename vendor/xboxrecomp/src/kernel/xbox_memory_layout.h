@@ -264,6 +264,7 @@ void xbox_WatchInit(void);
 #define KDATA_FILE_OBJ_TYPE     0x0C0  /* IoFileObjectType (4 bytes) */
 #define KDATA_TIME_INCREMENT    0x0D0  /* KeTimeIncrement (4 bytes) */
 #define KDATA_BOOT_SMC_VIDEO    0x0E0  /* HalBootSMCVideoMode (4 bytes) */
+#define KDATA_SHUTDOWN_HEAD     0x700 /* Guest HAL shutdown LIST_ENTRY (8 bytes). */
 #define KDATA_IDEX_CHANNEL      0x500  /* IDE_CHANNEL_OBJECT (512-byte reserved region) */
 #define KDATA_HD_KEY            0x100  /* XboxHDKey (16 bytes) */
 #define KDATA_SIGNATURE_KEY     0x110  /* XboxSignatureKey (16 bytes) */
@@ -336,7 +337,10 @@ typedef struct XboxGuestRegisters {
     uint8_t xmm[8][16];
     int32_t fp_top, fp_cmp, df;
     uint16_t fp_control_word, fp_cc;
-    uint32_t interrupt_state, irql;
+    uint16_t fp_status_word, fp_tag_word, fp_opcode, fp_code_selector, fp_data_selector;
+    uint32_t fp_instruction_pointer, fp_data_pointer, mxcsr;
+    uint8_t fp_raw[8][10];
+    uint32_t interrupt_state, irql, eflags;
 } XboxGuestRegisters;
 void xbox_CaptureGuestRegisters(XboxGuestRegisters *);
 int xbox_ValidateGuestRegisters(const XboxGuestRegisters *);

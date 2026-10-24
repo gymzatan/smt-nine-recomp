@@ -1,17 +1,14 @@
 /*
- * kernel_io.c - I/O Manager Stubs
- *
- * Implements IoCreateDevice, IoDeleteDevice, IRP management, and I/O
- * completion stubs.
- *
- * The Xbox I/O manager is used internally by XDK libraries (DSOUND, D3D,
- * storage drivers). Since we replace those libraries entirely with Win32
- * equivalents, most I/O manager functions are stubs that return success.
+ * kernel_io.c - Exported I/O type objects and the existing path-link index.
+ * Device bodies, references, IRPs and callbacks share kernel_bridge.c's
+ * guest object table, dispatcher objects and continuation engine.
  */
 
 #include "kernel.h"
+#include "xbox_memory_layout.h"
 #include <string.h>
 #include <stdlib.h>
+extern ptrdiff_t g_xbox_mem_offset;
 
 /* ============================================================================
  * Type Object Pointers
@@ -30,421 +27,86 @@ PVOID xbox_IoCompletionObjectType = &g_completion_object_type_data;
 PVOID xbox_IoFileObjectType       = &g_file_object_type_data;
 
 /* ============================================================================
- * Device Management
- *
- * IoCreateDevice/IoDeleteDevice create kernel device objects. Since we
- * don't have real kernel drivers, we allocate dummy objects that satisfy
- * the interface without actual device functionality.
- * ============================================================================ */
-
-/* Minimal device object - just enough to not crash if someone reads fields */
-typedef struct _XBOX_FAKE_DEVICE {
-    ULONG Type;
-    ULONG Size;
-    PVOID DeviceExtension;
-    PVOID DriverObject;
-} XBOX_FAKE_DEVICE;
-
-NTSTATUS __stdcall xbox_IoCreateDevice(
-    PVOID DriverObject,
-    ULONG DeviceExtensionSize,
-    PXBOX_ANSI_STRING DeviceName,
-    ULONG DeviceType,
-    BOOLEAN Exclusive,
-    PVOID* DeviceObject)
-{
-    XBOX_FAKE_DEVICE* device;
-    ULONG total_size;
-
-    (void)DriverObject;
-    (void)DeviceType;
-    (void)Exclusive;
-
-    if (!DeviceObject)
-        return STATUS_INVALID_PARAMETER;
-
-    total_size = sizeof(XBOX_FAKE_DEVICE) + DeviceExtensionSize;
-    device = (XBOX_FAKE_DEVICE*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, total_size);
-    if (!device) {
-        *DeviceObject = NULL;
-        return STATUS_NO_MEMORY;
-    }
-
-    device->Type = DeviceType;
-    device->Size = total_size;
-    device->DriverObject = DriverObject;
-    device->DeviceExtension = (DeviceExtensionSize > 0)
-        ? (PVOID)((UCHAR*)device + sizeof(XBOX_FAKE_DEVICE))
-        : NULL;
-
-    *DeviceObject = device;
-
-    xbox_log(XBOX_LOG_DEBUG, XBOX_LOG_IO,
-        "IoCreateDevice: '%.*s' type=%u ext_size=%u → %p",
-        DeviceName ? DeviceName->Length : 0,
-        DeviceName ? DeviceName->Buffer : "<null>",
-        DeviceType, DeviceExtensionSize, device);
-
-    return STATUS_SUCCESS;
-}
-
-VOID __stdcall xbox_IoDeleteDevice(PVOID DeviceObject)
-{
-    if (DeviceObject) {
-        xbox_log(XBOX_LOG_DEBUG, XBOX_LOG_IO,
-            "IoDeleteDevice: %p", DeviceObject);
-        HeapFree(GetProcessHeap(), 0, DeviceObject);
-    }
-}
-
-/* ============================================================================
- * IRP Management Stubs
- *
- * IRPs (I/O Request Packets) are the core mechanism for driver I/O on Xbox.
- * Since we don't use real drivers, these are all stubs.
- * ============================================================================ */
-
-VOID __stdcall xbox_IoInitializeIrp(PVOID Irp, USHORT PacketSize, CCHAR StackSize)
-{
-    (void)StackSize;
-    if (Irp)
-        memset(Irp, 0, PacketSize);
-}
-
-VOID __stdcall xbox_IoStartNextPacket(PVOID DeviceObject, BOOLEAN Cancelable)
-{
-    (void)DeviceObject;
-    (void)Cancelable;
-}
-
-VOID __stdcall xbox_IoStartNextPacketByKey(PVOID DeviceObject, BOOLEAN Cancelable, ULONG Key)
-{
-    (void)DeviceObject;
-    (void)Cancelable;
-    (void)Key;
-}
-
-VOID __stdcall xbox_IoStartPacket(PVOID DeviceObject, PVOID Irp, PULONG Key, PVOID CancelFunction)
-{
-    (void)DeviceObject;
-    (void)Irp;
-    (void)Key;
-    (void)CancelFunction;
-}
-
-VOID __stdcall xbox_IoMarkIrpMustComplete(PVOID Irp)
-{
-    (void)Irp;
-}
-
-/* ============================================================================
- * I/O Completion Ports
- * ============================================================================ */
-
-NTSTATUS __stdcall xbox_IoSetIoCompletion(
-    PVOID IoCompletion,
-    PVOID KeyContext,
-    PVOID ApcContext,
-    NTSTATUS IoStatus,
-    ULONG_PTR IoStatusInformation)
-{
-    (void)IoCompletion;
-    (void)KeyContext;
-    (void)ApcContext;
-    (void)IoStatus;
-    (void)IoStatusInformation;
-
-    xbox_log(XBOX_LOG_TRACE, XBOX_LOG_IO,
-        "IoSetIoCompletion: completion=%p status=0x%08X (stubbed)",
-        IoCompletion, IoStatus);
-
-    return STATUS_SUCCESS;
-}
-
-/* ============================================================================
- * Synchronous Device I/O
- *
- * These functions perform synchronous I/O through the driver stack.
- * Stubbed since we replace all Xbox drivers.
- * ============================================================================ */
-
-NTSTATUS __stdcall xbox_IoSynchronousDeviceIoControlRequest(
-    ULONG IoControlCode,
-    PVOID DeviceObject,
-    PVOID InputBuffer,
-    ULONG InputBufferLength,
-    PVOID OutputBuffer,
-    ULONG OutputBufferLength,
-    PULONG ReturnedOutputBufferLength,
-    BOOLEAN InternalDeviceIoControl)
-{
-    (void)IoControlCode;
-    (void)DeviceObject;
-    (void)InputBuffer;
-    (void)InputBufferLength;
-    (void)OutputBuffer;
-    (void)OutputBufferLength;
-    (void)InternalDeviceIoControl;
-
-    if (ReturnedOutputBufferLength)
-        *ReturnedOutputBufferLength = 0;
-
-    xbox_log(XBOX_LOG_TRACE, XBOX_LOG_IO,
-        "IoSynchronousDeviceIoControlRequest: ioctl=0x%08X device=%p (stubbed)",
-        IoControlCode, DeviceObject);
-
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS __stdcall xbox_IoBuildDeviceIoControlRequest(
-    ULONG IoControlCode,
-    PVOID DeviceObject,
-    PVOID InputBuffer,
-    ULONG InputBufferLength,
-    PVOID OutputBuffer,
-    ULONG OutputBufferLength,
-    BOOLEAN InternalDeviceIoControl,
-    HANDLE Event,
-    PXBOX_IO_STATUS_BLOCK IoStatusBlock)
-{
-    (void)IoControlCode;
-    (void)DeviceObject;
-    (void)InputBuffer;
-    (void)InputBufferLength;
-    (void)OutputBuffer;
-    (void)OutputBufferLength;
-    (void)InternalDeviceIoControl;
-    (void)Event;
-
-    if (IoStatusBlock) {
-        IoStatusBlock->Status = STATUS_SUCCESS;
-        IoStatusBlock->Information = 0;
-    }
-
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS __stdcall xbox_IoSynchronousFsdRequest(
-    ULONG MajorFunction,
-    PVOID DeviceObject,
-    PVOID Buffer,
-    ULONG Length,
-    PLARGE_INTEGER StartingOffset)
-{
-    (void)MajorFunction;
-    (void)DeviceObject;
-    (void)Buffer;
-    (void)Length;
-    (void)StartingOffset;
-
-    xbox_log(XBOX_LOG_TRACE, XBOX_LOG_IO,
-        "IoSynchronousFsdRequest: major=%u device=%p (stubbed)",
-        MajorFunction, DeviceObject);
-
-    return STATUS_SUCCESS;
-}
-
-PVOID __stdcall xbox_IoBuildSynchronousFsdRequest(
-    ULONG MajorFunction,
-    PVOID DeviceObject,
-    PVOID Buffer,
-    ULONG Length,
-    PLARGE_INTEGER StartingOffset,
-    HANDLE Event,
-    PXBOX_IO_STATUS_BLOCK IoStatusBlock)
-{
-    (void)DeviceObject;
-    (void)Buffer;
-    (void)Length;
-    (void)StartingOffset;
-    (void)Event;
-
-    /*
-     * Returns a built IRP for the caller to hand to IofCallDriver. We have no
-     * driver stack, so there is nothing meaningful to build. Returning NULL is
-     * the documented allocation-failure path, which callers already handle;
-     * inventing a fake IRP would only push the failure to whoever dereferences
-     * it. IoStatusBlock is filled in so a caller that reads it without checking
-     * the return sees a coherent result.
-     */
-    if (IoStatusBlock) {
-        IoStatusBlock->Status = STATUS_SUCCESS;
-        IoStatusBlock->Information = 0;
-    }
-
-    xbox_log(XBOX_LOG_WARN, XBOX_LOG_IO,
-        "IoBuildSynchronousFsdRequest: major=%u len=%u - no driver stack, returning NULL",
-        MajorFunction, Length);
-
-    return NULL;
-}
-
-/* ============================================================================
- * Driver Dispatch
- *
- * IofCallDriver/IofCompleteRequest are __fastcall on Xbox (the 'f' suffix).
- * Getting the convention wrong here corrupts the stack at every call site.
- * ============================================================================ */
-
-NTSTATUS __fastcall xbox_IofCallDriver(PVOID DeviceObject, PVOID Irp)
-{
-    (void)DeviceObject;
-    (void)Irp;
-
-    xbox_log(XBOX_LOG_TRACE, XBOX_LOG_IO,
-        "IofCallDriver: device=%p irp=%p (stubbed)", DeviceObject, Irp);
-
-    return STATUS_SUCCESS;
-}
-
-VOID __fastcall xbox_IofCompleteRequest(PVOID Irp, CCHAR PriorityBoost)
-{
-    (void)Irp;
-    (void)PriorityBoost;
-}
-
-NTSTATUS __stdcall xbox_IoInvalidDeviceRequest(PVOID DeviceObject, PVOID Irp)
-{
-    (void)DeviceObject;
-    (void)Irp;
-
-    /*
-     * The default dispatch entry for major functions a driver does not handle.
-     * Its whole contract is to reject, so this is a real implementation rather
-     * than a stub.
-     */
-    return STATUS_INVALID_DEVICE_REQUEST;
-}
-
-/* ============================================================================
  * Symbolic Links
  *
- * Games create links like \??\D: -> \Device\Cdrom0. Actual path translation is
- * table-driven in kernel_path.c, which already knows the standard Xbox drive
- * letters, so these only need to record the mapping and stay consistent:
- * creating a duplicate must collide, and deleting an unknown link must fail.
+ * The object table owns names, target references and lifetime. This existing
+ * path index connects drive spellings to those same guest objects.
  * ============================================================================ */
 
-#define XBOX_MAX_SYMLINKS 32
 
-typedef struct _XBOX_SYMLINK {
-    char link[64];
-    char target[128];
-    BOOL used;
-} XBOX_SYMLINK;
-
-static XBOX_SYMLINK g_symlinks[XBOX_MAX_SYMLINKS];
+/* The existing path map now joins to the object table by guest identity.
+ * Counted names and targets live in guest allocations, carried by the same
+ * RAM snapshot as the object. Slots are reused and grow only with live links. */
+typedef struct XBOX_SYMLINK {uint32_t object,name,length,used;} XBOX_SYMLINK;
+static XBOX_SYMLINK *g_symlinks;
+static uint32_t g_symlink_count;
+static char *link_pointer(uint32_t address) {return address?(char *)((uintptr_t)address+g_xbox_mem_offset):NULL;}
+static XBOX_SYMLINK *xbox_find_symlink(const char *name) {
+    if(!name || strlen(name)>UINT16_MAX)return NULL;
+    XBOX_ANSI_STRING wanted={(USHORT)strlen(name),(USHORT)strlen(name),(PCHAR)name};
+    for(uint32_t i=0;i<g_symlink_count;i++)if(g_symlinks[i].used) {
+        XBOX_ANSI_STRING stored={(USHORT)g_symlinks[i].length,(USHORT)g_symlinks[i].length,link_pointer(g_symlinks[i].name)};
+        if(xbox_RtlEqualString(&wanted,&stored,TRUE))return &g_symlinks[i];
+    }
+    return NULL;
+}
+const char *xbox_LookupSymbolicLink(const char *name) {
+    XBOX_SYMLINK *entry=xbox_find_symlink(name);
+    return entry?link_pointer(*(uint32_t *)(link_pointer(entry->object)+8)):NULL;
+}
+uint32_t xbox_LookupSymbolicLinkTarget(const char *name) {
+    XBOX_SYMLINK *entry=xbox_find_symlink(name);
+    return entry?*(uint32_t *)link_pointer(entry->object):0;
+}
+NTSTATUS xbox_RegisterSymbolicLink(uint32_t object,PXBOX_ANSI_STRING name) {
+    uint32_t index;
+    for(index=0;index<g_symlink_count;index++)if(!g_symlinks[index].object)break;
+    if(index==g_symlink_count) {
+        if(g_symlink_count==UINT32_MAX/sizeof *g_symlinks)return STATUS_INSUFFICIENT_RESOURCES;
+        XBOX_SYMLINK *grown=realloc(g_symlinks,((size_t)g_symlink_count+1)*sizeof *grown);
+        if(!grown)return STATUS_INSUFFICIENT_RESOURCES;
+        g_symlinks=grown;memset(&g_symlinks[g_symlink_count++],0,sizeof *g_symlinks);
+    }
+    uint32_t storage=xbox_HeapAlloc((uint32_t)name->Length+1,1);if(!storage)return STATUS_INSUFFICIENT_RESOURCES;
+    memcpy(link_pointer(storage),name->Buffer,name->Length);link_pointer(storage)[name->Length]=0;
+    g_symlinks[index]=(XBOX_SYMLINK){object,storage,name->Length,1};return 0;
+}
+void xbox_UnlinkSymbolicLink(uint32_t object) {
+    for(uint32_t i=0;i<g_symlink_count;i++)if(g_symlinks[i].object==object)g_symlinks[i].used=0;
+}
+void xbox_ReleaseSymbolicLink(uint32_t object) {
+    for(uint32_t i=0;i<g_symlink_count;i++)if(g_symlinks[i].object==object) {
+        xbox_HeapFree(g_symlinks[i].name);memset(&g_symlinks[i],0,sizeof g_symlinks[i]);break;
+    }
+}
+typedef struct SavedIoNamespace {uint32_t count;XBOX_SYMLINK *links;} SavedIoNamespace;
+void xbox_DiscardIoNamespace(void *state) {
+    SavedIoNamespace *saved=state;if(!saved)return;
+    free(saved->links);free(saved);
+}
 int xbox_SaveIoNamespace(FILE *out) {
-    return out && xbox_CheckpointFrozen() && fwrite("XBNAMES",7,1,out)==1 && fwrite(g_symlinks,sizeof g_symlinks,1,out)==1;
+    return out && xbox_CheckpointFrozen() && fwrite("XBNAMES",7,1,out)==1 && fwrite(&g_symlink_count,4,1,out)==1 &&
+        (!g_symlink_count || fwrite(g_symlinks,sizeof *g_symlinks,g_symlink_count,out)==g_symlink_count);
 }
 void *xbox_PrepareIoNamespace(FILE *in) {
     if(!in || !xbox_CheckpointFrozen())return NULL;
-    XBOX_SYMLINK *saved=malloc(sizeof g_symlinks);if(!saved)return NULL;
-    char magic[7];int ok=fread(magic,7,1,in)==1 && !memcmp(magic,"XBNAMES",7) && fread(saved,sizeof g_symlinks,1,in)==1;
-    for(unsigned i=0;ok && i<XBOX_MAX_SYMLINKS;i++) {
-        ok=(saved[i].used==FALSE || saved[i].used==TRUE) && memchr(saved[i].link,0,sizeof saved[i].link) && memchr(saved[i].target,0,sizeof saved[i].target);
-        for(unsigned j=0;ok && saved[i].used && j<i;j++)ok=!saved[j].used || strcmp(saved[j].link,saved[i].link)!=0;
+    char magic[7];uint32_t count;
+    if(fread(magic,7,1,in)!=1 || memcmp(magic,"XBNAMES",7) || fread(&count,4,1,in)!=1 ||
+       count>xbox_GetMappedSize()/sizeof(XBOX_SYMLINK))return NULL;
+    SavedIoNamespace *saved=calloc(1,sizeof *saved);if(!saved)return NULL;
+    saved->count=count;saved->links=count?malloc((size_t)count*sizeof *saved->links):NULL;
+    int ok=!count || (saved->links && fread(saved->links,sizeof *saved->links,count,in)==count);
+    for(uint32_t i=0;ok && i<count;i++) {
+        XBOX_SYMLINK *entry=&saved->links[i];ok=entry->used<=1;
+        if(entry->object) {
+            ok=ok && entry->object>=0x1000 && (uint64_t)entry->object+12<=xbox_GetMappedSize() &&
+                entry->name>=0x1000 && entry->length && entry->length<=UINT16_MAX &&
+                (uint64_t)entry->name+entry->length+1<=xbox_GetMappedSize() && !link_pointer(entry->name)[entry->length];
+        } else ok=ok && !entry->name && !entry->length && !entry->used;
     }
-    if(!ok){free(saved);return NULL;}return saved;
+    if(!ok){xbox_DiscardIoNamespace(saved);return NULL;}return saved;
 }
-void xbox_ApplyIoNamespace(void *saved) {memcpy(g_symlinks,saved,sizeof g_symlinks);}
-
-/* Copy a counted, non-NUL-terminated ANSI_STRING into a C buffer. */
-static void xbox_copy_ansi(char* dst, size_t dst_size, PXBOX_ANSI_STRING src)
-{
-    size_t n;
-
-    if (!dst || dst_size == 0)
-        return;
-    dst[0] = '\0';
-    if (!src || !src->Buffer)
-        return;
-
-    n = (size_t)src->Length;
-    if (n >= dst_size)
-        n = dst_size - 1;
-    memcpy(dst, src->Buffer, n);
-    dst[n] = '\0';
-}
-
-static XBOX_SYMLINK* xbox_find_symlink(const char* name)
-{
-    int i;
-    for (i = 0; i < XBOX_MAX_SYMLINKS; i++) {
-        if (g_symlinks[i].used && strcmp(g_symlinks[i].link, name) == 0)
-            return &g_symlinks[i];
-    }
-    return NULL;
-}
-
-const char* xbox_LookupSymbolicLink(const char* link)
-{
-    XBOX_SYMLINK* entry;
-
-    if (!link)
-        return NULL;
-    entry = xbox_find_symlink(link);
-    return entry ? entry->target : NULL;
-}
-
-NTSTATUS __stdcall xbox_IoCreateSymbolicLink(
-    PXBOX_ANSI_STRING SymbolicLinkName,
-    PXBOX_ANSI_STRING DeviceName)
-{
-    char link[64], target[128];
-    int i;
-
-    if (!SymbolicLinkName)
-        return STATUS_INVALID_PARAMETER;
-
-    xbox_copy_ansi(link, sizeof(link), SymbolicLinkName);
-    xbox_copy_ansi(target, sizeof(target), DeviceName);
-
-    if (link[0] == '\0')
-        return STATUS_INVALID_PARAMETER;
-
-    if (xbox_find_symlink(link)) {
-        xbox_log(XBOX_LOG_WARN, XBOX_LOG_IO,
-            "IoCreateSymbolicLink: '%s' already exists", link);
-        return STATUS_OBJECT_NAME_COLLISION;
-    }
-
-    for (i = 0; i < XBOX_MAX_SYMLINKS; i++) {
-        if (!g_symlinks[i].used) {
-            g_symlinks[i].used = TRUE;
-            strcpy(g_symlinks[i].link, link);
-            strcpy(g_symlinks[i].target, target);
-            xbox_log(XBOX_LOG_DEBUG, XBOX_LOG_IO,
-                "IoCreateSymbolicLink: '%s' -> '%s'", link, target);
-            return STATUS_SUCCESS;
-        }
-    }
-
-    xbox_log(XBOX_LOG_ERROR, XBOX_LOG_IO,
-        "IoCreateSymbolicLink: table full (%d), dropping '%s'",
-        XBOX_MAX_SYMLINKS, link);
-    return STATUS_INSUFFICIENT_RESOURCES;
-}
-
-NTSTATUS __stdcall xbox_IoDeleteSymbolicLink(PXBOX_ANSI_STRING SymbolicLinkName)
-{
-    char link[64];
-    XBOX_SYMLINK* entry;
-
-    if (!SymbolicLinkName)
-        return STATUS_INVALID_PARAMETER;
-
-    xbox_copy_ansi(link, sizeof(link), SymbolicLinkName);
-    entry = xbox_find_symlink(link);
-    if (!entry) {
-        xbox_log(XBOX_LOG_WARN, XBOX_LOG_IO,
-            "IoDeleteSymbolicLink: '%s' not found", link);
-        return STATUS_OBJECT_NAME_NOT_FOUND;
-    }
-
-    xbox_log(XBOX_LOG_DEBUG, XBOX_LOG_IO, "IoDeleteSymbolicLink: '%s'", link);
-    entry->used = FALSE;
-    entry->link[0] = '\0';
-    entry->target[0] = '\0';
-    return STATUS_SUCCESS;
+void xbox_ApplyIoNamespace(void *state) {
+    SavedIoNamespace *saved=state;
+    free(g_symlinks);g_symlinks=saved->links;g_symlink_count=saved->count;saved->links=NULL;
 }

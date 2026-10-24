@@ -32,7 +32,7 @@ def test_decoded_port_instruction_executes(opcode, read, width, immediate):
     input_value = 0x88776655
     expected_eax = ((initial & ~mask) | (input_value & mask)) if read else initial
     expected_port = 0xC0 if immediate else 0x80C0
-    header = Path(__file__).resolve().parents[2] / "templates/runtime/recomp_types.h"
+    header = Path(__file__).resolve().parents[4] / "config/recomp_types.h"
     program = f'''
 #include "{header.as_posix()}"
 #include <assert.h>
@@ -59,7 +59,7 @@ int main(void) {{
         root = Path(temporary)
         source = root / "ports.c"
         source.write_text(program, encoding="utf-8")
-        built = subprocess.run([compiler, "/nologo", "/O2", str(source),
+        built = subprocess.run([compiler, "/nologo", "/O2", "/I"+str(header.parents[1]/"vendor/xboxrecomp/src"), str(source),
                                 f"/Fe:{root / 'ports.exe'}"],
                                cwd=root, capture_output=True, text=True)
         assert built.returncode == 0, built.stdout + built.stderr

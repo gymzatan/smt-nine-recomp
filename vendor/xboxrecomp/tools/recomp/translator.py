@@ -323,8 +323,8 @@ FP_STACK_MACROS = [
     "    #define fp_stack_top g_fp_top",
     "    #define fp_push(v) do { double _fp_value = (v); \\",
     "        fp_stack_top = (fp_stack_top + 7u) & 7u; \\",
-    "        g_fp_stack[fp_stack_top] = _fp_value; } while (0)",
-    "    #define fp_pop() (fp_stack_top = (fp_stack_top + 1u) & 7u)",
+    "        g_fp_stack[fp_stack_top] = _fp_value; recomp_fp_commit(fp_stack_top); } while (0)",
+    "    #define fp_pop() (recomp_fp_set_tag(fp_stack_top, 3), fp_stack_top = (fp_stack_top + 1u) & 7u)",
     "    #define fp_top() g_fp_stack[fp_stack_top]",
     "    #define fp_st(i) g_fp_stack[(fp_stack_top + (i)) & 7u]",
     "    #define fp_st1() fp_st(1)",
@@ -480,6 +480,7 @@ class FunctionTranslator:
                              xbe_data=xbe_data, seh_prolog=seh_prolog,
                              setjmp_fn=setjmp_fn, longjmp_fn=longjmp_fn,
                              seh_epilog=seh_epilog)
+        self.lifter.architectural_flags = True
         self.owned_function_starts = set()
         self.recovered_function_starts = set()
         self.coalesced_function_starts = set()
@@ -2111,6 +2112,11 @@ class FunctionTranslator:
 
         # Determine which registers are used
         used_regs = self._find_used_registers(instructions)
+        self.lifter.fault_resume_addresses = (
+            {insn.address for block in blocks for insn in block.instructions}
+            if any(insn.mnemonic in ("div", "idiv") for insn in instructions) else set())
+        if self.lifter.fault_resume_addresses:
+            used_regs.add("ebp")
         used_xmm = self._find_used_xmm(instructions)
         has_prologue = self._func_has_prologue(instructions)
         has_fpu = any(insn.mnemonic.startswith("f") for insn in instructions)
@@ -2355,9 +2361,10 @@ class FunctionTranslator:
         # reads is the lifter's tracking rule, mirrored here so only the
         # functions that consume CF declare it: computing it beside every add
         # in the image would be a line per add in 48,000 functions.
-        has_carry = self._function_needs_cf(instructions)
+        has_carry = self.lifter.architectural_flags or self._function_needs_cf(instructions)
         if has_carry:
-            lines.append(f"    int _cf = 0; /* carry flag */")
+            lines.append("    int _cf = (int)(g_eflags & 1u); /* carry flag */" if self.lifter.architectural_flags
+                         else "    int _cf = 0; /* carry flag */")
         # Only functions that consume CF pay for producing it: an adc/sbb
         # reading a never-written _cf silently drops every carry, which
         # corrupts multi-word arithmetic (add/adc pairs) and the shr/adc
@@ -2646,6 +2653,7 @@ class FunctionTranslator:
         integer = {"mov", "lea", "add", "sub", "and", "or", "xor", "inc",
                    "dec", "cmp", "test", "sar", "shr", "shl", "cdq", "nop"}
         if (not instructions or not any(i.mnemonic in fpu for i in instructions)
+                or self.lifter.fault_resume_addresses
                 or start in ENTRY_HOOKS or start in self.trace_functions
                 or start in self.force_returns
                 or any(i.is_call or i.is_ret for i in instructions)
@@ -2790,7 +2798,15 @@ class FunctionTranslator:
                          if f"/* longjmp 0x{insn.call_target:08X} */" in line]
                 if len(matches)!=1:
                     raise ValueError(f"Continuation cannot identify longjmp at 0x{insn.address:08X}")
-                lines[matches[0]]="    if (!recomp_guest_longjmp(MEM32(esp), MEM32(esp + 4))) recomp_cont_invalid();"
+                buffer=f"_cont_longjmp_buffer_{insn.address:08X}"
+                value=f"_cont_longjmp_value_{insn.address:08X}"
+                captured.extend((buffer,value))
+                label=f"cont_longjmp_{insn.address:08X}"
+                sites[(1<<32)|insn.address]=label
+                lines[matches[0]]=(f"    {buffer} = MEM32(esp); {value} = MEM32(esp + 4);\n"
+                    f"    recomp_cont_site(&_cont_frame, 0x1{insn.address:08X}ULL);\n"
+                    f"{label}: ;\n"
+                    f"    if (!recomp_guest_longjmp({buffer}, {value})) recomp_cont_invalid();")
                 continue
             marker = f"PUSH32(esp, 0x{insn.end_address:08X}u); "
             matches = [i for i, line in enumerate(lines) if marker in line]
@@ -2828,6 +2844,36 @@ class FunctionTranslator:
                         f"    recomp_cont_site(&_cont_frame, 0x1{insn.address:08X}ULL);\n"
                         f"{label}: ;\n    " + rest + "\n"
                         "    recomp_cont_site(&_cont_frame, 0);")
+        # CPU faults are native calls made by a lifted instruction, not x86
+        # CALLs. Preserve their input boundary exactly like the saved kind-1
+        # call sites above so a waiting exception callback can rebuild it.
+        for insn in instructions:
+            if insn.mnemonic not in ("div", "idiv"):
+                continue
+            pattern=re.compile(r"uint32_t _resume=xbox_CpuException\(([^,]+),0x"+
+                               f"{insn.address:08X}"+r"u,([^;]+)\);")
+            matches=[(i,pattern.search(line)) for i,line in enumerate(lines) if pattern.search(line)]
+            if len(matches)!=1:
+                raise ValueError(f"Continuation cannot identify CPU fault call at 0x{insn.address:08X}")
+            i,match=matches[0]
+            code=f"_cont_fault_code_{insn.address:08X}"
+            address=f"_cont_fault_address_{insn.address:08X}"
+            frame=f"_cont_fault_ebp_{insn.address:08X}"
+            result=f"_cont_fault_result_{insn.address:08X}"
+            captured.extend((code,address,frame,result))
+            label=f"cont_call_{insn.address:08X}"
+            sites[(1<<32)|insn.address]=label
+            replacement=(f"{code}={match[1]}; {address}=0x{insn.address:08X}u; {frame}={match[2]};\n"
+                         f"    recomp_cont_site(&_cont_frame, 0x1{insn.address:08X}ULL);\n"
+                         f"{label}: ;\n"
+                         f"    {result}=xbox_CpuException({code},{address},{frame});")
+            lines[i]=lines[i][:match.start()]+replacement+lines[i][match.end():]
+            for j in range(i+1,len(lines)):
+                if lines[j].strip()=="} else {":
+                    break
+                lines[j]=re.sub(r"\b_resume\b",result,lines[j])
+                lines[j]=re.sub(r"(case 0x[0-9A-F]+u:) (goto cpu_resume_[0-9A-F]+;)",
+                                r"\1 recomp_cont_site(&_cont_frame, 0); \2",lines[j])
         # External branches retain the original frame until their callee
         # returns. Re-enter at the call itself, after condition/target reads.
         tail_insns = [insn for insn in instructions
@@ -2875,6 +2921,7 @@ class FunctionTranslator:
                 if not any(l.startswith(label + ":") for l in lines):
                     raise ValueError(f"Continuation has missing loop site 0x{address:08X}")
                 sites[(2 << 32) | address] = label
+                sites[(10 << 32) | address] = label
                 return (f"recomp_cont_site(&_cont_frame, 0x2{address:08X}ULL); "
                         f"guest_cpu_yield(); goto {label};")
             lines[i] = re.sub(r"guest_cpu_yield\(\); goto loc_([0-9A-F]+);",
@@ -2910,7 +2957,9 @@ class FunctionTranslator:
             ])
         prelude.append("    switch (_cont_resume) {")
         prelude.append("    case 0: break;")
-        prelude.extend(f"    case 0x{site:09X}ULL: goto {label};" for site, label in sorted(sites.items()))
+        prelude.extend(f"    case 0x{site:09X}ULL: " +
+                       ("guest_cpu_yield(); " if site >> 32 == 10 else "") +
+                       f"goto {label};" for site, label in sorted(sites.items()))
         prelude.append("    default: recomp_cont_invalid();")
         prelude.append("    }")
         lines[first_label:first_label] = prelude

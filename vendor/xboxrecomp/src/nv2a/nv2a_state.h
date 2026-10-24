@@ -62,7 +62,11 @@ struct PGRAPHState {
     uint32_t regs[0x2000];
     struct {
         uint32_t dma_notifies, dma_in, dma_out;
+        uint32_t offset_in,offset_out,pitch_in,pitch_out,line_length,line_count,format,valid;
+        uint32_t notify_pending,notify_type,notify_subchannel,notify_instance;
     } memory_to_memory;
+    struct { uint32_t object_instance, value; } beta;
+    struct { uint32_t object_instance, point, size; } clip_rectangle;
     struct {
         uint32_t object_instance, dma_image_source, dma_image_dest;
         uint32_t color_format, source_pitch, dest_pitch;
@@ -76,6 +80,7 @@ struct PGRAPHState {
     uint32_t dma_notifies, dma_a, dma_b, dma_state, dma_color, dma_zeta;
     uint32_t dma_vertex_a, dma_vertex_b, dma_semaphore, dma_report;
     uint32_t edge_flag;
+    uint32_t polygon_stipple[32];
     bool waiting_for_nop;
     bool texture_matrix_enable[4];
     float point_params[8];
@@ -85,6 +90,8 @@ struct PGRAPHState {
     float light_infinite_half_vector[8][4], light_infinite_direction[8][4];
     float light_local_position[8][4], light_local_attenuation[8][4];
     float material_alpha, specular_params[6];
+    float back_material_alpha, back_specular_params[6];
+    uint32_t back_material_sources;
 };
 
 /* ============================================================

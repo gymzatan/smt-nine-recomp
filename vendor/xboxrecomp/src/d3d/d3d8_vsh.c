@@ -45,7 +45,7 @@ static ID3D11Buffer *g_vsh_cb = NULL;
 static ID3D11Buffer *g_vsh_geometry_cb = NULL;
 static NV2ANativeGeometry g_vsh_geometry_value;
 static BOOL g_vsh_geometry_valid;
-static ID3D11GeometryShader *g_vsh_geometry_shader[3];
+static ID3D11GeometryShader *g_vsh_geometry_shader[9];
 static ID3D11VertexShader *g_vsh_fixed_shader;
 static ID3D11InputLayout *g_vsh_fixed_layout;
 static ID3D11Buffer *g_vsh_fixed_cb;
@@ -958,7 +958,7 @@ void d3d8_vsh_shutdown(void)
         g_vsh_cb = NULL;
     }
 
-    for(unsigned i=0;i<3;i++) if(g_vsh_geometry_shader[i]) { ID3D11GeometryShader_Release(g_vsh_geometry_shader[i]); g_vsh_geometry_shader[i]=NULL; }
+    for(unsigned i=0;i<9;i++) if(g_vsh_geometry_shader[i]) { ID3D11GeometryShader_Release(g_vsh_geometry_shader[i]); g_vsh_geometry_shader[i]=NULL; }
     if(g_vsh_geometry_cb) { ID3D11Buffer_Release(g_vsh_geometry_cb); g_vsh_geometry_cb=NULL; }
     g_vsh_geometry_valid=FALSE;
     if(g_vsh_fixed_shader) { ID3D11VertexShader_Release(g_vsh_fixed_shader);g_vsh_fixed_shader=NULL; }

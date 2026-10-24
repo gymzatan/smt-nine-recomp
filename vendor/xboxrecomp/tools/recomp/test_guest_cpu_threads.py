@@ -25,15 +25,55 @@ void fixture_memory_init(void) {
     g_tls_template_va=0x6000; g_tls_total=16; g_tls_thread_size=64;
     g_fs_base=XBOX_TIB_MAIN; g_esp=0x80000;
 }
+void fixture_prepare_dpc_stack(void) {
+    /* This DPC scenario bypasses main-PCR bootstrap. Use its original allocator. */
+    uint32_t tib=xbox_AllocThreadTib();assert(tib);
+    *(uint32_t *)((uintptr_t)g_memory_offset+XBOX_TIB_MAIN+0x5c)=
+        *(uint32_t *)((uintptr_t)g_memory_offset+tib+0x5c);
+}
+void fixture_deferred_fp_capture(void) {
+    XboxGuestRegisters saved,observed;xbox_CaptureGuestRegisters(&saved);
+    g_fp_stack[3]=1.25;g_fp_alias_dirty=8;g_fp_tag_word=0xffff;
+    xbox_CaptureGuestRegisters(&observed);
+    assert(!g_fp_alias_dirty && observed.fp_tag_word==0xffff);
+    assert(observed.mm[3]==0xa000000000000000ULL);
+    assert(observed.fp_raw[3][8]==0xff && observed.fp_raw[3][9]==0x3f);
+    g_fp_alias_dirty=1;assert(xbox_RestoreGuestRegisters(&saved));assert(!g_fp_alias_dirty);
+}
+void fixture_pcr_tls_layout(void) {
+#define TEST_GUEST(va) ((void *)((uintptr_t)g_memory_offset+(va)))
+    for(unsigned i=0;i<16;i++)*(uint8_t*)TEST_GUEST(0x6000+i)=(uint8_t)(0x80+i);
+    uint32_t tib=xbox_AllocThreadTib();assert(tib);
+    uint32_t tls_end=*(uint32_t*)TEST_GUEST(tib+4),thread=*(uint32_t*)TEST_GUEST(tib+0x28);
+    assert(tls_end==tib+0x60+16);
+    uint32_t tls_thread=*(uint32_t*)TEST_GUEST(tls_end-16);
+    assert(tls_thread==tls_end && thread==tls_thread+64);
+    uint32_t top=*(uint32_t*)TEST_GUEST(tib+0x5c);
+    assert(top-0x3000>=thread+0x140 && top<=tib+xbox_HeapBlockSize(tib));
+    memset(TEST_GUEST(top-0x3000),0x5a,0x3000);
+    for(unsigned i=4;i<16;i++)assert(*(uint8_t*)TEST_GUEST(tls_end-16+i)==0x80+i);
+    assert(*(uint32_t*)TEST_GUEST(tib+0x58)==0);
+    assert(*(uint32_t*)TEST_GUEST(thread+0x134)==thread+0x134);
+    xbox_HeapFree(tib);assert(!xbox_HeapBlockSize(tib));
+}
+#undef TEST_GUEST
 '''
     program = r'''
 #include <windows.h>
+static volatile LONG fixture_tick_reads;
+static ULONGLONG WINAPI fixture_tick_count(void) {
+    InterlockedIncrement(&fixture_tick_reads);return GetTickCount64();
+}
+#define GetTickCount64 fixture_tick_count
 #include "kernel/kernel_bridge.c"
+#undef GetTickCount64
 #include "kernel/kernel_rtl.c"
 #include "apu/apu_state.h"
 #include "apu/apu.h"
 #include <assert.h>
 void fixture_memory_init(void);
+void fixture_pcr_tls_layout(void);
+void fixture_prepare_dpc_stack(void);
 extern MCPXAPUState *g_state;
 static HANDLE entered,started;
 static volatile LONG changed;
@@ -59,13 +99,13 @@ static void wait_objects_probe(void) {
     assert(xbox_NtWaitForSingleObject(notification,FALSE,&zero)==STATUS_TIMEOUT);
     HANDLE pair[2]={automatic,CreateEventA(0,FALSE,FALSE,0)};assert(pair[1]);
     assert(SetEvent(pair[0]));
-    assert(xbox_NtWaitForMultipleObjectsEx(2,pair,0,FALSE,&zero)==STATUS_TIMEOUT);
+    assert(xbox_NtWaitForMultipleObjectsEx(2,pair,0,UserMode,FALSE,&zero)==STATUS_TIMEOUT);
     assert(SetEvent(pair[1]));
-    assert(xbox_NtWaitForMultipleObjectsEx(2,pair,0,FALSE,&zero)==STATUS_SUCCESS);
+    assert(xbox_NtWaitForMultipleObjectsEx(2,pair,0,UserMode,FALSE,&zero)==STATUS_SUCCESS);
     assert(xbox_NtWaitForSingleObject(pair[0],FALSE,&zero)==STATUS_TIMEOUT);
     assert(xbox_NtWaitForSingleObject(pair[1],FALSE,&zero)==STATUS_TIMEOUT);
     assert(SetEvent(pair[1]));
-    assert(xbox_NtWaitForMultipleObjectsEx(2,pair,1,FALSE,&zero)==1);
+    assert(xbox_NtWaitForMultipleObjectsEx(2,pair,1,UserMode,FALSE,&zero)==1);
     assert(xbox_NtWaitForSingleObject(pair[1],FALSE,&zero)==STATUS_TIMEOUT);
     assert(QueueUserAPC(wait_apc,GetCurrentThread(),0));
     assert(xbox_NtWaitForSingleObject(notification,TRUE,&zero)==STATUS_ALERTED && changed==1);
@@ -80,14 +120,20 @@ static DWORD WINAPI context_worker(void *param) {
     xbox_CaptureGuestRegisters(&state); assert(state.eax==0x1234);
     return 0;
 }
+void fixture_deferred_fp_capture(void);
 static void context_probe(const char *path,int restore) {
+    fixture_deferred_fp_capture();
     XboxGuestRegisters initial,expected,actual;
     xbox_CaptureGuestRegisters(&initial);
     expected=initial;
     expected.eax=0x89abcdef; expected.ebp=0x23456789; expected.seh_ebp=0x3456789a;
     expected.fs_base=0x6000; expected.fp_top=7; expected.fp_cmp=-1; expected.df=1;
     expected.fp_control_word=0x127f; expected.fp_cc=0x4500;
-    expected.interrupt_state=3; expected.irql=16;
+    expected.fp_status_word=0x82a1; expected.fp_tag_word=0x391b; expected.fp_opcode=0x6db;
+    expected.fp_instruction_pointer=0x239c19; expected.fp_data_pointer=0x87654321;
+    expected.fp_code_selector=8;expected.fp_data_selector=16;expected.mxcsr=0x5f80;
+    for(unsigned i=0;i<8;i++)for(unsigned j=0;j<10;j++)expected.fp_raw[i][j]=(uint8_t)(i*13+j);
+    expected.interrupt_state=3; expected.irql=16; expected.eflags=0x246ed7;
     for(unsigned i=0;i<8;i++) {
         expected.fp_stack[i]=0x7ff8000000000042ULL+i;
         expected.mm[i]=0x89abcdef01234567ULL+i;
@@ -133,7 +179,7 @@ static void probe_guest(void) {
         InterlockedIncrement(&changed); SetEvent(entered);
         g_esp+=20;
     } else if(mode==5) {
-        assert(t_guest_held && xbox_CurrentIrql()==16);
+        assert(t_guest_held && xbox_CurrentIrql()==22);
         assert(!apu_retired && changed==0);
         retire_thread=CreateThread(0,0,retire_worker,0,0,0); assert(retire_thread);
         assert(WaitForSingleObject(retire_started,5000)==WAIT_OBJECT_0);
@@ -239,7 +285,16 @@ int main(int argc,char **argv) {
     fixture_memory_init(); _putenv_s("RECOMP_GUEST_LOCK","1"); _putenv_s("RECOMP_GPU_TIMING","1");
     entered=CreateEventA(0,1,0,0); started=CreateEventA(0,1,0,0);
     guest_cpu_join();
-    if(strcmp(argv[1],"critical_leave")==0) {
+    if(strcmp(argv[1],"yield_idle")==0) {
+        assert(!ReadAcquire(&g_guest_cpu_waiters) && !ReadAcquire(&g_dpc_cpu_waiters));
+        uint64_t joins=t_guest_cpu_timing->join_count,yields=t_guest_cpu_timing->yield_count;
+        t_guest_yield_tick=0;InterlockedExchange(&fixture_tick_reads,0);
+        for(unsigned i=0;i<128;i++)guest_cpu_yield();
+        assert(!ReadAcquire(&fixture_tick_reads) && t_guest_yield_tick==0);
+        assert(t_guest_held && t_guest_cpu_timing->join_count==joins && t_guest_cpu_timing->yield_count==yields);
+        guest_cpu_part();
+    } else if(strcmp(argv[1],"pcr_layout")==0) {fixture_pcr_tls_layout();}
+    else if(strcmp(argv[1],"critical_leave")==0) {
         ULONG ordinals[]={277,294,291};bridge_func_t bridges[]={bridge_RtlEnterCriticalSection,bridge_RtlLeaveCriticalSection,bridge_RtlInitializeCriticalSection};
         for(unsigned i=0;i<3;i++){g_slot_ordinals[i+1]=ordinals[i];g_slot_bridges[i+1]=bridges[i];g_slot_arg_bytes[i+1]=4;}
         critical_call(291);uint64_t fast_before=t_guest_cpu_timing->join_count;
@@ -308,6 +363,7 @@ int main(int argc,char **argv) {
         assert(WaitForSingleObject(t,5000)==WAIT_OBJECT_0 && changed==1);
         CloseHandle(t);
     } else if(strcmp(argv[1],"dpc_priority")==0) {
+        fixture_prepare_dpc_stack();
         mode=3;
         BRIDGE_MEM32(0x2000+12)=0x20000;
         call_slot(160,bridge_KfRaiseIrql,DISPATCH_LEVEL);
@@ -343,6 +399,7 @@ int main(int argc,char **argv) {
         MCPXAPUState *apu=calloc(1,sizeof(*apu)); assert(apu);
         qemu_mutex_init(&apu->lock); qemu_cond_init(&apu->cond); g_state=apu;
         g_connected_isr[5]=0x2000; BRIDGE_MEM32(0x2000)=0x20000;
+        BRIDGE_MEM32(0x2008)=5;BRIDGE_MEM32(0x200c)=22;BRIDGE_MEM8(0x2010)=1;
         mcpx_apu_mmio_write(apu,NV_PAPU_IEN,0x11,4);
         mcpx_apu_mmio_write(apu,NV_PAPU_FECTL,0x1FEF,4);
         apu->regs[NV_PAPU_ISTS]=NV_PAPU_ISTS_FETINTSTS;
@@ -444,7 +501,7 @@ int main(int argc,char **argv) {
         libraries.append(dsp_jit)
         result = subprocess.run([compiler,"/nologo","/O2","/Gy","/MD","/utf-8","/DWIN32_LEAN_AND_MEAN",
             "/DNOMINMAX","/I"+str(root/"src"),str(work/"memory.c"),
-            str(work/"threads.c"),str(root/"src/kernel/kernel_hal.c"),
+            str(work/"threads.c"),str(root/"src/kernel/kernel_hal.c"),str(root/"src/kernel/recomp_continuation.c"),
             "/Fe:"+str(work/"threads.exe"),"/link","/OPT:REF",*[str(p) for p in libraries],
             "kernel32.lib","user32.lib","gdi32.lib","advapi32.lib","ole32.lib","shell32.lib",
             "d3d11.lib","d3d12.lib","dxgi.lib","dxguid.lib","d3dcompiler.lib","winmm.lib",
@@ -454,7 +511,7 @@ int main(int argc,char **argv) {
         yield work/"threads.exe"
 
 
-@pytest.mark.parametrize("mode",["critical_leave","event_idle","handoff_stress","pcr","raise","dpc","dpc_priority","apu_idle","apu_irq","quantum","resume","kernel_resume","irql","inline","register_context","wait_objects","checkpoint_backedge"])
+@pytest.mark.parametrize("mode",["yield_idle","pcr_layout","critical_leave","event_idle","handoff_stress","pcr","raise","dpc","dpc_priority","apu_idle","apu_irq","quantum","resume","kernel_resume","irql","inline","register_context","wait_objects","checkpoint_backedge"])
 def test_original_thread_and_thunk_ownership(native_thread_probe,mode):
     subprocess.run([str(native_thread_probe),mode],check=True,timeout=12)
 

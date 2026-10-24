@@ -659,6 +659,7 @@ void xbox_PortWrite(uint16_t port, uint32_t value, unsigned width,
 
 VOID __stdcall xbox_HalReturnToFirmware(ULONG Routine)
 {
+    if(Routine==2)xbox_HalNotifyShutdown();
     xbox_log(XBOX_LOG_INFO, XBOX_LOG_HAL,
         "HalReturnToFirmware: routine=%u (exiting)", Routine);
     /* stderr too: the kernel log file is rewritten on every run, so a title
@@ -1090,20 +1091,6 @@ PVOID xbox_IdexChannelObject = &g_idex_channel_data;
  * Shutdown Notification
  * ============================================================================ */
 
-VOID __stdcall xbox_HalRegisterShutdownNotification(
-    PVOID ShutdownRegistration,
-    BOOLEAN Register)
-{
-    /*
-     * Registers a callback to run on reboot/shutdown. We never initiate an
-     * Xbox-style shutdown -- HalReturnToFirmware terminates the process -- so
-     * the callback would never fire. Recorded in the log so a title relying on
-     * shutdown cleanup is visible rather than silently ignored.
-     */
-    xbox_log(XBOX_LOG_DEBUG, XBOX_LOG_HAL,
-        "HalRegisterShutdownNotification: %s registration=%p (never invoked)",
-        Register ? "register" : "unregister", ShutdownRegistration);
-}
 
 /* ============================================================================
  * Unknown Ordinal Stubs

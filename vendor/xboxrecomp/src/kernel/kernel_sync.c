@@ -16,6 +16,17 @@
 
 #include "kernel.h"
 
+/* NT event operations return the previous state in the same operation that
+ * changes it. Querying and then setting cannot preserve that contract when a
+ * synchronization-event waiter consumes the signal between the two calls. */
+#if defined(_WIN32)
+__declspec(dllimport) NTSTATUS NTAPI NtSetEvent(HANDLE, PLONG);
+__declspec(dllimport) NTSTATUS NTAPI NtResetEvent(HANDLE, PLONG);
+__declspec(dllimport) NTSTATUS NTAPI NtPulseEvent(HANDLE, PLONG);
+__declspec(dllimport) NTSTATUS NTAPI NtSignalAndWaitForSingleObject(HANDLE,HANDLE,BOOLEAN,PLARGE_INTEGER);
+#endif
+
+
 /* ============================================================================
  * Helper: Convert NT 100ns interval to Win32 milliseconds
  *
@@ -25,7 +36,7 @@
  *   - NULL = infinite wait
  * ============================================================================ */
 
-static DWORD xbox_nt_timeout_to_ms(PLARGE_INTEGER Timeout)
+DWORD xbox_nt_timeout_to_ms(PLARGE_INTEGER Timeout)
 {
     if (!Timeout)
         return INFINITE;
@@ -68,9 +79,9 @@ NTSTATUS __stdcall xbox_NtCreateEvent(
     HANDLE hEvent;
     BOOL bManualReset;
 
-    (void)ObjectAttributes;
+    if(ObjectAttributes)return xbox_kernel_create_named(189,EventHandle,ObjectAttributes,EventType,InitialState);
 
-    if (!EventHandle)
+    if (!EventHandle || EventType>1)
         return STATUS_INVALID_PARAMETER;
 
     /* XboxNotificationEvent = manual-reset, XboxSynchronizationEvent = auto-reset */
@@ -94,17 +105,23 @@ NTSTATUS __stdcall xbox_NtCreateEvent(
 
 NTSTATUS __stdcall xbox_NtSetEvent(HANDLE EventHandle, PLONG PreviousState)
 {
-    if (PreviousState)
-        *PreviousState = 0; /* We don't track previous state */
+    NTSTATUS type=xbox_kernel_reject_timer_signal(EventHandle);
+    if(type<0)return type;
+    return NtSetEvent(EventHandle, PreviousState);
+}
 
-    if (!SetEvent(EventHandle)) {
-        xbox_log(XBOX_LOG_ERROR, XBOX_LOG_SYNC,
-            "NtSetEvent: SetEvent failed for handle %p (error %u)",
-            EventHandle, GetLastError());
-        return STATUS_INVALID_HANDLE;
-    }
+NTSTATUS __stdcall xbox_NtResetEvent(HANDLE EventHandle, PLONG PreviousState)
+{
+    NTSTATUS type=xbox_kernel_reject_timer_signal(EventHandle);
+    if(type<0)return type;
+    return NtResetEvent(EventHandle, PreviousState);
+}
 
-    return STATUS_SUCCESS;
+NTSTATUS __stdcall xbox_NtPulseEvent(HANDLE EventHandle, PLONG PreviousState)
+{
+    NTSTATUS type=xbox_kernel_reject_timer_signal(EventHandle);
+    if(type<0)return type;
+    return NtPulseEvent(EventHandle, PreviousState);
 }
 
 /*
@@ -120,9 +137,9 @@ LONG __stdcall xbox_KeSetEvent(PVOID Event, LONG Increment, BOOLEAN Wait)
     (void)Increment;
     (void)Wait;
 
-    /* We can't easily query previous state, so just set and return 0 */
-    SetEvent(hEvent);
-    return 0;
+    LONG previous = 0;
+    xbox_NtSetEvent(hEvent, &previous);
+    return previous;
 }
 
 /* ============================================================================
@@ -137,9 +154,9 @@ NTSTATUS __stdcall xbox_NtCreateSemaphore(
 {
     HANDLE hSemaphore;
 
-    (void)ObjectAttributes;
+    if(ObjectAttributes)return xbox_kernel_create_named(193,SemaphoreHandle,ObjectAttributes,(uint32_t)InitialCount,(uint32_t)MaximumCount);
 
-    if (!SemaphoreHandle)
+    if (!SemaphoreHandle || InitialCount<0 || MaximumCount<=0 || InitialCount>MaximumCount)
         return STATUS_INVALID_PARAMETER;
 
     hSemaphore = CreateSemaphoreW(NULL, InitialCount, MaximumCount, NULL);
@@ -182,46 +199,94 @@ NTSTATUS __stdcall xbox_NtReleaseSemaphore(
  */
 static NTSTATUS xbox_wait_result_to_ntstatus(DWORD result, ULONG count)
 {
+    if(result>=0xc0000000u && result!=WAIT_FAILED)return (NTSTATUS)result;
     if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + count)
         return (NTSTATUS)(STATUS_SUCCESS + (result - WAIT_OBJECT_0));
 
     switch (result) {
         case WAIT_TIMEOUT:          return STATUS_TIMEOUT;
         case WAIT_IO_COMPLETION:    return STATUS_ALERTED;
+        case XBOX_WAIT_USER_APC:    return (NTSTATUS)0xc0;
         case WAIT_ABANDONED_0:      return STATUS_ABANDONED;
         case WAIT_FAILED:           return STATUS_UNSUCCESSFUL;
         default:                    return STATUS_UNSUCCESSFUL;
     }
 }
 
-DWORD xbox_checkpoint_wait(ULONG count,const HANDLE *handles,BOOL wait_all,
-                           BOOLEAN alertable,DWORD milliseconds)
+static DWORD checkpoint_wait(ULONG count,const HANDLE *handles,BOOL wait_all,
+                           KPROCESSOR_MODE mode,BOOLEAN alertable,DWORD milliseconds,int signal_wait)
 {
-    int tracked=xbox_kernel_wait_tracked();
+    HANDLE owned[MAXIMUM_WAIT_OBJECTS];uint32_t tokens[MAXIMUM_WAIT_OBJECTS];
+    NTSTATUS status=xbox_kernel_wait_acquire(count,handles,owned,tokens);
+    if(status<0)return (DWORD)status;
+    if(signal_wait && (status=xbox_kernel_reject_timer_signal(owned[0]))<0) {
+        xbox_kernel_wait_release_objects(count,tokens);return (DWORD)status;
+    }
+    int signal_pending=signal_wait && !xbox_kernel_wait_signal_done();
+    int held=xbox_kernel_wait_release_cpu();
+    int tracked=xbox_kernel_wait_tracked(),poll=tracked || xbox_ThreadApcsEnabled();
+    DWORD outcome;
     if (tracked) milliseconds=xbox_kernel_wait_begin(milliseconds);
     ULONGLONG started=GetTickCount64();
     for (;;) {
         DWORD remaining=milliseconds;
-        if (tracked && milliseconds!=INFINITE) {
+        if (poll && milliseconds!=INFINITE) {
             ULONGLONG elapsed=GetTickCount64()-started;
             remaining=elapsed>=milliseconds?0:milliseconds-(DWORD)elapsed;
+        }
+        if(!signal_pending) {
+            xbox_kernel_wait_apc_begin(remaining);
+            int delivered=xbox_DeliverThreadApcs(alertable && mode==UserMode);
+            xbox_kernel_wait_apc_end();
+            if(delivered){outcome=XBOX_WAIT_USER_APC;break;}
+            if(poll && milliseconds!=INFINITE) {
+                ULONGLONG elapsed=GetTickCount64()-started;
+                remaining=elapsed>=milliseconds?0:milliseconds-(DWORD)elapsed;
+            }
         }
         if (tracked) {
             ULONGLONG boundary_started=GetTickCount64();
             xbox_kernel_wait_boundary(remaining);
             started+=GetTickCount64()-boundary_started;
         }
-        DWORD slice=tracked && remaining>10?10:remaining;
-        DWORD result=count?WaitForMultipleObjectsEx(count,handles,wait_all,slice,alertable):
-                           SleepEx(slice,alertable);
+        DWORD slice=poll && remaining>10?10:remaining;
+        uint32_t associated_queue=xbox_QueueThreadWaitBegin();
+        DWORD result;
+        if(signal_pending) {
+            LARGE_INTEGER due;due.QuadPart=-(LONGLONG)slice*10000;
+            result=(DWORD)NtSignalAndWaitForSingleObject(owned[0],owned[1],alertable,slice==INFINITE?NULL:&due);
+            /* No checkpoint is taken inside the atomic host operation. Its
+             * completed signal is persisted before the next wait boundary. */
+            signal_pending=0;xbox_kernel_wait_mark_signalled();
+            if(result==0xc0)result=WAIT_IO_COMPLETION;
+        } else if(signal_wait) result=WaitForSingleObjectEx(owned[1],slice,alertable);
+        else result=count?WaitForMultipleObjectsEx(count,owned,wait_all,slice,alertable):SleepEx(slice,alertable);
+        xbox_QueueThreadWaitEnd(associated_queue);
         if (!count && result==0) result=WAIT_TIMEOUT;
         /* A final-slice timeout already completes the remaining interval.
          * Do not repeat it while the coarser tick counter has not advanced. */
-        if (!tracked || result!=WAIT_TIMEOUT ||
+        if (!poll || result!=WAIT_TIMEOUT ||
             (milliseconds!=INFINITE && slice==remaining) ||
             (milliseconds!=INFINITE && GetTickCount64()-started>=milliseconds))
-            return result;
+            {outcome=result;break;}
     }
+    if(held)guest_cpu_join();
+    xbox_kernel_wait_release_objects(count,tokens);
+    return outcome;
+}
+
+DWORD xbox_checkpoint_wait(ULONG count,const HANDLE *handles,BOOL wait_all,
+                           KPROCESSOR_MODE mode,BOOLEAN alertable,DWORD milliseconds)
+{
+    return checkpoint_wait(count,handles,wait_all,mode,alertable,milliseconds,0);
+}
+
+NTSTATUS __stdcall xbox_NtSignalAndWaitForSingleObjectEx(
+    HANDLE Signal,HANDLE Wait,KPROCESSOR_MODE WaitMode,BOOLEAN Alertable,PLARGE_INTEGER Timeout)
+{
+    HANDLE objects[]={Signal,Wait};
+    return xbox_wait_result_to_ntstatus(checkpoint_wait(2,objects,FALSE,WaitMode,Alertable,
+                                        xbox_nt_timeout_to_ms(Timeout),1),1);
 }
 
 NTSTATUS __stdcall xbox_NtWaitForSingleObject(
@@ -230,7 +295,7 @@ NTSTATUS __stdcall xbox_NtWaitForSingleObject(
     PLARGE_INTEGER Timeout)
 {
     DWORD ms = xbox_nt_timeout_to_ms(Timeout);
-    DWORD result = xbox_checkpoint_wait(1,&Handle,FALSE,Alertable,ms);
+    DWORD result = xbox_checkpoint_wait(1,&Handle,FALSE,UserMode,Alertable,ms);
     return xbox_wait_result_to_ntstatus(result, 1);
 }
 
@@ -243,14 +308,7 @@ NTSTATUS __stdcall xbox_NtWaitForSingleObjectEx(
     DWORD ms = xbox_nt_timeout_to_ms(Timeout);
     DWORD result;
 
-    /*
-     * Same as NtWaitForSingleObject but with an explicit wait mode. We run
-     * everything in one host process with no kernel/user split, so WaitMode
-     * has nothing to select and is ignored.
-     */
-    (void)WaitMode;
-
-    result = xbox_checkpoint_wait(1,&Handle,FALSE,Alertable,ms);
+    result = xbox_checkpoint_wait(1,&Handle,FALSE,WaitMode,Alertable,ms);
     return xbox_wait_result_to_ntstatus(result, 1);
 }
 
@@ -258,6 +316,7 @@ NTSTATUS __stdcall xbox_NtWaitForMultipleObjectsEx(
     ULONG Count,
     HANDLE Handles[],
     ULONG WaitType,
+    KPROCESSOR_MODE WaitMode,
     BOOLEAN Alertable,
     PLARGE_INTEGER Timeout)
 {
@@ -268,7 +327,7 @@ NTSTATUS __stdcall xbox_NtWaitForMultipleObjectsEx(
     /* WaitType: 0 = WaitAll, 1 = WaitAny (matches NT definitions) */
     bWaitAll = (WaitType == 0) ? TRUE : FALSE;
 
-    result = xbox_checkpoint_wait(Count,Handles,bWaitAll,Alertable,ms);
+    result = xbox_checkpoint_wait(Count,Handles,bWaitAll,WaitMode,Alertable,ms);
     return xbox_wait_result_to_ntstatus(result, Count);
 }
 
@@ -285,11 +344,10 @@ NTSTATUS __stdcall xbox_KeWaitForSingleObject(
     PLARGE_INTEGER Timeout)
 {
     (void)WaitReason;
-    (void)WaitMode;
 
     HANDLE hObject = (HANDLE)Object;
     DWORD ms = xbox_nt_timeout_to_ms(Timeout);
-    DWORD result = xbox_checkpoint_wait(1,&hObject,FALSE,Alertable,ms);
+    DWORD result = xbox_checkpoint_wait(1,&hObject,FALSE,WaitMode,Alertable,ms);
     return xbox_wait_result_to_ntstatus(result, 1);
 }
 
@@ -304,14 +362,13 @@ NTSTATUS __stdcall xbox_KeWaitForMultipleObjects(
     PVOID WaitBlockArray)
 {
     (void)WaitReason;
-    (void)WaitMode;
     (void)WaitBlockArray;
 
     BOOL bWaitAll = (WaitType == 0) ? TRUE : FALSE;
     DWORD ms = xbox_nt_timeout_to_ms(Timeout);
 
     /* Objects[] is an array of PVOID which we treat as HANDLE[] */
-    DWORD result = xbox_checkpoint_wait(Count,(HANDLE*)Objects,bWaitAll,Alertable,ms);
+    DWORD result = xbox_checkpoint_wait(Count,(HANDLE*)Objects,bWaitAll,WaitMode,Alertable,ms);
     return xbox_wait_result_to_ntstatus(result, Count);
 }
 
@@ -603,12 +660,7 @@ BOOLEAN __stdcall xbox_KeSynchronizeExecution(
 
 NTSTATUS __stdcall xbox_NtClearEvent(HANDLE EventHandle)
 {
-    if (!ResetEvent(EventHandle)) {
-        xbox_log(XBOX_LOG_ERROR, XBOX_LOG_SYNC,
-            "NtClearEvent: ResetEvent failed (error %u)", GetLastError());
-        return STATUS_INVALID_HANDLE;
-    }
-    return STATUS_SUCCESS;
+    return xbox_NtResetEvent(EventHandle,NULL);
 }
 
 /* ============================================================================
@@ -622,7 +674,7 @@ NTSTATUS __stdcall xbox_NtCreateMutant(
 {
     HANDLE hMutex;
 
-    (void)ObjectAttributes;
+    if(ObjectAttributes)return xbox_kernel_create_named(192,MutantHandle,ObjectAttributes,InitialOwner,0);
 
     if (!MutantHandle)
         return STATUS_INVALID_PARAMETER;

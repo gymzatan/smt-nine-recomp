@@ -25,6 +25,8 @@ int nvk_completed(uint64_t serial);
 
 NvkImage *nvk_image_create(unsigned width,unsigned height,unsigned layers,
                           VkFormat format,int cube);
+/* Volume slices are z-major, each containing height rows at the upload/read pitch. */
+NvkImage *nvk_image_create_volume(unsigned width,unsigned height,unsigned depth,VkFormat format);
 void nvk_image_destroy(NvkImage *image);
 int nvk_image_upload(NvkImage *image,const void *pixels,size_t pitch);
 int nvk_image_read(NvkImage *image,void *pixels,size_t pitch);
@@ -62,6 +64,7 @@ typedef struct NvkDraw {
     const void *vertices;
     size_t vertex_bytes;
     unsigned stride,count;
+    unsigned draw_first,draw_count;
     const uint32_t *indices;
     /* Existing converted-vertex cache owns these range identities. */
     uint64_t *upload_generation;
@@ -78,6 +81,8 @@ typedef struct NvkDraw {
     VkStencilOpState stencil_state;
     VkBlendFactor source_blend,destination_blend;
     VkBlendOp blend_op;
+    VkBool32 logic;
+    VkLogicOp logic_op;
     VkColorComponentFlags color_mask;
     NvkQuery *query;
 } NvkDraw;

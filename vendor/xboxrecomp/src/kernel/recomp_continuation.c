@@ -31,6 +31,9 @@ static CONT_TLS uint32_t recovery_count, recovery_next;
 static CONT_TLS uint32_t returned_jump_buffer;
 
 int recomp_cont_active(void) { return head != 0; }
+int recomp_cont_recovering(uint32_t function) {
+    return recovery && recovery_next<recovery_count && recovery[recovery_next].function==function;
+}
 RecompContFrame *recomp_cont_current(void) { return head; }
 
 void recomp_cont_invalid(void) {
@@ -52,7 +55,7 @@ static void discard_recovery(SavedFrame *frames, uint32_t count) {
 uint64_t recomp_cont_enter(RecompContFrame *f, uint32_t function,
                           const RecompContLocal *locals, size_t count) {
     f->function=function; f->site=0;
-    f->locals=locals; f->local_count=count; f->parent=head; f->jumps=0; f->on_leave=0; head=f;
+    f->locals=locals; f->local_count=count; f->parent=head; f->jumps=0; f->on_leave=0; f->on_unwind=0; f->retained=0; head=f;
     if (recovery) {
         SavedFrame *saved=&recovery[recovery_next];
         if (saved->function!=function || saved->count!=count)
@@ -130,6 +133,39 @@ int recomp_cont_jump_known(const RecompContFrame *f,uint32_t buffer) {
         if (p==f) return find_jump(f,buffer)!=0;
     return 0;
 }
+/* Preserve the original owners until cleanup finishes: callbacks can enter
+ * guest drivers and wait, so dropping their frame before cleanup loses the
+ * saved call path. The retained target itself is not being abandoned. */
+void recomp_cont_prepare_unwind(RecompContFrame *stop) {
+    if(!head) {if(stop)recomp_cont_invalid();return;}
+    RecompContFrame *owner=head;
+    while(owner && owner!=stop)owner=owner->parent;
+    if(stop && !owner)recomp_cont_invalid();
+    const uint32_t function=0xfe00074cu;
+    uint32_t depth=0,finishing=0;RecompContFrame frame;
+    const RecompContLocal locals[]={{"depth",&depth,4},{"finishing",&finishing,4}};
+    uint64_t resume=recomp_cont_enter(&frame,function,locals,2);
+    if(resume && resume!=((6ULL<<32)|function))recomp_cont_invalid();
+    recomp_cont_site(&frame,(6ULL<<32)|function);
+    owner=frame.parent;
+    for(uint32_t i=0;i<depth;i++) {
+        if(!owner || owner==stop)recomp_cont_invalid();owner=owner->parent;
+    }
+    if(resume) {
+        if(!finishing || !owner || owner==stop || !owner->on_unwind)recomp_cont_invalid();
+        goto finish;
+    }
+    for(;owner!=stop;owner=owner->parent,++depth) {
+        if(!owner)recomp_cont_invalid();
+        if(owner->on_unwind) {
+            finishing=1;
+finish:
+            owner->on_unwind(owner);finishing=0;
+        }
+    }
+    recomp_cont_leave(&frame);
+}
+
 void recomp_cont_unwind(RecompContFrame *f,uint32_t buffer) {
     RecompContFrame *p=head;
     while (p && p!=f) p=p->parent;
@@ -150,8 +186,8 @@ uint64_t recomp_cont_jump_return(RecompContFrame *f) {
 }
 /* The original guest EH runtime has already selected and unwound the catch.
  * Retain the same suspended callers and rebuild only their native C frames. */
-void recomp_cont_prepare_transfer(uint32_t frame_ebp, uint32_t target) {
-    if (recovery || !frame_ebp || !target) recomp_cont_invalid();
+RecompContFrame *recomp_cont_transfer_owner(uint32_t frame_ebp) {
+    if (recovery || !frame_ebp) recomp_cont_invalid();
     RecompContFrame *owner=0;
     for (RecompContFrame *f=head;f;f=f->parent) {
         for (size_t i=0;i<f->local_count;++i) {
@@ -164,6 +200,11 @@ void recomp_cont_prepare_transfer(uint32_t frame_ebp, uint32_t target) {
      * owns that guest activation; none of its fragments may be replayed. */
     if (!owner || ((owner->site>>32)!=1 && (owner->site>>32)!=3 &&
                    (owner->site>>32)!=7)) recomp_cont_invalid();
+    return owner;
+}
+void recomp_cont_prepare_transfer(uint32_t frame_ebp, uint32_t target) {
+    if (!target) recomp_cont_invalid();
+    RecompContFrame *owner=recomp_cont_transfer_owner(frame_ebp);
     uint32_t count=0;
     for (RecompContFrame *f=owner;f;f=f->parent) {
         if (count==UINT32_MAX || f->local_count>UINT32_MAX) recomp_cont_invalid();
@@ -190,7 +231,7 @@ void recomp_cont_prepare_transfer(uint32_t frame_ebp, uint32_t target) {
         }
         saved->jumps=f->jumps;f->jumps=0;
     }
-    while (head) recomp_cont_leave(head);
+    while (head) {head->retained=1;recomp_cont_leave(head);}
     recovery=frames;recovery_count=count;recovery_next=0;
 }
 
@@ -218,8 +259,8 @@ static size_t snapshot_depth(void) {
     size_t depth=0;
     for (RecompContFrame *f=head; f; f=f->parent) {
         if (!f->site || depth==UINT32_MAX || f->local_count>UINT32_MAX) return 0;
-        if (f!=head && (f->site>>32)!=1 && (f->site>>32)!=3 && (f->site>>32)!=7 &&
-            !((f->site>>32)==6 && (uint32_t)f->site==f->function)) return 0;
+        if (f!=head && (f->site>>32)!=1 && (f->site>>32)!=10 && (f->site>>32)!=3 && (f->site>>32)!=7 &&
+            !(((f->site>>32)==6 || (f->site>>32)==8 || (f->site>>32)==9 || (f->site>>32)==11) && (uint32_t)f->site==f->function)) return 0;
         ++depth;
     }
     if (depth>SIZE_MAX/sizeof(RecompContFrame *)) return 0;
@@ -278,7 +319,7 @@ static int read_recovery(FILE *in,SavedFrame **result,uint32_t *result_count) {
            read_u32(in,&f->count) && (size_t)f->count<=SIZE_MAX/sizeof(SavedLocal);
         if (ok) {
             uint64_t kind=f->site>>32;
-            ok=i+1<count ? (kind==1 || kind==3 || (kind==7 && (uint32_t)f->site) || (kind==6 && (uint32_t)f->site==f->function)) :
+            ok=i+1<count ? (kind==1 || kind==3 || ((kind==7 || kind==10) && (uint32_t)f->site) || ((kind==6 || kind==8 || kind==9 || kind==11) && (uint32_t)f->site==f->function)) :
                            (kind==2 || (kind==5 && (uint32_t)f->site==f->function));
         }
         if (!ok) break;

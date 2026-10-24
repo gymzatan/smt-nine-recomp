@@ -75,6 +75,7 @@ def binaries(tmp_path_factory, request):
 void sub_00011000(void); void sub_00012000(void); void sub_00013000(void);
 ptrdiff_t g_xbox_mem_offset;
 RECOMP_TLS uint32_t g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp,g_seh_ebp;
+RECOMP_TLS uint32_t g_eflags=0x202u;
 uint32_t g_xbox_code_lo=0x11000,g_xbox_code_hi=0x14000;
 volatile uint32_t g_icall_trace[ICALL_TRACE_SIZE],g_icall_trace_idx;
 volatile uint64_t g_icall_count;
@@ -90,16 +91,16 @@ static const char *snapshot;
 static int saving;
 static unsigned char *ram;
 static void write_arch(FILE *f) {
-    uint32_t regs[]={g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp,g_seh_ebp};
+    uint32_t regs[]={g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp,g_seh_ebp,g_eflags};
     assert(fwrite(regs,sizeof regs,1,f)==1);
     assert(fwrite(g_fp_stack,sizeof g_fp_stack,1,f)==1);
     assert(fwrite(&g_fp_top,sizeof g_fp_top,1,f)==1);
     assert(fwrite(ram,0x100000,1,f)==1);
 }
 static void read_arch(FILE *f) {
-    uint32_t r[9];assert(fread(r,sizeof r,1,f)==1);
+    uint32_t r[10];assert(fread(r,sizeof r,1,f)==1);
     g_eax=r[0];g_ecx=r[1];g_edx=r[2];g_esp=r[3];g_ebx=r[4];g_esi=r[5];
-    g_edi=r[6];g_ebp=r[7];g_seh_ebp=r[8];
+    g_edi=r[6];g_ebp=r[7];g_seh_ebp=r[8];g_eflags=r[9];
     assert(fread(g_fp_stack,sizeof g_fp_stack,1,f)==1);
     assert(fread(&g_fp_top,sizeof g_fp_top,1,f)==1);
     assert(fread(ram,0x100000,1,f)==1);

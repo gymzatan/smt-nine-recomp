@@ -22,6 +22,7 @@
 #include "nv2a_combiner.h"
 #include "../video/video_player.h"
 #include "../nv2a/nv2a_state.h"
+#include "../nv2a/nv2a_color_logic.h"
 #if defined(_WIN32)
 #include <windows.h>
 #include "../d3d/d3d8_internal.h"
@@ -154,6 +155,7 @@ typedef struct {
     uint32_t pitch;                     /* bytes per row, from CONTROL1  */
     uint32_t color;                     /* NV097 colour-format code      */
     uint32_t addr_u, addr_v;            /* wrap mode per axis            */
+    uint32_t border_color;
     uint32_t palette;                   /* guest address of the CLUT, P8 */
     uint32_t dma_palette;
     int palette_set;
@@ -168,11 +170,13 @@ typedef struct PbState {
     uint32_t   prim;                    /* SET_BEGIN_END parameter, 0 = ended */
     uint32_t   idx[NV_MAX_INDICES];
     uint32_t   idx_count;
+    uint8_t    idx_edge[NV_MAX_INDICES];
     /* INLINE_ARRAY payload: vertices written straight into the pushbuffer
      * instead of into a buffer the title points at. Same vertex format, a
      * different place to read them from. */
     uint32_t   inline_buf[NV_MAX_INLINE];
     uint32_t   inline_count;
+    uint8_t    inline_edge[NV_MAX_INLINE];
     /* Current values of the immediate-mode attributes, and how many complete
      * vertices they have produced in this batch. */
     /* Immediate mode: every attribute's current value, as the SET_VERTEX
@@ -237,7 +241,7 @@ typedef struct PbState {
     uint32_t xf_fmt[16];  /* attribute formats seen: type | size<<4 | slot<<8 */
     int xf_nfmt, xf_seeded;
     uint32_t depth_test, depth_func, depth_mask;
-    uint32_t zeta_offset, zstencil_clear;
+    uint32_t zeta_offset, zstencil_clear, zeta_pitch;
     uint64_t timing_frequency, draw_ticks, program_raster_ticks, raster_wait_ticks;
     uint64_t vertex_ticks, hardware_surface_ticks, hardware_texture_ticks;
     uint64_t hardware_state_ticks, hardware_submit_ticks, hardware_publish_ticks;
@@ -299,7 +303,19 @@ static uint8_t  s_tex_set[(NV_TEX_LAST - NV_TEX_FIRST) / 4 + 1];
  * and every place that used to test only for swizzled needs the pair. */
 static int tex_size_from_format(uint32_t fmt)
 {
-    return d3d8_format_is_swizzled(fmt) || d3d8_format_dxt_block_bytes(fmt);
+    return fmt==D3DFMT_D16 || fmt==D3DFMT_D24S8 || fmt==D3DFMT_F16 || fmt==D3DFMT_F24S8 || d3d8_format_is_swizzled(fmt) || d3d8_format_dxt_block_bytes(fmt);
+}
+
+static int texture_volume(const Texture *t) { return ((t->dma_format>>4)&15)==3; }
+static unsigned texture_depth(const Texture *t) { return texture_volume(t)?1u<<((t->dma_format>>28)&15):1; }
+static unsigned texture_address_w(unsigned stage) { return (nv2a_get_state()->pgraph.regs[NV_PGRAPH_TEXADDRESS0+stage*4]>>16)&15; }
+static uint32_t texture_volume_bytes(const Texture *t)
+{
+    uint64_t bytes=(uint64_t)t->width*t->height*texture_depth(t)*(d3d8_format_bpp((D3DFORMAT)t->color)/8);
+    if(t->cube || !d3d8_format_is_swizzled(t->color) || d3d8_format_dxt_block_bytes(t->color) || !bytes || bytes>UINT32_MAX) {
+        fprintf(stderr,"[STOP] volume requires noncompressed Morton level-zero storage\n");exit(5);
+    }
+    return (uint32_t)bytes;
 }
 
 static void note_unhandled(uint32_t method, uint32_t param);
@@ -313,8 +329,6 @@ static void tex_update_valid(Texture *t)
             && t->offset_set && t->width && t->height
             && (tex_size_from_format(t->color) || t->pitch);
     if (!t->valid) return;
-    if (control & NV_PGRAPH_TEXCTL0_0_COLORKEYMODE)
-        note_unhandled(NV097_SET_TEXTURE_CONTROL0 + stage * 64, control);
     if (t->valid) {
         t->offset = dma_resolve((t->dma_format & 3) == 2 ? pg->dma_b : pg->dma_a,
                                 t->dma_offset, 1);
@@ -427,6 +441,11 @@ static void note_unhandled(uint32_t method, uint32_t param)
     exit(5);
 }
 
+static float normalized_vertex_short(float value)
+{
+    return value / 32767.0f;
+}
+
 /* Read attribute `a` of vertex `index` as floats. Only the float and the
  * normalised-byte types appear in practice; anything else returns 0 so a
  * caller sees a degenerate vertex rather than reading past the array. */
@@ -484,7 +503,7 @@ static int fetch_attr(const VertexAttr * __restrict a, uint32_t index, float out
     /* The formats 3D geometry uses and screen-space quads never did. */
     case 1:                                  /* signed short, normalised */
         for (i = 0; i < a->size && i < 4; i++)
-            out[i] = (float)((const int16_t *)p)[i] / 32767.0f;
+            out[i] = normalized_vertex_short((float)((const int16_t *)p)[i]);
         return 1;
     case 5:                                  /* signed short, as is */
         for (i = 0; i < a->size && i < 4; i++)
@@ -697,6 +716,8 @@ static void dump_surface_bmp(void)
 
 /* Defined below, next to the rest of the rasteriser; the clear path uses it
  * for RECOMP_RASTER_TEST. */
+static int polygon_stipple_pass(unsigned x,unsigned y);
+
 static void raster_triangle(const float a[2], const float b[2],
                             const float c[2], uint32_t argb,
                             const float uv[3][2]);
@@ -950,7 +971,16 @@ static uint32_t wrap_coord(uint32_t c, uint32_t size, uint32_t mode)
         return 0;
     if (mode == 1)                         /* wrap */
         return (uint32_t)(((sc % n) + n) % n);
-    return sc < 0 ? 0u : (sc >= n ? size - 1 : c);   /* clamp, and the rest */
+    if (mode == 2) {                       /* mirrored repeat */
+        int64_t period = (int64_t)n * 2;
+        int64_t tap = ((int64_t)sc % period + period) % period;
+        return (uint32_t)(tap < n ? tap : period - 1 - tap);
+    }
+    if (mode == 5 && sc < 0) {            /* mirror once, then clamp */
+        int64_t tap = -(int64_t)sc - 1;
+        return tap >= n ? size - 1 : (uint32_t)tap;
+    }
+    return sc < 0 ? 0u : (sc >= n ? size - 1 : c);
 }
 
 static uint32_t expand(uint32_t v, uint32_t bits)
@@ -976,22 +1006,58 @@ static uint32_t linear_twin(uint32_t fmt)
     case 0x06: return 0x12;                /* A8R8G8B8  -> LIN_A8R8G8B8  */
     case 0x07: return 0x1E;                /* X8R8G8B8  -> LIN_X8R8G8B8  */
     case 0x19: return 0x1F;                /* A8        -> LIN_A8        */
+    case D3DFMT_AL8: return D3DFMT_LIN_AL8;
+    case D3DFMT_A8L8: return D3DFMT_LIN_A8L8;
+    case D3DFMT_R5G5B5A1: return D3DFMT_LIN_R5G5B5A1;
+    case D3DFMT_R4G4B4A4: return D3DFMT_LIN_R4G4B4A4;
+    case D3DFMT_A8B8G8R8: return D3DFMT_LIN_A8B8G8R8;
+    case D3DFMT_B8G8R8A8: return D3DFMT_LIN_B8G8R8A8;
+    case D3DFMT_R8G8B8A8: return D3DFMT_LIN_R8G8B8A8;
+    case D3DFMT_D16:return D3DFMT_LIN_D16;
+    case D3DFMT_D24S8:return D3DFMT_LIN_D24S8;
     default:   return fmt;                 /* already linear, or unhandled */
     }
 }
 
+static uint32_t pack_color(const float c[4]);
+static int texture_luma_format(const Texture *t) { return t->color==D3DFMT_LIN_L16; }
+static unsigned texture_shadow_bits(const Texture *t)
+{
+    switch(t->color){case D3DFMT_D16:case D3DFMT_LIN_D16:return 16;
+    case D3DFMT_D24S8:case D3DFMT_LIN_D24S8:return 24;default:return 0;}
+}
+static unsigned texture_shadow_mode(unsigned stage)
+{
+    const Texture *t=&s_gpu.texs[stage];unsigned bits=texture_shadow_bits(t);if(!bits)return 0;
+    unsigned mode=(s_gpu.rc.stage_program>>(stage*5))&31;
+    if(mode==0 || mode==4 || mode==5 || mode==17)return 0;
+    if(mode!=1 && mode!=2){fprintf(stderr,"[STOP] integer shadow texture stage mode %u is not implemented\n",mode);exit(5);}
+    if(t->cube || ((t->dma_format>>4)&15)!=2 || t->addr_u==4 || t->addr_v==4 ||
+       nv2a_get_state()->pgraph.regs[NV_PGRAPH_SHADOWZSLOPETHRESHOLD]!=0x7f800000u) {
+        fprintf(stderr,"[STOP] integer shadow requires 2D texture, established addressing and disabled slope threshold\n");exit(5);
+    }
+    return bits;
+}
 /* Sample texel (u, v) of stage texture `t`; `face` offsets a cube map. */
-static int sample_tex(const Texture *t, uint32_t face_offset,
-                      uint32_t u, uint32_t v, uint32_t *argb)
+static int sample_tex_value(const Texture *t, uint32_t face_offset,
+                      uint32_t u, uint32_t v, uint32_t z, unsigned addr_w, uint32_t *argb,float value[4])
 {
     const uint8_t *mem = (const uint8_t *)xbox_GetMemoryOffset();
     const uint8_t *p;
-    uint32_t fmt, base = t->offset + face_offset;
+    uint32_t fmt, base = t->offset + face_offset,local=0;
+    if(!argb)argb=&local;
 
     if (!t->valid)
         return 0;
+    if ((t->addr_u == 4 && ((int32_t)u < 0 || u >= t->width)) ||
+        (t->addr_v == 4 && ((int32_t)v < 0 || v >= t->height)) ||
+        (texture_volume(t) && addr_w == 4 && ((int32_t)z < 0 || z >= texture_depth(t)))) {
+        *argb = t->border_color;
+        goto decoded;
+    }
     u = wrap_coord(u, t->width,  t->addr_u);
     v = wrap_coord(v, t->height, t->addr_v);
+    if(texture_volume(t))z=wrap_coord(z,texture_depth(t),addr_w);
 
     fmt = t->color;
     if (d3d8_format_dxt_block_bytes(fmt)) {
@@ -1024,29 +1090,60 @@ static int sample_tex(const Texture *t, uint32_t face_offset,
             cache[slot].raw[1] = raw[1];
         }
         *argb = cache[slot].px[(v & 3) * 4 + (u & 3)];
-        return 1;
+        goto decoded;
     }
-    if (d3d8_format_is_swizzled(fmt)) {
+    if (fmt==D3DFMT_D16 || fmt==D3DFMT_D24S8 || d3d8_format_is_swizzled(fmt)) {
         /* Morton order: a texel's index is interleaved from x and y instead of
          * v*pitch + u, so index from the base of the image. The switch below
          * casts to each format's own width, which makes that index a texel
          * index for every one of them. */
         fmt = linear_twin(fmt);
         p = mem + base;
-        u = swizzle_offset(u, v, t->width, t->height);
+        u = texture_volume(t)?xbox_swizzle_offset_3d(u,v,z,t->width,t->height,texture_depth(t)):swizzle_offset(u, v, t->width, t->height);
     } else {
         p = mem + base + (size_t)v * t->pitch;
     }
 
+    /* These source layouts already have an authoritative conversion in the
+     * D3D resource layer. Consume its upload pixels, then use the existing
+     * corresponding linear sampler rather than reproduce its bit rules. */
+    uint8_t converted[4];
+    uint32_t converted_format = 0;
+    if(fmt==D3DFMT_LIN_AL8) converted_format=D3DFMT_LIN_A8L8;
+    else if(fmt==D3DFMT_LIN_R5G5B5A1) converted_format=D3DFMT_LIN_A1R5G5B5;
+    else if(fmt==D3DFMT_LIN_R4G4B4A4) converted_format=D3DFMT_LIN_A4R4G4B4;
+    if(converted_format) {
+        d3d8_convert_linear_pixels((D3DFORMAT)fmt,1,1,p+(size_t)u*(d3d8_format_bpp((D3DFORMAT)fmt)/8),converted,0);
+        fmt=converted_format;p=converted;u=0;
+    }
+    if(fmt==D3DFMT_LIN_D16 || fmt==D3DFMT_LIN_D24S8) {
+        uint32_t raw=fmt==D3DFMT_LIN_D16?((const uint16_t *)p)[u]:((const uint32_t *)p)[u]>>8;
+        float depth=(float)raw;
+        if(value){value[0]=depth;value[1]=value[2]=0;value[3]=1;}
+        *argb=raw;return 1;
+    }
+    if(fmt==D3DFMT_LIN_L16) {
+        float luma=((const uint16_t *)p)[u]/65535.0f,rgba[4]={luma,luma,luma,1};
+        if(value)memcpy(value,rgba,sizeof rgba);
+        *argb=pack_color(rgba);return 1;
+    }
     switch (fmt) {
+
+    /* NV097 channel pairs use the original 16-bit resource bytes. The
+     * published image swizzle also defines both otherwise-missing channels. */
+    case D3DFMT_G8B8:case D3DFMT_LIN_G8B8:case D3DFMT_R8B8: {
+        uint32_t word=((const uint16_t *)p)[u],lo=word&255,hi=word>>8;
+        *argb=(hi<<24)|((fmt==D3DFMT_R8B8?hi:lo)<<16)|((fmt==D3DFMT_R8B8?lo:hi)<<8)|lo;
+        goto decoded;
+    }
 
     /* 32-bit, alpha-red-green-blue in the dword. */
     case 0x12:                                      /* LIN_A8R8G8B8 */
         *argb = ((const uint32_t *)p)[u];
-        return 1;
+        goto decoded;
     case 0x1E:                                      /* LIN_X8R8G8B8 */
         *argb = ((const uint32_t *)p)[u] | 0xFF000000u;
-        return 1;
+        goto decoded;
 
     /* 8-bit palette index, swizzled. Burnout 3 draws its logo and frontend
      * header art this way; without a case every such quad came out as the
@@ -1055,14 +1152,14 @@ static int sample_tex(const Texture *t, uint32_t face_offset,
         if (!t->palette)
             return 0;
         *argb = ((const uint32_t *)(mem + t->palette))[p[u]];
-        return 1;
+        goto decoded;
 
     /* 32-bit, other channel orders. The name gives the byte order from the
      * top of the dword down, so each is a permutation of the same four. */
     case 0x3F: {                                    /* LIN_A8B8G8R8 */
         uint32_t t = ((const uint32_t *)p)[u];
         *argb = (t & 0xFF00FF00u) | ((t & 0xFF) << 16) | ((t >> 16) & 0xFF);
-        return 1;
+        goto decoded;
     }
     case 0x40: {                                    /* LIN_B8G8R8A8 */
         uint32_t t = ((const uint32_t *)p)[u];
@@ -1070,12 +1167,12 @@ static int sample_tex(const Texture *t, uint32_t face_offset,
               | (((t >>  8) & 0xFFu) << 16)         /* R */
               | (((t >> 16) & 0xFFu) <<  8)         /* G */
               |  ((t >> 24) & 0xFFu);               /* B, from the top */
-        return 1;
+        goto decoded;
     }
     case 0x41: {                                    /* LIN_R8G8B8A8 */
         uint32_t t = ((const uint32_t *)p)[u];
         *argb = ((t & 0xFFu) << 24) | (t >> 8);
-        return 1;
+        goto decoded;
     }
 
     /* 16-bit. */
@@ -1085,7 +1182,7 @@ static int sample_tex(const Texture *t, uint32_t face_offset,
               | (expand((t >> 10) & 0x1F, 5) << 16)
               | (expand((t >>  5) & 0x1F, 5) <<  8)
               |  expand( t        & 0x1F, 5);
-        return 1;
+        goto decoded;
     }
     case 0x1C: {                                    /* LIN_X1R5G5B5 */
         uint32_t t = ((const uint16_t *)p)[u];
@@ -1093,7 +1190,7 @@ static int sample_tex(const Texture *t, uint32_t face_offset,
               | (expand((t >> 10) & 0x1F, 5) << 16)
               | (expand((t >>  5) & 0x1F, 5) <<  8)
               |  expand( t        & 0x1F, 5);
-        return 1;
+        goto decoded;
     }
     case 0x11: {                                    /* LIN_R5G6B5 */
         uint32_t t = ((const uint16_t *)p)[u];
@@ -1101,7 +1198,7 @@ static int sample_tex(const Texture *t, uint32_t face_offset,
               | (expand((t >> 11) & 0x1F, 5) << 16)
               | (expand((t >>  5) & 0x3F, 6) <<  8)
               |  expand( t        & 0x1F, 5);
-        return 1;
+        goto decoded;
     }
     case 0x1D: {                                    /* LIN_A4R4G4B4 */
         uint32_t t = ((const uint16_t *)p)[u];
@@ -1109,18 +1206,23 @@ static int sample_tex(const Texture *t, uint32_t face_offset,
               | (expand((t >>  8) & 0x0F, 4) << 16)
               | (expand((t >>  4) & 0x0F, 4) <<  8)
               |  expand( t        & 0x0F, 4);
-        return 1;
+        goto decoded;
     }
 
     /* 8-bit. */
     case 0x13: {                                    /* LIN_L8 */
         uint32_t t = p[u];
         *argb = 0xFF000000u | (t << 16) | (t << 8) | t;
-        return 1;
+        goto decoded;
     }
     case 0x1F:                                      /* LIN_A8 */
         *argb = ((uint32_t)p[u] << 24) | 0x00FFFFFFu;
-        return 1;
+        goto decoded;
+    case D3DFMT_LIN_A8L8: {
+        uint32_t pixel=((const uint16_t *)p)[u],luma=pixel&255;
+        *argb=((pixel&0xff00)<<16)|(luma<<16)|(luma<<8)|luma;
+        goto decoded;
+    }
 
     /* 4:2:2 packed YUV, two texels per four bytes.
      *
@@ -1150,13 +1252,19 @@ static int sample_tex(const Texture *t, uint32_t face_offset,
         if (b > 255) b = 255;
         *argb = 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)gg << 8)
               | (uint32_t)b;
-        return 1;
+        goto decoded;
     }
 
     default:
-        return 0;
+        fprintf(stderr,"[STOP] texture format decoder %02X is not implemented\n",t->color);exit(5);
     }
+decoded:
+    if(value)nv2a_rc_unpack(*argb,value);
+    return 1;
 }
+
+static int sample_tex(const Texture *t,uint32_t face,uint32_t u,uint32_t v,uint32_t *argb)
+{ return sample_tex_value(t,face,u,v,0,0,argb,NULL); }
 
 static int sample_texture(uint32_t u, uint32_t v, uint32_t *argb)
 {
@@ -1255,7 +1363,6 @@ static int surface_begin_batch(const uint8_t *mem)
     return 1;
 }
 
-static uint32_t pack_color(const float c[4]);
 
 /* One GL blend factor, per channel (r g b a). */
 static void blend_factor(uint32_t f, const float s[4], const float d[4],
@@ -1307,7 +1414,16 @@ static void put_pixel(uint8_t *mem, uint32_t bpp, int x, int y, uint32_t argb)
      * pair was written opaque. Menus never noticed; a race does: Burnout 3
      * finishes its 3D frame with screen-space passes that modulate or add
      * over the scene, and written opaque they paint the whole view over. */
-    if (s_gpu.blend_enable
+    uint32_t logic=nv2a_get_state()->pgraph.regs[NV_PGRAPH_BLEND];
+    if(logic&NV_PGRAPH_BLEND_LOGICOP_ENABLE) {
+        uint32_t destination;
+        if(bpp==4)destination=*(const uint32_t *)row;
+        else {
+            uint32_t packed=*(const uint16_t *)row;
+            destination=0xff000000u|((packed&0xf800u)<<8)|((packed&0x07e0u)<<5)|((packed&31u)<<3);
+        }
+        argb=color_logic(GET_MASK(logic,NV_PGRAPH_BLEND_LOGICOP),argb,destination);
+    } else if (s_gpu.blend_enable
         && !(s_gpu.blend_sfactor == 1 && s_gpu.blend_dfactor == 0)) {
         uint32_t dst = 0xFF000000u;
         float sc[4], dc[4], sf[4], df[4], out[4];
@@ -1367,6 +1483,13 @@ static void put_pixel(uint8_t *mem, uint32_t bpp, int x, int y, uint32_t argb)
 /* Half-space fill. Barycentric edge functions rather than scanline slopes:
  * the same test decides both windings, so a title that emits clockwise
  * triangles does not silently render nothing. */
+static int polygon_stipple_pass(unsigned x,unsigned y)
+{
+    struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
+    if(s_gpu.prim<NV097_SET_BEGIN_END_OP_TRIANGLES || !(pg->regs[NV_PGRAPH_SETUPRASTER]&NV_PGRAPH_SETUPRASTER_STIPPLEENABLE))return 1;
+    return (pg->polygon_stipple[31-(y&31)] & (1u<<((x&31)^7)))!=0;
+}
+
 static void raster_triangle(const float a[2], const float b[2],
                             const float c[2], uint32_t argb,
                             const float uv[3][2])
@@ -1406,6 +1529,7 @@ static void raster_triangle(const float a[2], const float b[2],
 
     for (y = miny; y < maxy; y++) {
         for (x = minx; x < maxx; x++) {
+            if(!polygon_stipple_pass(x,y))continue;
             float px = (float)x + 0.5f, py = (float)y + 0.5f;
             float w0 = (b[0] - a[0]) * (py - a[1]) - (b[1] - a[1]) * (px - a[0]);
             float w1 = (c[0] - b[0]) * (py - b[1]) - (c[1] - b[1]) * (px - b[0]);
@@ -1680,14 +1804,12 @@ static void raster_indexed(uint32_t i0,uint32_t i1,uint32_t i2,uint32_t provokin
  * plane; road right under the camera is where that shows. Clip in
  * homogeneous space if it matters. */
 
-/* Logical depth/stencil surfaces share the existing DMA-keyed cache.
- * Guest tiled/compressed encoding and readback are not implemented. */
+/* Software pixels use the same DMA-resolved RAM as CPU and texture accesses.
+ * No separate logical depth/stencil pixel storage is retained. */
 #define NV_ZBUF_W 1024
 #define NV_ZBUF_H 1024
-typedef struct { uint32_t offset, compressed; float *z; uint8_t *stencil; } ZetaBuffer;
-static ZetaBuffer s_zbufs[4];
+typedef struct { uint8_t *memory;uint32_t address,width,height,pitch,format,layout; } ZetaSurface;
 static int s_ftrace;            /* frame trace: 0 idle, 2 tracing, 3 done */
-static int s_zbuf_next;
 
 static float zclear_value(void)
 {
@@ -1697,52 +1819,58 @@ static float zclear_value(void)
                    : (float)(s_gpu.zstencil_clear >> 8);
 }
 
-static ZetaBuffer *zbuf_current(int create)
+/* Keep encoded depth in the existing surface cache, including float formats.
+ * Switching CONTROL0 therefore reinterprets the same guest bits instead of
+ * replacing the surface. NV2A F16 is unsigned e4m12 with bias 7; F24 is
+ * unsigned e8m16 with bias 127, distinct from host half/float depth. */
+static float depth_encode(float depth, unsigned format)
 {
-    NV2AState *gpu = nv2a_get_state();
-    uint32_t address = dma_resolve(gpu->pgraph.dma_zeta, s_gpu.zeta_offset, 1);
-    int i;
-    size_t k;
-
-    for (i = 0; i < 4; i++)
-        if (s_zbufs[i].z && s_zbufs[i].offset == address) {
-            s_zbufs[i].compressed = GET_MASK(gpu->pgraph.regs[NV_PGRAPH_ZCOMPRESSOCCLUDE], NV_PGRAPH_ZCOMPRESSOCCLUDE_COMPRESS_ENABLE);
-            return &s_zbufs[i];
+    if (format==16 || format==24) {
+        uint32_t bits;memcpy(&bits,&depth,4);
+        if (!(depth>0)) return 0;
+        if (format==16) {
+            if (bits<=0x3c000000u) return 0;
+            uint32_t value=(bits-0x3c000000u)>>11;
+            return (float)(value>65535?65535:value);
         }
-    if (!create)
-        return NULL;
-    i = s_zbuf_next++ & 3;
-    if (!s_zbufs[i].z)
-        s_zbufs[i].z = (float *)malloc(sizeof(float) * NV_ZBUF_W * NV_ZBUF_H);
-    if (!s_zbufs[i].stencil)
-        s_zbufs[i].stencil = (uint8_t *)malloc(NV_ZBUF_W * NV_ZBUF_H);
-    if (!s_zbufs[i].z || !s_zbufs[i].stencil) {
-        fprintf(stderr, "[STOP] logical depth/stencil allocation failed\n");
-        exit(5);
+        uint32_t value=bits>>7;
+        return (float)(value>0xfeffffu?0xfeffffu:value);
     }
-    s_zbufs[i].offset = address;
-    s_zbufs[i].compressed = GET_MASK(gpu->pgraph.regs[NV_PGRAPH_ZCOMPRESSOCCLUDE], NV_PGRAPH_ZCOMPRESSOCCLUDE_COMPRESS_ENABLE);
-    for (k = 0; k < (size_t)NV_ZBUF_W * NV_ZBUF_H; k++)
-        s_zbufs[i].z[k] = 3.4e38f;
-    return &s_zbufs[i];
+    return floorf(fminf(format==1?65535.0f:16777215.0f,fmaxf(0,depth)));
 }
 
+static ZetaSurface zeta_surface(void)
+{
+    ZetaSurface surface={0};surface.format=(s_gpu.format>>4)&15;
+    if(surface.format!=1 && surface.format!=2)note_unhandled(NV097_SET_SURFACE_FORMAT,s_gpu.format);
+    unsigned bpp=surface.format==1?2:4;
+    surface.width=color_width(s_gpu.format,s_gpu.pitch,surface_bpp());surface.height=color_height(s_gpu.format,s_gpu.clip_y+s_gpu.clip_h);
+    surface.pitch=color_swizzled(s_gpu.format)?surface.width*bpp:s_gpu.zeta_pitch;surface.layout=s_gpu.format;
+    if(!surface.width || !surface.height || surface.width>NV_ZBUF_W || surface.height>NV_ZBUF_H || surface.pitch<surface.width*bpp || (uint64_t)surface.pitch*surface.height>UINT32_MAX)
+        note_unhandled(NV097_SET_SURFACE_PITCH,(s_gpu.zeta_pitch<<16)|s_gpu.pitch);
+    surface.address=dma_resolve(nv2a_get_state()->pgraph.dma_zeta,s_gpu.zeta_offset,surface.pitch*surface.height);
+    surface.memory=(uint8_t *)xbox_GetMemoryOffset()+surface.address;return surface;
+}
+static uint8_t *zeta_pixel(const ZetaSurface *surface,unsigned x,unsigned y)
+{
+    return surface->memory+color_pixel_offset(surface->layout,surface->pitch,surface->format==1?2:4,x,y);
+}
+static void zeta_write_depth(const ZetaSurface *surface,uint8_t *pixel,uint32_t encoded)
+{
+    if(surface->format==1){uint16_t value=(uint16_t)encoded;memcpy(pixel,&value,2);}
+    else {pixel[1]=(uint8_t)encoded;pixel[2]=(uint8_t)(encoded>>8);pixel[3]=(uint8_t)(encoded>>16);}
+}
 static void zbuf_clear(uint32_t param)
 {
-    ClearBounds b = clear_bounds();
-    if (b.x0 >= b.x1 || b.y0 >= b.y1) return;
-    uint32_t format = (s_gpu.format >> 4) & 0xF;
-    if (b.x1 > NV_ZBUF_W || b.y1 > NV_ZBUF_H ||
-        (format != 1 && format != 2) || ((param & NV097_CLEAR_SURFACE_STENCIL) && format != 2))
-        note_unhandled(NV097_CLEAR_SURFACE, param);
-    ZetaBuffer *buffer = zbuf_current(1);
-    float v = zclear_value();
-    for (uint32_t y = b.y0; y < b.y1; ++y)
-        for (uint32_t x = b.x0; x < b.x1; ++x) {
-            size_t k = (size_t)y * NV_ZBUF_W + x;
-            if (param & NV097_CLEAR_SURFACE_Z) buffer->z[k] = v;
-            if (param & NV097_CLEAR_SURFACE_STENCIL) buffer->stencil[k] = (uint8_t)s_gpu.zstencil_clear;
-        }
+    ClearBounds b=clear_bounds();if(b.x0>=b.x1 || b.y0>=b.y1)return;
+    ZetaSurface surface=zeta_surface();
+    if(b.x1>surface.width || b.y1>surface.height || ((param&NV097_CLEAR_SURFACE_STENCIL) && surface.format!=2))note_unhandled(NV097_CLEAR_SURFACE,param);
+    uint32_t value=(uint32_t)zclear_value();
+    for(unsigned y=b.y0;y<b.y1;y++)for(unsigned x=b.x0;x<b.x1;x++) {
+        uint8_t *pixel=zeta_pixel(&surface,x,y);
+        if(param&NV097_CLEAR_SURFACE_Z)zeta_write_depth(&surface,pixel,value);
+        if(param&NV097_CLEAR_SURFACE_STENCIL)*pixel=(uint8_t)s_gpu.zstencil_clear;
+    }
 }
 
 static int compare_pass(uint32_t func, float z, float stored)
@@ -1787,7 +1915,8 @@ static uint32_t tex_texel_bytes(uint32_t fmt)
     case 0x00: case 0x01: case 0x0B: case 0x13: case 0x19: case 0x1F:
         return 1;
     case 0x02: case 0x03: case 0x04: case 0x05: case 0x10: case 0x11:
-    case 0x1C: case 0x1D:
+    case 0x1C: case 0x1D:case D3DFMT_D16:case D3DFMT_LIN_D16:
+    case D3DFMT_G8B8:case D3DFMT_R8B8:case D3DFMT_LIN_G8B8:
         return 2;
     default:
         return 4;
@@ -1815,13 +1944,15 @@ static uint32_t tex_face_stride(const Texture *t)
 /* One texel at normalised (swizzled/DXT) or texel (linear) coordinates, as
  * floats. An unusable stage reads white, so a missing texture multiplies
  * through instead of blacking the pixel out. */
-static void rc_texel(const Texture *t, uint32_t face, float u, float v,
+static void rc_texel(const Texture *t, uint32_t face, float u, float v, float w, unsigned addr_w,
                      float out[4])
 {
+    int volume=texture_volume(t);
     uint32_t texel, mag = (t->filter >> 24) & 0xF, min = (t->filter >> 16) & 0xFF;
     if (tex_size_from_format(t->color)) {
         u *= (float)t->width;
         v *= (float)t->height;
+        if(volume)w*=(float)texture_depth(t);
     }
     /* TENT (bilinear) when the title asks for it, magnifying or minifying:
      * a 64x32 sky gradient stretched over the screen is blocks with nearest
@@ -1834,23 +1965,31 @@ static void rc_texel(const Texture *t, uint32_t face, float u, float v,
         int32_t iu = (int32_t)floorf(fu), iv = (int32_t)floorf(fv), k, j;
         wu = fu - (float)iu;
         wv = fv - (float)iv;
+        float ww=0;int32_t iw=0;
+        if(volume){float fw=w-0.5f;iw=(int32_t)floorf(fw);ww=fw-(float)iw;}
+        for(unsigned plane=0;plane<(volume?2u:1u);plane++) {
         for (k = 0; k < 4; k++) {
-            if (sample_tex(t, face, (uint32_t)(iu + (k & 1)),
-                           (uint32_t)(iv + (k >> 1)), &texel))
-                nv2a_rc_unpack(texel, c[k]);
-            else
+            if (sample_tex_value(t, face, (uint32_t)(iu + (k & 1)),
+                           (uint32_t)(iv + (k >> 1)),volume?(uint32_t)(iw+plane):0,addr_w, &texel,c[k])) { }
+            else {
+                if(volume){fprintf(stderr,"[STOP] volume texel has no decoded source\n");exit(5);}
                 c[k][0] = c[k][1] = c[k][2] = c[k][3] = 1.0f;
+            }
         }
-        for (j = 0; j < 4; j++)
-            out[j] = (c[0][j] * (1.0f - wu) + c[1][j] * wu) * (1.0f - wv)
+        for (j = 0; j < 4; j++) {
+            float sampled = (c[0][j] * (1.0f - wu) + c[1][j] * wu) * (1.0f - wv)
                    + (c[2][j] * (1.0f - wu) + c[3][j] * wu) * wv;
+            if(!plane)out[j]=sampled;else out[j]=out[j]*(1.0f-ww)+sampled*ww;
+        }
+        }
         return;
     }
-    if (sample_tex(t, face, (uint32_t)(int32_t)floorf(u),
-                   (uint32_t)(int32_t)floorf(v), &texel))
-        nv2a_rc_unpack(texel, out);
-    else
+    if (sample_tex_value(t, face, (uint32_t)(int32_t)floorf(u),
+                   (uint32_t)(int32_t)floorf(v),volume?(uint32_t)(int32_t)floorf(w):0,addr_w, &texel,out)) { }
+    else {
+        if(volume){fprintf(stderr,"[STOP] volume texel has no decoded source\n");exit(5);}
         out[0] = out[1] = out[2] = out[3] = 1.0f;
+    }
 }
 
 /* What texture stage `st` contributes, by its SHADER_STAGE_PROGRAM mode
@@ -1862,39 +2001,220 @@ static int texture_alpha_kill_enabled(unsigned stage)
          NV_PGRAPH_TEXCTL0_0_ALPHAKILLEN) != 0;
 }
 
-static int rc_stage_fetch(int st, const float c[4], float out[4])
+static uint32_t texture_color_key_mask(unsigned stage)
+{
+    switch(s_gpu.texs[stage].color) {
+    case D3DFMT_X1R5G5B5:case D3DFMT_LIN_X1R5G5B5:
+    case D3DFMT_X8R8G8B8:case D3DFMT_LIN_X8R8G8B8:return 0x00ffffffu;
+    default:return 0xffffffffu;
+    }
+}
+static unsigned texture_color_key_mode(unsigned stage)
+{
+    unsigned mode=s_gpu.texs[stage].valid ? nv2a_get_state()->pgraph.regs[NV_PGRAPH_TEXCTL0_0+stage*4]&NV_PGRAPH_TEXCTL0_0_COLORKEYMODE : 0;
+    unsigned format=s_gpu.texs[stage].color;
+    if(mode && (format==D3DFMT_G8B8 || format==D3DFMT_R8B8 || format==D3DFMT_LIN_G8B8)) {
+        fprintf(stderr,"[STOP] channel-pair texture color-key mask is not established\n");exit(5);
+    }
+    return mode;
+}
+static int texture_post_sample(unsigned stage,float color[4])
+{
+    if(texture_alpha_kill_enabled(stage) && color[3]==0) return 0;
+    unsigned mode=texture_color_key_mode(stage);
+    if(!mode)return 1;
+    uint32_t mask=texture_color_key_mask(stage),key=nv2a_get_state()->pgraph.regs[NV_PGRAPH_COLORKEYCOLOR0+stage*4];
+    if((pack_color(color)&mask)!=(key&mask))return 1;
+    if(mode==3)return 0;
+    color[3]=0;
+    if(mode==2)color[0]=color[1]=color[2]=0;
+    return 1;
+}
+
+static int texture_stage_samples(unsigned mode)
+{
+    return (mode>=1 && mode<=3) || mode==6 || mode==7 || mode==9 || mode==11 || mode==12 || mode==13 || mode==14 || mode==18 || mode==15 || mode==16;
+}
+static unsigned texture_dependent_source(unsigned stage)
+{
+    unsigned source=stage==1?0:(nv2a_get_state()->pgraph.regs[NV_PGRAPH_SHADERCTL]>>(stage==2?16:20))&15;
+    if(stage==0 || source>=stage || !tex_size_from_format(s_gpu.texs[stage].color) || s_gpu.texs[stage].cube || ((s_gpu.texs[stage].dma_format>>4)&15)!=2) {
+        fprintf(stderr,"[STOP] dependent texture stage requires an earlier input and swizzled 2D texture\n");exit(5);
+    }
+    return source;
+}
+
+static unsigned texture_bump_source(unsigned stage)
+{
+    const Texture *t=&s_gpu.texs[stage];
+    unsigned source=stage==1?0:(nv2a_get_state()->pgraph.regs[NV_PGRAPH_SHADERCTL]>>(stage==2?16:20))&15;
+    if(stage==0 || source>=stage || !t->valid || t->cube || ((t->dma_format>>4)&15)!=2) {
+        fprintf(stderr,"[STOP] bump texture requires earlier input and valid unsigned 2D target\n");exit(5);
+    }
+    return source;
+}
+static void texture_bump_parameters(unsigned stage,float matrix[4],float lum_coord[4])
+{
+    const uint32_t *regs=nv2a_get_state()->pgraph.regs;
+    const unsigned offsets[]={NV_PGRAPH_BUMPMAT00,NV_PGRAPH_BUMPMAT01,NV_PGRAPH_BUMPMAT10,NV_PGRAPH_BUMPMAT11};
+    for(unsigned i=0;i<4;i++)memcpy(&matrix[i],&regs[offsets[i]+(stage-1)*4],4);
+    memcpy(&lum_coord[0],&regs[NV_PGRAPH_BUMPSCALE1+(stage-1)*4],4);
+    memcpy(&lum_coord[1],&regs[NV_PGRAPH_BUMPOFFSET1+(stage-1)*4],4);
+    const Texture *t=&s_gpu.texs[stage];
+    lum_coord[2]=tex_size_from_format(t->color)?1.0f:1.0f/t->width;
+    lum_coord[3]=tex_size_from_format(t->color)?1.0f:1.0f/t->height;
+}
+static float texture_bump_signed(float value)
+{
+    value*=255.0f;return (value>=128.0f?value-256.0f:value)/127.0f;
+}
+
+typedef struct RcStageDots { float value[4],coordinate_w[4],next_coordinate[4]; } RcStageDots;
+
+static unsigned texture_dot_source(unsigned stage,unsigned mode)
+{
+    const Texture *t=&s_gpu.texs[stage];unsigned program=s_gpu.rc.stage_program;
+    unsigned source=stage==1?0:(nv2a_get_state()->pgraph.regs[NV_PGRAPH_SHADERCTL]>>(stage==2?16:20))&15;
+    unsigned previous=stage?(program>>((stage-1)*5))&31:0;
+    if(!stage || source>=stage || (mode==17 && stage>2) ||
+       (mode==9 && (stage<2 || (previous!=17 && previous!=9) || !t->valid || t->cube || ((t->dma_format>>4)&15)!=2)) ||
+       (mode==13 && (stage!=3 || ((program>>5)&31)!=17 || previous!=17 || source!=0 || ((nv2a_get_state()->pgraph.regs[NV_PGRAPH_SHADERCTL]>>16)&15)!=0 || !t->valid || t->cube || (((t->dma_format>>4)&15)!=2 && !texture_volume(t)))) ||
+       (mode==11 && (stage!=2 || ((program>>5)&31)!=17 || (((program>>15)&31)!=12 && ((program>>15)&31)!=18) || ((nv2a_get_state()->pgraph.regs[NV_PGRAPH_SHADERCTL]>>20)&15)>=2 || !t->valid || ((t->dma_format>>4)&15)!=2)) ||
+       ((mode==14 || mode==12 || mode==18) && (stage!=3 || ((program>>5)&31)!=17 || (previous!=17 && previous!=9 && !((mode==12 || mode==18) && previous==11)) || !t->valid || ((t->dma_format>>4)&15)!=2))) {
+        fprintf(stderr,"[STOP] DOT stage requires established earlier input and DOT_ST 2D chain\n");exit(5);
+    }
+    return source;
+}
+static unsigned texture_dot_mapping(unsigned stage)
+{
+    unsigned mapping=(nv2a_get_state()->pgraph.regs[NV_PGRAPH_SHADERCTL]>>((stage-1)*4))&15;
+    if(mapping>4){fprintf(stderr,"[STOP] DOT HILO hemisphere mapping is not implemented\n");exit(5);}
+    return mapping;
+}
+static float texture_dot_component(unsigned mapping,float value)
+{
+    if(!mapping)return value;
+    if(mapping==3)return texture_bump_signed(value);
+    float encoded=value*255.0f;
+    if(mapping==1)return (encoded-128.0f)/127.0f;
+    return (encoded>=128.0f?encoded-255.5f:encoded+0.5f)/127.5f;
+}
+
+static float texture_dot_value(unsigned mapping,const float color[4],const float coordinate[4])
+{
+    if(mapping==4) {
+        uint32_t hi=((uint32_t)(color[3]*255.0f)<<8)|(uint32_t)(color[0]*255.0f);
+        uint32_t lo=((uint32_t)(color[1]*255.0f)<<8)|(uint32_t)(color[2]*255.0f);
+        return coordinate[0]*((float)hi/65535.0f)+coordinate[1]*((float)lo/65535.0f)+coordinate[2];
+    }
+    float value=0;for(unsigned component=0;component<3;component++)value+=coordinate[component]*texture_dot_component(mapping,color[component]);return value;
+}
+
+static void texture_eye_vector(float eye[3])
+{
+    const uint32_t *regs=nv2a_get_state()->pgraph.regs;
+    for(unsigned i=0;i<3;i++)memcpy(eye+i,regs+NV_PGRAPH_EYEVEC0+i*4,4);
+}
+
+static int texture_luma_stage(unsigned stage)
+{
+    const Texture *t=&s_gpu.texs[stage];if(!texture_luma_format(t))return 0;
+    unsigned mode=(s_gpu.rc.stage_program>>(stage*5))&31;
+    if(texture_stage_samples(mode) && (t->cube || texture_color_key_mode(stage))) {
+        fprintf(stderr,"[STOP] pitched Y16 cube/color-key contract is not implemented\n");exit(5);
+    }
+    return 1;
+}
+
+static void rc_cube_texel(const Texture *t,const float c[3],float out[4])
+{
+    float x = c[0], y = c[1], z = c[2];
+    float ax = fabsf(x), ay = fabsf(y), az = fabsf(z), ma, sc, tc;
+    uint32_t face;
+    if (ax >= ay && ax >= az) {
+        face = x > 0 ? 0 : 1; ma = ax; sc = x > 0 ? -z : z; tc = -y;
+    } else if (ay >= az) {
+        face = y > 0 ? 2 : 3; ma = ay; sc = x; tc = y > 0 ? z : -z;
+    } else {
+        face = z > 0 ? 4 : 5; ma = az; sc = z > 0 ? x : -x; tc = -y;
+    }
+    if (ma == 0.0f)
+        ma = 1.0f;
+    rc_texel(t, face * tex_face_stride(t), (sc / ma + 1.0f) * 0.5f,
+             (tc / ma + 1.0f) * 0.5f,0,0,out);
+}
+
+static void rc_dot_texel(const Texture *t,const float direction[3],float out[4])
+{
+    if(t->cube){rc_cube_texel(t,direction,out);return;}
+    float x=direction[0],y=direction[1],z=direction[2],ax=fabsf(x),ay=fabsf(y),az=fabsf(z),u,v;
+    if(ax>ay && ax>az){u=(x>0?-z:z)/ax;v=y/ax;}
+    else if(ay>ax && ay>az){u=x/ay;v=(y>0?-z:z)/ay;}
+    else {u=(z>0?x:-x)/az;v=y/az;}
+    /* The primary DOT remap uses normalized sampler2D coordinates even
+     * for pitched textures; rc_texel takes pixels for pitched storage. */
+    if(!tex_size_from_format(t->color)){u*=t->width;v*=t->height;}
+    rc_texel(t,0,u,v,0,0,out);
+}
+
+static int rc_stage_fetch(int st, const float c[4], const float previous[4][4],RcStageDots *dots,float out[4])
 {
     const Texture *t = &s_gpu.texs[st];
     uint32_t mode = (s_gpu.rc.stage_program >> (st * 5)) & 0x1F, j;
     float q = c[3] != 0.0f ? c[3] : 1.0f;
 
+    (void)texture_luma_stage((unsigned)st);
+    unsigned shadow=texture_shadow_mode((unsigned)st);
+    if(shadow && (mode==1 || mode==2)) {
+        rc_texel(t,0,c[0]/q,c[1]/q,0,0,out);
+        float reference=mode==2?fminf(shadow==16?65535.0f:16777215.0f,fmaxf(0,c[2]/q)):0;
+        unsigned function=nv2a_get_state()->pgraph.regs[NV_PGRAPH_SHADOWCTL]&7;
+        float pass=compare_pass(0x200|function,out[0],reference)?1.0f:0.0f;
+        out[0]=out[1]=out[2]=out[3]=pass;
+        return texture_post_sample((unsigned)st,out);
+    }
     switch (mode) {
     case 0:                                       /* NONE */
         out[0] = out[1] = out[2] = 0.0f; out[3] = 1.0f;
         return 1;
     case 1: case 2:                               /* PROJECT2D / 3D */
-        rc_texel(t, 0, c[0] / q, c[1] / q, out);
-        return !texture_alpha_kill_enabled(st) || out[3] != 0.0f;
+        if(mode==2 && texture_volume(t))rc_texel(t,0,c[0]/c[3],c[1]/c[3],c[2]/c[3],texture_address_w(st),out);
+        else rc_texel(t, 0, c[0] / q, c[1] / q,0,0,out);
+        return texture_post_sample(st,out);
     case 3: {                                     /* CUBEMAP */
-        float x = c[0], y = c[1], z = c[2];
-        float ax = fabsf(x), ay = fabsf(y), az = fabsf(z), ma, sc, tc;
-        uint32_t face;
-        if (!t->cube) {
-            rc_texel(t, 0, c[0], c[1], out);
-            return !texture_alpha_kill_enabled(st) || out[3] != 0.0f;
+        if(t->cube)rc_cube_texel(t,c,out);else rc_texel(t,0,c[0],c[1],0,0,out);
+        return texture_post_sample(st,out);
+    }
+    case 17: case 9: case 11: case 14: case 12: case 13: case 18: {                    /* DOTPRODUCT / DOT_ST / DOT_STR_CUBE */
+        unsigned source=texture_dot_source(st,mode),mapping=texture_dot_mapping(st);
+        dots->coordinate_w[st]=c[3];
+        if(!((mode==12 || mode==18) && ((s_gpu.rc.stage_program>>10)&31)==11))dots->value[st]=texture_dot_value(mapping,previous[source],c);
+        if(mode==11) {
+            unsigned next_source=texture_dot_source(3,(s_gpu.rc.stage_program>>15)&31),next_mapping=texture_dot_mapping(3);
+            dots->coordinate_w[3]=dots->next_coordinate[3];dots->value[3]=texture_dot_value(next_mapping,previous[next_source],dots->next_coordinate);
         }
-        if (ax >= ay && ax >= az) {
-            face = x > 0 ? 0 : 1; ma = ax; sc = x > 0 ? -z : z; tc = -y;
-        } else if (ay >= az) {
-            face = y > 0 ? 2 : 3; ma = ay; sc = x; tc = y > 0 ? z : -z;
-        } else {
-            face = z > 0 ? 4 : 5; ma = az; sc = z > 0 ? x : -x; tc = -y;
-        }
-        if (ma == 0.0f)
-            ma = 1.0f;
-        rc_texel(t, face * tex_face_stride(t), (sc / ma + 1.0f) * 0.5f,
-                 (tc / ma + 1.0f) * 0.5f, out);
-        return !texture_alpha_kill_enabled(st) || out[3] != 0.0f;
+        if(mode==17){out[0]=out[1]=out[2]=out[3]=0;return 1;}
+        if(mode==13)rc_texel(t,0,dots->value[1],dots->value[2],dots->value[3],texture_address_w(st),out);
+        else if(mode==12 || mode==18) {
+            const float *normal=dots->value+1,*eye=dots->coordinate_w+1;
+            float constant_eye[3];if(mode==18){texture_eye_vector(constant_eye);eye=constant_eye;}
+            float scale=2.0f*(normal[0]*eye[0]+normal[1]*eye[1]+normal[2]*eye[2])/(normal[0]*normal[0]+normal[1]*normal[1]+normal[2]*normal[2]);
+            float reflected[3];for(unsigned i=0;i<3;i++)reflected[i]=normal[i]*scale-eye[i];
+            rc_dot_texel(t,reflected,out);
+        } else if(mode==14 || mode==11)rc_dot_texel(t,dots->value+1,out);else rc_texel(t,0,dots->value[st-1],dots->value[st],0,0,out);
+        return texture_post_sample(st,out);
+    }
+    case 6: case 7: {                             /* BUMPENVMAP / LUM */
+        unsigned source=texture_bump_source(st);float matrix[4],params[4];texture_bump_parameters(st,matrix,params);
+        float ds=texture_bump_signed(previous[source][2]),dt=texture_bump_signed(previous[source][1]);
+        rc_texel(t,0,c[0]+matrix[0]*ds+matrix[2]*dt,c[1]+matrix[1]*ds+matrix[3]*dt,0,0,out);
+        if(mode==7)for(unsigned component=0;component<4;component++)out[component]*=params[0]*previous[source][0]+params[1];
+        return texture_post_sample(st,out);
+    }
+    case 15: case 16: {                           /* DEPENDENT AR / GB */
+        unsigned source=texture_dependent_source(st);
+        rc_texel(t,0,previous[source][mode==15?3:1],previous[source][mode==15?0:2],0,0,out);
+        return texture_post_sample(st,out);
     }
     case 4:                                       /* PASSTHRU */
         for (j = 0; j < 4; j++)
@@ -1954,22 +2274,93 @@ typedef struct {
     const Nv2aVshOutput *va, *vb, *vc;
     const float *a, *b, *c;
     float iw[3], uv[3][2], stc[3][4][4], vfog[3], fogc[4], inv_area;
-    float *zb;
-    uint8_t *stencil;
+    ZetaSurface zeta;
+    int has_zeta,stencil_test;
     uint32_t stencil_func, stencil_ref, stencil_mask;
-    float zmin, zmax;
+    uint32_t stencil_write_mask, stencil_fail, stencil_zfail, stencil_zpass;
+    float zmin, zmax, depth_offset_bias, depth_offset_slope;
     uint32_t clip_x[8], clip_y[8];
     int clip_exclusive, depth_clipping, w_depth;
-    unsigned edge_inclusive;
+    unsigned depth_format;
+    unsigned edge_inclusive, raster_mode;
+    int line;
     int minx, maxx, miny, maxy, use_rc, textured, alpha_kill;
 } XfTri;
+
+static void xf_stencil_write(const XfTri *triangle, uint8_t *pixel, unsigned operation,uint8_t *storage)
+{
+    if (!pixel || !triangle->stencil_write_mask) return;
+    unsigned value=*pixel;
+    switch (operation) {
+    case NV_PGRAPH_CONTROL_2_STENCIL_OP_V_KEEP: return;
+    case NV_PGRAPH_CONTROL_2_STENCIL_OP_V_ZERO: value=0; break;
+    case NV_PGRAPH_CONTROL_2_STENCIL_OP_V_REPLACE: value=triangle->stencil_ref; break;
+    case NV_PGRAPH_CONTROL_2_STENCIL_OP_V_INCRSAT: if (value<255) ++value; break;
+    case NV_PGRAPH_CONTROL_2_STENCIL_OP_V_DECRSAT: if (value>0) --value; break;
+    case NV_PGRAPH_CONTROL_2_STENCIL_OP_V_INVERT: value=~value; break;
+    case NV_PGRAPH_CONTROL_2_STENCIL_OP_V_INCR: ++value; break;
+    case NV_PGRAPH_CONTROL_2_STENCIL_OP_V_DECR: --value; break;
+    default: note_unhandled(NV097_SET_STENCIL_OP_ZPASS,operation); return;
+    }
+    *pixel=(uint8_t)((*pixel & ~triangle->stencil_write_mask)|(value & triangle->stencil_write_mask));
+    *storage=*pixel;
+}
+
+static uint32_t primitive_polygon_info(uint32_t a,uint32_t b,uint32_t c,uint32_t d,unsigned count)
+{
+    uint32_t slots[4]={a,b,c,d},edges=0,points=0;
+    int connected=s_gpu.prim==NV_PRIM_TRIANGLE_STRIP || s_gpu.prim==NV_PRIM_TRIANGLE_FAN || s_gpu.prim==NV_PRIM_QUAD_STRIP;
+    for(unsigned i=0;i<count;i++)if(connected || s_gpu.idx_edge[slots[i]])edges|=1u<<i;
+    points=edges;
+    if(s_gpu.prim==NV_PRIM_POLYGON) {
+        /* Internal fan diagonals are not polygon boundaries. Each original
+         * vertex is emitted once in point mode, including with blending. */
+        edges&=2u|(b==1?1u:0u)|(c+1==s_gpu.idx_count?4u:0u);
+        points&=4u|(b==1?3u:0u);
+    }
+    return count|(edges<<8)|(points<<16);
+}
 
 typedef struct { uint64_t depth_fail, pixels; uint32_t zpass; } XfCount;
 #if defined(_WIN32)
 #include "nv2a_d3d11_bridge.inc"
 #endif
 
+/* D3D11 aliased line diamond, in the existing Y-down window space.
+ * Lower diamond edges own ties; the right corner also belongs to Y-major
+ * lines. A fragment is generated only when the directed segment exits. */
+static int xf_line_diamond(double u,double v,int ymajor)
+{
+    if(ymajor && u==.5 && v==.5)return 1;
+    return u>-.5 && u<=.5 && v>=-.5 && v<.5;
+}
+static int xf_line_covers(const float *a,const float *b,float x,float y)
+{
+    double dx=(double)b[0]-a[0],dy=(double)b[1]-a[1];
+    double p[2]={(double)a[0]-x+a[1]-y,(double)a[0]-x-a[1]+y};
+    double d[2]={dx+dy,dx-dy},enter=0,leave=1;
+    int ymajor=fabs(dy)>fabs(dx);
+    for(unsigned i=0;i<2;i++) {
+        if(d[i]==0) {if(p[i]<-.5 || p[i]>.5)return 0;}
+        else {
+            double lo=(-.5-p[i])/d[i],hi=(.5-p[i])/d[i];
+            if(lo>hi){double swap=lo;lo=hi;hi=swap;}
+            if(lo>enter)enter=lo;if(hi<leave)leave=hi;
+        }
+    }
+    if(enter>leave || xf_line_diamond(p[0]+d[0],p[1]+d[1],ymajor))return 0;
+    double mid=(enter+leave)*.5;
+    return xf_line_diamond(p[0]+mid*d[0],p[1]+mid*d[1],ymajor) ||
+        xf_line_diamond(p[0]+enter*d[0],p[1]+enter*d[1],ymajor) ||
+        xf_line_diamond(p[0]+leave*d[0],p[1]+leave*d[1],ymajor);
+}
+
 /* Rows y0, y0+step, ... < maxy of triangle T. */
+static void xf_stage_coordinate(const XfTri *T,unsigned stage,float l0,float l1,float l2,float pw,float coordinate[4])
+{
+    for(unsigned j=0;j<4;j++)coordinate[j]=(l0*T->stc[0][stage][j]+l1*T->stc[1][stage][j]+l2*T->stc[2][stage][j])/pw;
+}
+
 static void xf_rows(const XfTri *T, int y0, int step, XfCount *cnt)
 {
     const float *a = T->a, *b = T->b, *c = T->c;
@@ -1977,7 +2368,18 @@ static void xf_rows(const XfTri *T, int y0, int step, XfCount *cnt)
     int x, y, k;
 
     for (y = y0; y < T->maxy; y += step) {
-        for (x = T->minx; x < T->maxx; x++) {
+        int row_min=T->minx,row_max=T->maxx;
+        if(T->line && b[1]!=a[1]) {
+            float lo=((float)y-a[1])/(b[1]-a[1]);
+            float hi=((float)y+1-a[1])/(b[1]-a[1]);
+            if(lo>hi){float swap=lo;lo=hi;hi=swap;}
+            lo=fmaxf(0,lo);hi=fminf(1,hi);if(lo>hi)continue;
+            float x0=a[0]+lo*(b[0]-a[0]),x1=a[0]+hi*(b[0]-a[0]);
+            int left=(int)floorf(fminf(x0,x1)-.5f),right=(int)ceilf(fmaxf(x0,x1)+.5f);
+            if(left>row_min)row_min=left;if(right<row_max)row_max=right;
+        }
+        for (x = row_min; x < row_max; x++) {
+            if(T->raster_mode==0 && !polygon_stipple_pass(x,y))continue;
             int contained = 0;
             for (unsigned i = 0; i < 8; ++i)
                 if (x >= (int)(T->clip_x[i] & 0xFFF) && x <= (int)((T->clip_x[i] >> 16) & 0xFFF) &&
@@ -1987,11 +2389,17 @@ static void xf_rows(const XfTri *T, int y0, int step, XfCount *cnt)
                 }
             if (contained == T->clip_exclusive) continue;
             float px = (float)x + 0.5f, py = (float)y + 0.5f;
+            float l0, l1, l2, z, col[4], pw;
+            uint32_t argb;
+            if(T->line) {
+                if(!xf_line_covers(a,b,px,py))continue;
+                float dx=b[0]-a[0],dy=b[1]-a[1];
+                l1=fabsf(dx)>=fabsf(dy)?(px-a[0])/dx:(py-a[1])/dy;
+                l0=1-l1;l2=0;
+            } else {
             float w0 = (b[0] - a[0]) * (py - a[1]) - (b[1] - a[1]) * (px - a[0]);
             float w1 = (c[0] - b[0]) * (py - b[1]) - (c[1] - b[1]) * (px - b[0]);
             float w2 = (a[0] - c[0]) * (py - c[1]) - (a[1] - c[1]) * (px - c[0]);
-            float l0, l1, l2, z, col[4], pw;
-            uint32_t argb;
             float e0 = T->inv_area > 0.0f ? w0 : -w0;
             float e1 = T->inv_area > 0.0f ? w1 : -w1;
             float e2 = T->inv_area > 0.0f ? w2 : -w2;
@@ -2001,6 +2409,7 @@ static void xf_rows(const XfTri *T, int y0, int step, XfCount *cnt)
                 continue;
             /* w1 is opposite a, w2 opposite b, w0 opposite c. */
             l0 = w1 * T->inv_area; l1 = w2 * T->inv_area; l2 = w0 * T->inv_area;
+            }
             /* Anchor the depth plane at a. A constant far-boundary depth
              * must remain exact: summing three weighted copies can round
              * above zmax and discard pixels from a full-screen clear. */
@@ -2009,23 +2418,32 @@ static void xf_rows(const XfTri *T, int y0, int step, XfCount *cnt)
                 float inverse_w = l0 * T->iw[0] + l1 * T->iw[1] + l2 * T->iw[2];
                 z = inverse_w > 0.0f ? 1.0f / inverse_w : 3.402823466e+38f;
             }
+            z+=T->depth_offset_bias;
+            z+=T->depth_offset_slope;
             if (T->depth_clipping) {
                 if (z < T->zmin || z > T->zmax) continue;
             } else {
                 z = fminf(T->zmax, fmaxf(T->zmin, z));
             }
+            z=depth_encode(z,T->depth_format);
             {
-                float *zp = T->zb ? &T->zb[(size_t)y * NV_ZBUF_W + x] : NULL;
+                uint8_t *zram=T->has_zeta?zeta_pixel(&T->zeta,(unsigned)x,(unsigned)y):NULL;
+                uint32_t raw=0;if(zram){if(T->zeta.format==1){uint16_t value;memcpy(&value,zram,2);raw=value;}else memcpy(&raw,zram,4);}
+                float stored=(float)(T->zeta.format==1?raw:raw>>8);uint8_t stencil_value=(uint8_t)raw;
+                float *zp=T->has_zeta?&stored:NULL;
                 int shade = (s_gpu.color_mask & 0x01010101u) || s_gpu.alpha_test || T->alpha_kill;
-                if (T->stencil && !compare_pass(T->stencil_func,
-                         (float)(T->stencil_ref & T->stencil_mask),
-                         (float)(T->stencil[(size_t)y * NV_ZBUF_W + x] & T->stencil_mask)))
-                    continue;
-                /* Depth test, then shade, then alpha test, and only then the
-                 * depth write: an alpha-tested texel that is cut away must
-                 * not leave its depth behind (foliage, fences). */
-                if (zp && s_gpu.depth_test && !compare_pass(s_gpu.depth_func, z, *zp)) {
-                    cnt->depth_fail++;
+                uint8_t *sp=T->stencil_test?&stencil_value:NULL;
+                int stencil_pass=!sp || compare_pass(T->stencil_func,
+                    (float)(T->stencil_ref & T->stencil_mask),(float)(*sp & T->stencil_mask));
+                int depth_pass=!zp || !s_gpu.depth_test || compare_pass(s_gpu.depth_func,z,*zp);
+                unsigned stencil_op=!stencil_pass?T->stencil_fail:!depth_pass?T->stencil_zfail:T->stencil_zpass;
+                /* Alpha rejection suppresses all stencil writes, including
+                 * stencil/depth-fail operations. Keep early rejection when
+                 * the fragment cannot have such a side effect. */
+                int late_stencil=sp && T->stencil_write_mask && (s_gpu.alpha_test || T->alpha_kill);
+                if ((!stencil_pass || !depth_pass) && !late_stencil) {
+                    xf_stencil_write(T,sp,stencil_op,zram);
+                    if (stencil_pass && !depth_pass) cnt->depth_fail++;
                     continue;
                 }
                 argb = 0;
@@ -2034,8 +2452,8 @@ static void xf_rows(const XfTri *T, int y0, int step, XfCount *cnt)
                         col[k] = l0 * va->d0[k] + l1 * vb->d0[k] + l2 * vc->d0[k];
                     pw = l0 * T->iw[0] + l1 * T->iw[1] + l2 * T->iw[2];
                     if (T->use_rc) {
-                        float d1[4], fog[4], t[4][4], out[4], tc[4];
-                        int st, j, keep = 1;
+                        float d1[4], fog[4], t[4][4], out[4], tc[4];RcStageDots dots;
+                        int st, keep = 1;
                         for (k = 0; k < 4; k++)
                             d1[k] = l0 * va->d1[k] + l1 * vb->d1[k] + l2 * vc->d1[k];
                         fog[0] = T->fogc[0]; fog[1] = T->fogc[1]; fog[2] = T->fogc[2];
@@ -2046,10 +2464,10 @@ static void xf_rows(const XfTri *T, int y0, int step, XfCount *cnt)
                                 t[st][3] = 1.0f;
                                 continue;
                             }
-                            for (j = 0; j < 4; j++)
-                                tc[j] = (l0 * T->stc[0][st][j] + l1 * T->stc[1][st][j]
-                                       + l2 * T->stc[2][st][j]) / pw;
-                            keep = rc_stage_fetch(st, tc, t[st]);
+                            if(st==3 && ((s_gpu.rc.stage_program>>10)&31)==11)memcpy(tc,dots.next_coordinate,sizeof(tc));
+                            else xf_stage_coordinate(T,st,l0,l1,l2,pw,tc);
+                            if(st==2 && ((s_gpu.rc.stage_program>>10)&31)==11)xf_stage_coordinate(T,3,l0,l1,l2,pw,dots.next_coordinate);
+                            keep = rc_stage_fetch(st, tc, (const float (*)[4])t,&dots,t[st]);
                         }
                         if (!keep)
                             continue;
@@ -2067,9 +2485,9 @@ static void xf_rows(const XfTri *T, int y0, int step, XfCount *cnt)
                             tv = (l0 * T->uv[0][1] + l1 * T->uv[1][1] + l2 * T->uv[2][1]) / pw;
                             if (sample_texture((uint32_t)(int32_t)floorf(tu),
                                                (uint32_t)(int32_t)floorf(tv), &texel)) {
-                                if (texture_alpha_kill_enabled(0) && !(texel >> 24))
-                                    continue;
-                                argb = modulate(texel, col);
+                                float sampled[4];nv2a_rc_unpack(texel,sampled);
+                                if(!texture_post_sample(0,sampled))continue;
+                                argb = modulate(pack_color(sampled), col);
                             }
                         }
                         if (s_gpu.alpha_test
@@ -2077,8 +2495,13 @@ static void xf_rows(const XfTri *T, int y0, int step, XfCount *cnt)
                             continue;
                     }
                 }
+                xf_stencil_write(T,sp,stencil_op,zram);
+                if (!stencil_pass || !depth_pass) {
+                    if (stencil_pass && !depth_pass) cnt->depth_fail++;
+                    continue;
+                }
                 if (zp && s_gpu.depth_test && s_gpu.depth_mask)
-                    *zp = z;
+                    zeta_write_depth(&T->zeta,zram,(uint32_t)z);
                 if (s_gpu.zpass_enable)
                     cnt->zpass++;
                 if (!(s_gpu.color_mask & 0x01010101u))
@@ -2218,10 +2641,24 @@ static void xf_rows_parallel(const XfTri *T, XfCount *total)
 }
 #endif
 
-static void raster_xf_triangle(const Nv2aVshOutput *va, const Nv2aVshOutput *vb,
-                               const Nv2aVshOutput *vc)
+static float xf_polygon_depth_slope(const float *a,const float *b,const float *c,float inv_area,int w_depth)
+{
+    if(w_depth) {
+        /* A finite constant W field has zero slope for every sampling grid. */
+        if(isfinite(a[3]) && a[3]==b[3] && a[3]==c[3])return 0;
+        fprintf(stderr,"[STOP] W-buffer polygon slope convention is not implemented\n");exit(5);
+    }
+    float db=b[2]-a[2],dc=c[2]-a[2];
+    float dx=(db*(c[1]-a[1])-dc*(b[1]-a[1]))*inv_area;
+    float dy=(dc*(b[0]-a[0])-db*(c[0]-a[0]))*inv_area;
+    return fmaxf(fabsf(dx),fabsf(dy));
+}
+
+static void raster_xf_triangle_mode(const Nv2aVshOutput *va,const Nv2aVshOutput *vb,
+                                    const Nv2aVshOutput *vc,unsigned raster_mode,int face_checked,float polygon_slope)
 {
     XfTri T;
+    Nv2aVshOutput back[3];
     XfCount cnt = {0, 0, 0};
     const Nv2aVshOutput *v[3];
     const float *a, *b, *c;
@@ -2233,6 +2670,8 @@ static void raster_xf_triangle(const Nv2aVshOutput *va, const Nv2aVshOutput *vb,
     if (no_rc < 0)
         no_rc = getenv("RECOMP_NO_COMBINERS") != NULL;
     memset(&T, 0, sizeof T);
+    T.raster_mode=raster_mode;
+    T.line=raster_mode>=4;
     T.mem = (uint8_t *)xbox_GetMemoryOffset();
     T.bpp = surface_bpp();
     T.textured = s_gpu.texs[0].valid;
@@ -2241,8 +2680,8 @@ static void raster_xf_triangle(const Nv2aVshOutput *va, const Nv2aVshOutput *vb,
      * combiner and any depth write, including a depth-only draw. */
     for (unsigned stage = 0; stage < 4; ++stage) {
         unsigned mode = (s_gpu.rc.stage_program >> (stage * 5)) & 0x1F;
-        if (texture_alpha_kill_enabled(stage) &&
-            (T.use_rc ? mode >= 1 && mode <= 3 : stage == 0 && T.textured))
+        if ((texture_alpha_kill_enabled(stage) || texture_color_key_mode(stage)==3) &&
+            (T.use_rc ? texture_stage_samples(mode) : stage == 0 && T.textured))
             T.alpha_kill = 1;
     }
     T.va = va; T.vb = vb; T.vc = vc;
@@ -2265,6 +2704,10 @@ static void raster_xf_triangle(const Nv2aVshOutput *va, const Nv2aVshOutput *vb,
         return;
     }
     area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    if(T.line) {
+        if(a[0]==b[0] && a[1]==b[1])return;
+        area=1;
+    }
     if (area == 0.0f || area != area) {
         s_gpu.xf_degenerate++;
         return;
@@ -2280,15 +2723,22 @@ static void raster_xf_triangle(const Nv2aVshOutput *va, const Nv2aVshOutput *vb,
     {
         struct PGRAPHState *pg = &nv2a_get_state()->pgraph;
         uint32_t raster = pg->regs[NV_PGRAPH_SETUPRASTER];
-        if (raster & NV_PGRAPH_SETUPRASTER_CULLENABLE) {
-            int front = (area < 0) == ((raster & NV_PGRAPH_SETUPRASTER_FRONTFACE) != 0);
+        int front = (area < 0) == ((raster & NV_PGRAPH_SETUPRASTER_FRONTFACE) != 0);
+        if (!face_checked && s_gpu.prim>=NV_PRIM_TRIANGLES && (raster & NV_PGRAPH_SETUPRASTER_CULLENABLE)) {
             uint32_t face = GET_MASK(raster, NV_PGRAPH_SETUPRASTER_CULLCTRL);
             if (face == NV_PGRAPH_SETUPRASTER_CULLCTRL_FRONT_AND_BACK ||
                 (front && face == NV_PGRAPH_SETUPRASTER_CULLCTRL_FRONT) ||
                 (!front && face == NV_PGRAPH_SETUPRASTER_CULLCTRL_BACK)) return;
         }
+        if(!face_checked && s_gpu.prim>=NV_PRIM_TRIANGLES && !front && (pg->regs[NV_PGRAPH_CSV0_C]&NV_PGRAPH_CSV0_C_LIGHT_TWO_SIDE_ENABLE)) {
+            for(unsigned i=0;i<3;i++){back[i]=*v[i];memcpy(back[i].d0,v[i]->b0,16);memcpy(back[i].d1,v[i]->b1,16);v[i]=&back[i];}
+            T.va=v[0];T.vb=v[1];T.vc=v[2];
+        }
         T.clip_exclusive = (raster & NV_PGRAPH_SETUPRASTER_WINDOWCLIPTYPE) != 0;
         T.w_depth = (pg->regs[NV_PGRAPH_CONTROL_0] & NV_PGRAPH_CONTROL_0_Z_PERSPECTIVE_ENABLE) != 0;
+        T.depth_format=(s_gpu.format>>4)&15;
+        if (raster & NV_PGRAPH_SETUPRASTER_Z_FORMAT)
+            T.depth_format=T.depth_format==1?16:24;
         T.depth_clipping = GET_MASK(pg->regs[NV_PGRAPH_ZCOMPRESSOCCLUDE],
                                    NV_PGRAPH_ZCOMPRESSOCCLUDE_ZCLAMP_EN) ==
                            NV_PGRAPH_ZCOMPRESSOCCLUDE_ZCLAMP_EN_CULL;
@@ -2313,26 +2763,24 @@ static void raster_xf_triangle(const Nv2aVshOutput *va, const Nv2aVshOutput *vb,
     if (s_gpu.depth_test || stencil_test) {
         if (stencil_test && ((s_gpu.format >> 4) & 0xF) != 2)
             note_unhandled(NV097_SET_STENCIL_TEST_ENABLE, 1);
-        if (stencil_test) {
-            uint32_t ops = nv2a_get_state()->pgraph.regs[NV_PGRAPH_CONTROL_2];
-            if (GET_MASK(ops, NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL) != NV_PGRAPH_CONTROL_2_STENCIL_OP_V_KEEP ||
-                GET_MASK(ops, NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL) != NV_PGRAPH_CONTROL_2_STENCIL_OP_V_KEEP ||
-                GET_MASK(ops, NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS) != NV_PGRAPH_CONTROL_2_STENCIL_OP_V_KEEP)
-                note_unhandled(NV097_SET_STENCIL_TEST_ENABLE, 1);
-        }
-        ZetaBuffer *buffer = NULL;
 #if defined(_WIN32)
         if (!hw_enabled())
 #endif
         {
-            buffer = zbuf_current(1);
-            T.zb = buffer->z;
+            T.zeta=zeta_surface();T.has_zeta=1;
+            if(T.maxx>(int)T.zeta.width || T.maxy>(int)T.zeta.height)note_unhandled(NV097_SET_SURFACE_CLIP_VERTICAL,s_gpu.clip_h);
         }
         if (stencil_test) {
-            T.stencil = buffer ? buffer->stencil : NULL;
+            T.stencil_test=T.has_zeta;
             T.stencil_func = 0x200 | GET_MASK(stencil_control, NV_PGRAPH_CONTROL_1_STENCIL_FUNC);
             T.stencil_ref = GET_MASK(stencil_control, NV_PGRAPH_CONTROL_1_STENCIL_REF);
             T.stencil_mask = GET_MASK(stencil_control, NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ);
+            struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
+            if (pg->regs[NV_PGRAPH_CONTROL_0] & NV_PGRAPH_CONTROL_0_STENCIL_WRITE_ENABLE)
+                T.stencil_write_mask=GET_MASK(stencil_control,NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+            T.stencil_fail=GET_MASK(pg->regs[NV_PGRAPH_CONTROL_2],NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL);
+            T.stencil_zfail=GET_MASK(pg->regs[NV_PGRAPH_CONTROL_2],NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL);
+            T.stencil_zpass=GET_MASK(pg->regs[NV_PGRAPH_CONTROL_2],NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS);
         }
     }
     if (tex_size_from_format(s_gpu.texs[0].color)) {
@@ -2361,6 +2809,10 @@ static void raster_xf_triangle(const Nv2aVshOutput *va, const Nv2aVshOutput *vb,
     T.maxx = (int)ceilf (fmaxf(a[0], fmaxf(b[0], c[0])));
     T.miny = (int)floorf(fminf(a[1], fminf(b[1], c[1])));
     T.maxy = (int)ceilf (fmaxf(a[1], fmaxf(b[1], c[1])));
+    if(T.line) {
+        T.minx=(int)floorf(fminf(a[0],b[0])-.5f);T.maxx=(int)ceilf(fmaxf(a[0],b[0])+.5f);
+        T.miny=(int)floorf(fminf(a[1],b[1])-.5f);T.maxy=(int)ceilf(fmaxf(a[1],b[1])+.5f);
+    }
     if (T.minx < (int)s_gpu.clip_x) T.minx = (int)s_gpu.clip_x;
     if (T.miny < (int)s_gpu.clip_y) T.miny = (int)s_gpu.clip_y;
     if (T.maxx > (int)(s_gpu.clip_x + s_gpu.clip_w)) T.maxx = (int)(s_gpu.clip_x + s_gpu.clip_w);
@@ -2375,6 +2827,18 @@ static void raster_xf_triangle(const Nv2aVshOutput *va, const Nv2aVshOutput *vb,
     s_gpu.xf_drawn++;
     T.inv_area = 1.0f / area;
 
+    uint32_t offset_enable=raster_mode==1?NV_PGRAPH_SETUPRASTER_POFFSETPOINTENABLE:(raster_mode==2 || raster_mode==5)?NV_PGRAPH_SETUPRASTER_POFFSETLINEENABLE:NV_PGRAPH_SETUPRASTER_POFFSETFILLENABLE;
+    if((raster_mode<3 || raster_mode==5) && s_gpu.prim>NV_PRIM_LINE_STRIP &&
+       (nv2a_get_state()->pgraph.regs[NV_PGRAPH_SETUPRASTER]&offset_enable)) {
+        struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
+        float factor;memcpy(&factor,&pg->regs[NV_PGRAPH_ZOFFSETFACTOR],4);
+        memcpy(&T.depth_offset_bias,&pg->regs[NV_PGRAPH_ZOFFSETBIAS],4);
+        if(factor!=0) {
+            if(T.w_depth && !isfinite(factor)){fprintf(stderr,"[STOP] W-buffer polygon slope convention is not implemented\n");exit(5);}
+            T.depth_offset_slope=factor*((raster_mode==1 || raster_mode==5)?polygon_slope:xf_polygon_depth_slope(a,b,c,T.inv_area,T.w_depth));
+        }
+    }
+
 #if defined(_WIN32)
     if (hw_enabled()) hw_triangle(&T);
     else
@@ -2387,6 +2851,11 @@ static void raster_xf_triangle(const Nv2aVshOutput *va, const Nv2aVshOutput *vb,
     note_drawn();
 }
 
+
+static void raster_xf_triangle(const Nv2aVshOutput *a,const Nv2aVshOutput *b,const Nv2aVshOutput *c)
+{
+    raster_xf_triangle_mode(a,b,c,0,0,0);
+}
 
 /* Near-plane clipping.
  *
@@ -2425,6 +2894,39 @@ static void xf_lerp(const Nv2aVshOutput *a, const Nv2aVshOutput *b, float t,
         po[i] = pa[i] + (pb[i] - pa[i]) * t;
 }
 
+static unsigned xf_clip_polygon_w(const Nv2aVshOutput input[4],unsigned count,Nv2aVshOutput output[9],unsigned edges[9],unsigned points[9])
+{
+    int clipped=0;for(unsigned i=0;i<count;i++)if(input[i].pos[3]<=NV_CLIP_W)clipped=1;
+    if(!clipped){for(unsigned i=0;i<count;i++)output[i]=input[i];return count;}
+    const float *k=nv2a_vsh_constant(58),*o=nv2a_vsh_constant(59);unsigned n=0,oe[9]={0},op[9]={0};
+    for(unsigned i=0;i<count;i++) {
+        const Nv2aVshOutput *p=&input[i],*q=&input[(i+1)%count];int pin=p->pos[3]>NV_CLIP_W,qin=q->pos[3]>NV_CLIP_W;
+        Nv2aVshOutput a=*p,b=*q;float ca[3],cb[3];xf_to_clip(p,k,o,ca);xf_to_clip(q,k,o,cb);
+        for(unsigned j=0;j<3;j++){a.pos[j]=ca[j];b.pos[j]=cb[j];}
+        if(pin){output[n]=a;oe[n]=edges[i];op[n]=points[i];n++;}
+        if(pin!=qin){xf_lerp(&a,&b,(NV_CLIP_W-p->pos[3])/(q->pos[3]-p->pos[3]),&output[n]);oe[n]=pin?1:edges[i];op[n]=edges[i];n++;}
+    }
+    for(unsigned i=0;i<n;i++){for(unsigned j=0;j<3;j++)output[i].pos[j]=output[i].pos[j]/output[i].pos[3]*k[j]+o[j];edges[i]=oe[i];points[i]=op[i];}
+    return n;
+}
+
+static unsigned xf_clip_polygon_xy(Nv2aVshOutput poly[9],unsigned edges[9],unsigned points[9],unsigned count,unsigned axis,float boundary,int lower)
+{
+    Nv2aVshOutput output[9];unsigned oe[9]={0},op[9]={0},n=0;
+    for(unsigned i=0;i<count;i++) {
+        Nv2aVshOutput a=poly[i],b=poly[(i+1)%count];float da=lower?a.pos[axis]-boundary:boundary-a.pos[axis],db=lower?b.pos[axis]-boundary:boundary-b.pos[axis];int ain=da>=0,bin=db>=0;
+        if(ain){output[n]=a;oe[n]=edges[i];op[n]=points[i];n++;}
+        if(ain && !bin && da==0)oe[n-1]=1;
+        if(ain!=bin && da!=0 && db!=0) {
+            float t=da/(da-db),clip_t=t*a.pos[3]/((1-t)*b.pos[3]+t*a.pos[3]);
+            for(unsigned j=0;j<3;j++){a.pos[j]*=a.pos[3];b.pos[j]*=b.pos[3];}
+            xf_lerp(&a,&b,clip_t,&output[n]);for(unsigned j=0;j<3;j++)output[n].pos[j]/=output[n].pos[3];output[n].pos[axis]=boundary;
+            oe[n]=ain?1:edges[i];op[n]=edges[i];n++;
+        }
+    }
+    for(unsigned i=0;i<n;i++){poly[i]=output[i];edges[i]=oe[i];points[i]=op[i];}return n;
+}
+
 static void raster_xf_clipped(const Nv2aVshOutput *a, const Nv2aVshOutput *b,
                               const Nv2aVshOutput *c, const Nv2aVshOutput *provoking)
 {
@@ -2434,52 +2936,16 @@ static void raster_xf_clipped(const Nv2aVshOutput *a, const Nv2aVshOutput *b,
         for (unsigned i = 0; i < 3; ++i) {
             memcpy(flat[i].d0, provoking->d0, sizeof(flat[i].d0));
             memcpy(flat[i].d1, provoking->d1, sizeof(flat[i].d1));
+            memcpy(flat[i].b0, provoking->b0, sizeof(flat[i].b0));
+            memcpy(flat[i].b1, provoking->b1, sizeof(flat[i].b1));
         }
         a = &flat[0]; b = &flat[1]; c = &flat[2];
     }
-    const Nv2aVshOutput *in[3];
-    Nv2aVshOutput poly[4], va, vb;
-    float k[3], o[3], ca[3], cb[3];
-    int n = 0, i, j;
-
-    if (a->pos[3] > NV_CLIP_W && b->pos[3] > NV_CLIP_W && c->pos[3] > NV_CLIP_W) {
-        raster_xf_triangle(a, b, c);
-        return;
-    }
-    if (a->pos[3] <= NV_CLIP_W && b->pos[3] <= NV_CLIP_W
-        && c->pos[3] <= NV_CLIP_W) {
-        s_gpu.tris_behind++;                  /* wholly behind: nothing */
-        return;
-    }
-    {
-        const float *sc = nv2a_vsh_constant(58), *of = nv2a_vsh_constant(59);
-        for (i = 0; i < 3; i++) { k[i] = sc[i]; o[i] = of[i]; }
-    }
-    in[0] = a; in[1] = b; in[2] = c;
-    for (i = 0; i < 3; i++) {
-        const Nv2aVshOutput *p = in[i], *q = in[(i + 1) % 3];
-        int pin = p->pos[3] > NV_CLIP_W, qin = q->pos[3] > NV_CLIP_W;
-        if (pin) {
-            va = *p;
-            xf_to_clip(p, k, o, ca);
-            for (j = 0; j < 3; j++) va.pos[j] = ca[j];
-            poly[n++] = va;
-        }
-        if (pin != qin) {
-            float t = (NV_CLIP_W - p->pos[3]) / (q->pos[3] - p->pos[3]);
-            va = *p; vb = *q;
-            xf_to_clip(p, k, o, ca);
-            xf_to_clip(q, k, o, cb);
-            for (j = 0; j < 3; j++) { va.pos[j] = ca[j]; vb.pos[j] = cb[j]; }
-            xf_lerp(&va, &vb, t, &poly[n++]);
-        }
-    }
-    /* Back to screen space: divide by the (now positive) w, viewport. */
-    for (i = 0; i < n; i++)
-        for (j = 0; j < 3; j++)
-            poly[i].pos[j] = poly[i].pos[j] / poly[i].pos[3] * k[j] + o[j];
-    for (i = 1; i + 1 < n; i++)
-        raster_xf_triangle(&poly[0], &poly[i], &poly[i + 1]);
+    if(a->pos[3]>NV_CLIP_W && b->pos[3]>NV_CLIP_W && c->pos[3]>NV_CLIP_W){raster_xf_triangle(a,b,c);return;}
+    if(a->pos[3]<=NV_CLIP_W && b->pos[3]<=NV_CLIP_W && c->pos[3]<=NV_CLIP_W){s_gpu.tris_behind++;return;}
+    Nv2aVshOutput input[4]={*a,*b,*c},poly[9];unsigned edges[9]={1,1,1},points[9]={1,1,1};
+    unsigned count=xf_clip_polygon_w(input,3,poly,edges,points);
+    for(unsigned i=1;i+1<count;i++)raster_xf_triangle(&poly[0],&poly[i],&poly[i+1]);
 }
 
 static Nv2aVshOutput s_xf[NV_MAX_INDICES];
@@ -2494,7 +2960,9 @@ static int transform_vertex(uint32_t index, uint32_t inputs, Nv2aVshOutput *out)
     for (a = 0; a < NV2A_VSH_INPUTS; a++)
         if (inputs & (1u << a))
             fetch_attr(&s_gpu.attr[a], index, in[a]);   /* disabled arrays: current registers */
-    int result = nv2a_vsh_run((const float (*)[4])in, out);
+    int fixed=(s_gpu.xf_mode&3)==0;
+    int result = fixed ? nv2a_vsh_fixed_run((const float (*)[4])in,&nv2a_get_state()->pgraph,out) : nv2a_vsh_run((const float (*)[4])in, out);
+    if(fixed && !result) { fprintf(stderr,"[STOP] fixed software vertex mode or texgen requires consumer\n");exit(5); }
     if (s_ftrace == 2 && result && !isfinite(out->pos[3])) {
         static unsigned invalid_w_traces;
         if (invalid_w_traces++ < 16) {
@@ -2513,12 +2981,111 @@ static int transform_vertex(uint32_t index, uint32_t inputs, Nv2aVshOutput *out)
     return result;
 }
 
+static void raster_vertex_point(const Nv2aVshOutput *input,unsigned mode,float polygon_slope)
+{
+    struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
+    float size=(pg->regs[NV_PGRAPH_CSV0_D]&NV_PGRAPH_CSV0_D_POINTPARAMSENABLE)?input->point_size:pg->regs[NV_PGRAPH_POINTSIZE]/8.0f;
+    for(unsigned i=0;i<4;i++)if(!isfinite(input->pos[i]))return;
+    if(!isfinite(size) || input->pos[3]<=0)return;
+    float width=(float)color_width(s_gpu.format,s_gpu.pitch,surface_bpp()),height=(float)color_height(s_gpu.format,s_gpu.clip_y+s_gpu.clip_h);
+    float x=truncf(input->pos[0]*16)/16,y=truncf(input->pos[1]*16)/16;
+    if(x<0 || x>width || y<0 || y>height)return;
+    size=fmaxf(1,floorf(size+.5f));
+    if((unsigned)size&1){x=floorf(x)+.5f;y=floorf(y)+.5f;}else{x=floorf(x+.5f);y=floorf(y+.5f);}
+    Nv2aVshOutput corner[4];
+    for(unsigned i=0;i<4;i++) {
+        corner[i]=*input;float u=(float)(i&1),v=(float)(i>>1);
+        corner[i].pos[0]=x+(u-.5f)*size;corner[i].pos[1]=y+(v-.5f)*size;
+        if(pg->regs[NV_PGRAPH_SETUPRASTER]&NV_PGRAPH_SETUPRASTER_POINTSMOOTHENABLE) {
+            float su=1,sv=1;if(!tex_size_from_format(s_gpu.texs[3].color)){su=(float)s_gpu.texs[3].width;sv=(float)s_gpu.texs[3].height;}
+            corner[i].tex[3][0]=u*su;corner[i].tex[3][1]=v*sv;corner[i].tex[3][2]=corner[i].tex[3][3]=1;
+        }
+    }
+    raster_xf_triangle_mode(&corner[0],&corner[1],&corner[2],mode,1,polygon_slope);
+    raster_xf_triangle_mode(&corner[2],&corner[1],&corner[3],mode,1,polygon_slope);
+}
+
+static void raster_vertex_line(const Nv2aVshOutput *va,const Nv2aVshOutput *vb,const Nv2aVshOutput *provoking,unsigned polygon,float polygon_slope);
+
+static void raster_software_polygon(uint32_t a,uint32_t b,uint32_t c,uint32_t d,unsigned count,uint32_t provoking)
+{
+    struct PGRAPHState *pg=&nv2a_get_state()->pgraph;uint32_t info=primitive_polygon_info(a,b,c,d,count),raster=pg->regs[NV_PGRAPH_SETUPRASTER];
+    uint32_t slots[4]={a,b,c,d};Nv2aVshOutput input[4],poly[9];unsigned edges[9]={0},points[9]={0};
+    for(unsigned i=0;i<count;i++) {
+        input[i]=s_xf[slots[i]];edges[i]=(info>>(8+i))&1;points[i]=(info>>(16+i))&1;
+        if(!(pg->regs[NV_PGRAPH_CONTROL_3]&NV_PGRAPH_CONTROL_3_SHADEMODE)) {
+            memcpy(input[i].d0,s_xf[provoking].d0,16);memcpy(input[i].d1,s_xf[provoking].d1,16);memcpy(input[i].b0,s_xf[provoking].b0,16);memcpy(input[i].b1,s_xf[provoking].b1,16);
+        }
+    }
+    unsigned n=xf_clip_polygon_w(input,count,poly,edges,points);
+    float width=(float)color_width(s_gpu.format,s_gpu.pitch,surface_bpp()),height=(float)color_height(s_gpu.format,s_gpu.clip_y+s_gpu.clip_h);
+    n=xf_clip_polygon_xy(poly,edges,points,n,0,0,1);n=xf_clip_polygon_xy(poly,edges,points,n,0,width,0);
+    n=xf_clip_polygon_xy(poly,edges,points,n,1,0,1);n=xf_clip_polygon_xy(poly,edges,points,n,1,height,0);
+    if(n<3)return;
+    for(unsigned i=0;i<n;i++){poly[i].pos[0]=truncf(poly[i].pos[0]*16)/16;poly[i].pos[1]=truncf(poly[i].pos[1]*16)/16;}
+    float area=0;unsigned plane_vertex=1;for(unsigned i=1;i+1<n;i++){plane_vertex=i;area=(poly[i].pos[0]-poly[0].pos[0])*(poly[i+1].pos[1]-poly[0].pos[1])-(poly[i].pos[1]-poly[0].pos[1])*(poly[i+1].pos[0]-poly[0].pos[0]);if(area!=0)break;}
+    if(area==0 || !isfinite(area))return;int front=(area<0)==((raster&NV_PGRAPH_SETUPRASTER_FRONTFACE)!=0);
+    unsigned face=GET_MASK(raster,NV_PGRAPH_SETUPRASTER_CULLCTRL);
+    if((raster&NV_PGRAPH_SETUPRASTER_CULLENABLE) && (face==3 || (front && face==1) || (!front && face==2)))return;
+    unsigned mode=GET_MASK(raster,front?NV_PGRAPH_SETUPRASTER_FRONTFACEMODE:NV_PGRAPH_SETUPRASTER_BACKFACEMODE);
+    if(!front && (pg->regs[NV_PGRAPH_CSV0_C]&NV_PGRAPH_CSV0_C_LIGHT_TWO_SIDE_ENABLE))for(unsigned i=0;i<n;i++){memcpy(poly[i].d0,poly[i].b0,16);memcpy(poly[i].d1,poly[i].b1,16);}
+    if(mode==1 || mode==2){
+        float slope=0;unsigned enable=mode==1?NV_PGRAPH_SETUPRASTER_POFFSETPOINTENABLE:NV_PGRAPH_SETUPRASTER_POFFSETLINEENABLE;
+        if(raster&enable) {
+            float factor;memcpy(&factor,&pg->regs[NV_PGRAPH_ZOFFSETFACTOR],4);
+            if(factor!=0) {
+                int w_depth=(pg->regs[NV_PGRAPH_CONTROL_0]&NV_PGRAPH_CONTROL_0_Z_PERSPECTIVE_ENABLE)!=0;
+                if(w_depth)for(unsigned j=1;j+1<n;j++)slope=xf_polygon_depth_slope(poly[0].pos,poly[j].pos,poly[j+1].pos,0,1);
+                else slope=xf_polygon_depth_slope(poly[0].pos,poly[plane_vertex].pos,poly[plane_vertex+1].pos,1/area,0);
+            }
+        }
+        for(unsigned i=0;i<n;i++) {
+            if(mode==1 && points[i])raster_vertex_point(&poly[i],1,slope);
+            if(mode==2 && edges[i])raster_vertex_line(&poly[i],&poly[(i+1)%n],&poly[i],1,slope);
+        }
+        return;
+    }
+    for(unsigned i=1;i+1<n;i++)raster_xf_triangle_mode(&poly[0],&poly[i],&poly[i+1],0,1,0);
+}
+
 static void raster_program_triangle(uint32_t a,uint32_t b,uint32_t c,uint32_t p)
 {
 #if defined(_WIN32)
     if(s_hw_program_active) { hw_program_triangle(a,b,c,p);return; }
 #endif
+    if(nv2a_get_state()->pgraph.regs[NV_PGRAPH_SETUPRASTER]&(NV_PGRAPH_SETUPRASTER_FRONTFACEMODE|NV_PGRAPH_SETUPRASTER_BACKFACEMODE)){raster_software_polygon(a,b,c,0,3,p);return;}
     raster_xf_clipped(&s_xf[a],&s_xf[b],&s_xf[c],&s_xf[p]);
+}
+
+static void raster_vertex_line(const Nv2aVshOutput *va,const Nv2aVshOutput *vb,const Nv2aVshOutput *provoking,unsigned polygon,float polygon_slope)
+{
+    Nv2aVshOutput a=*va,b=*vb;
+    if(!polygon && !(nv2a_get_state()->pgraph.regs[NV_PGRAPH_CONTROL_3]&NV_PGRAPH_CONTROL_3_SHADEMODE)) {
+        memcpy(a.d0,provoking->d0,16);memcpy(b.d0,provoking->d0,16);
+        memcpy(a.d1,provoking->d1,16);memcpy(b.d1,provoking->d1,16);
+    }
+    if(!polygon && a.pos[3]<=NV_CLIP_W && b.pos[3]<=NV_CLIP_W)return;
+    if(!polygon && (a.pos[3]<=NV_CLIP_W || b.pos[3]<=NV_CLIP_W)) {
+        const float *k=nv2a_vsh_constant(58),*o=nv2a_vsh_constant(59);float ca[3],cb[3];
+        xf_to_clip(&a,k,o,ca);xf_to_clip(&b,k,o,cb);Nv2aVshOutput aa=a,bb=b,c;
+        for(unsigned j=0;j<3;j++){aa.pos[j]=ca[j];bb.pos[j]=cb[j];}
+        xf_lerp(&aa,&bb,(NV_CLIP_W-a.pos[3])/(b.pos[3]-a.pos[3]),&c);
+        for(unsigned j=0;j<3;j++)c.pos[j]=c.pos[j]/c.pos[3]*k[j]+o[j];
+        if(a.pos[3]<=NV_CLIP_W)a=c;else b=c;
+    }
+    a.pos[0]=truncf(a.pos[0]*16)/16;a.pos[1]=truncf(a.pos[1]*16)/16;
+    b.pos[0]=truncf(b.pos[0]*16)/16;b.pos[1]=truncf(b.pos[1]*16)/16;
+#if defined(_WIN32)
+    if(hw_enabled()){hw_fixed_line(&a,&b);return;}
+#endif
+    unsigned width=(unsigned)floorf(GET_MASK(nv2a_get_state()->pgraph.regs[NV_PGRAPH_SETUPRASTER],NV_PGRAPH_SETUPRASTER_LINEWIDTH)/8.0f+.5f);
+    if(!width)width=1;
+    unsigned axis=fabsf(b.pos[0]-a.pos[0])>=fabsf(b.pos[1]-a.pos[1])?1:0;
+    for(unsigned i=0;i<width;i++) {
+        Nv2aVshOutput aa=a,bb=b;float offset=(float)i-((float)width-1)*.5f;
+        aa.pos[axis]+=offset;bb.pos[axis]+=offset;
+        raster_xf_triangle_mode(&aa,&bb,&bb,polygon?5:4,1,polygon_slope);
+    }
 }
 
 static void raster_program_line(uint32_t a,uint32_t b,uint32_t p)
@@ -2526,34 +3093,14 @@ static void raster_program_line(uint32_t a,uint32_t b,uint32_t p)
 #if defined(_WIN32)
     if(s_hw_program_active) { hw_program_line(a,b,p);return; }
 #endif
-    note_unhandled(NV097_SET_BEGIN_END,s_gpu.prim);
+    raster_vertex_line(&s_xf[a],&s_xf[b],&s_xf[p],0,0);
 }
 static void raster_indexed_line(uint32_t i0,uint32_t i1,uint32_t p)
 {
-#if defined(_WIN32)
-    if(hw_enabled()) {
-        Nv2aVshOutput a={0},b={0},provoking={0};
-        if(!fetch_screen_vertex(i0,&a) || !fetch_screen_vertex(i1,&b)) return;
-        nv2a_rc_unpack(vertex_color(p),provoking.d0);fetch_attr(&s_gpu.attr[4],p,provoking.d1);
-        if(!(nv2a_get_state()->pgraph.regs[NV_PGRAPH_CONTROL_3]&NV_PGRAPH_CONTROL_3_SHADEMODE)) {
-            memcpy(a.d0,provoking.d0,sizeof a.d0);memcpy(b.d0,provoking.d0,sizeof b.d0);
-            memcpy(a.d1,provoking.d1,sizeof a.d1);memcpy(b.d1,provoking.d1,sizeof b.d1);
-        }
-        if(a.pos[3]<=0.001f && b.pos[3]<=0.001f) return;
-        if(a.pos[3]<=0.001f || b.pos[3]<=0.001f) {
-            const float *k=nv2a_vsh_constant(58),*o=nv2a_vsh_constant(59);float ca[3],cb[3];
-            xf_to_clip(&a,k,o,ca);xf_to_clip(&b,k,o,cb);Nv2aVshOutput aa=a,bb=b,c;
-            for(unsigned j=0;j<3;j++) { aa.pos[j]=ca[j];bb.pos[j]=cb[j]; }
-            xf_lerp(&aa,&bb,(0.001f-a.pos[3])/(b.pos[3]-a.pos[3]),&c);
-            for(unsigned j=0;j<3;j++) c.pos[j]=c.pos[j]/c.pos[3]*k[j]+o[j];
-            if(a.pos[3]<=0.001f) a=c;else b=c;
-        }
-        a.pos[0]=truncf(a.pos[0]*16)/16;a.pos[1]=truncf(a.pos[1]*16)/16;
-        b.pos[0]=truncf(b.pos[0]*16)/16;b.pos[1]=truncf(b.pos[1]*16)/16;
-        hw_fixed_line(&a,&b);return;
-    }
-#endif
-    note_unhandled(NV097_SET_BEGIN_END,s_gpu.prim);
+    Nv2aVshOutput a={0},b={0},provoking={0};
+    if(!fetch_screen_vertex(i0,&a) || !fetch_screen_vertex(i1,&b))return;
+    nv2a_rc_unpack(vertex_color(p),provoking.d0);fetch_attr(&s_gpu.attr[4],p,provoking.d1);
+    raster_vertex_line(&a,&b,&provoking,0,0);
 }
 
 static void raster_batch_vertices(int fixed)
@@ -2580,7 +3127,8 @@ static void raster_batch_vertices(int fixed)
             s_hw_program=nv2a_vsh_program(&s_hw_program_length,&inputs);
             if(!s_hw_program) hw_check(E_NOTIMPL,"vertex program context writes or missing final");
         }
-        s_hw_program_active=1;s_hw_fixed_active=fixed;s_hw_program_vertex_count=0;
+        s_hw_program_active=1;s_hw_output_active=fixed==2;s_hw_fixed_active=fixed==1;s_hw_program_vertex_count=0;
+        if(s_hw_output_active) inputs=255;
         s_hw_program_inputs=inputs;
         /* The native input layout uses this same decoded input mask, in
          * ascending attribute order. Write its packed rows directly. */
@@ -2595,7 +3143,7 @@ static void raster_batch_vertices(int fixed)
 #endif
     if(!fixed) inputs=nv2a_vsh_inputs_used();
 #if defined(_WIN32)
-    int cache_hit=0,cache_locked=s_hw_program_active && !s_gpu.inline_active;
+    int cache_hit=0,cache_locked=s_hw_program_active && !s_hw_output_active && !s_gpu.inline_active;
     HwVertexBatch *cache=NULL;
     if(cache_locked) {hw_enter();cache=hw_vertex_batch_begin(inputs,attribute_count,&cache_hit);}
     s_hw_vertex_batch=cache;
@@ -2618,14 +3166,20 @@ static void raster_batch_vertices(int fixed)
 #if defined(_WIN32)
             if(s_hw_program_active) {
                 uint32_t row=s_hw_program_vertex_count++;s_hw_program_vertex_rows[i]=row;
-                for(unsigned a=0;a<attribute_count;++a) {
+                if(s_hw_output_active) {
+                    Nv2aVshOutput output={0};
+                    if(!fetch_screen_vertex(s_gpu.idx[i],&output)) hw_check(E_FAIL,"screen vertex output");
+                    hw_pack_output((HwVertexOutput *)packed,&output);
+                    packed+=8;
+                } else for(unsigned a=0;a<attribute_count;++a) {
                     unsigned attr=attributes[a];
                     fetch_attr(&s_gpu.attr[attr],s_gpu.idx[i],*packed++);
                 }
             } else
 #endif
             {
-                if (!transform_vertex(s_gpu.idx[i], inputs, &s_xf[i])) return;
+                if(fixed==2){memset(&s_xf[i],0,sizeof s_xf[i]);if(!fetch_screen_vertex(s_gpu.idx[i],&s_xf[i]))return;}
+                else if (!transform_vertex(s_gpu.idx[i], inputs, &s_xf[i])) return;
                 ++s_gpu.vertices_transformed;
             }
             s_xf_positions[slot] = i + 1;
@@ -2705,7 +3259,7 @@ static void raster_batch_vertices(int fixed)
 #if defined(_WIN32)
         if(s_hw_program_active) { for(i=0;i<n;i++) hw_program_point(i);break; }
 #endif
-        note_unhandled(NV097_SET_BEGIN_END,s_gpu.prim);
+        for(i=0;i<n;i++)raster_vertex_point(&s_xf[i],3,0);
         break;
     case NV_PRIM_LINES:
         for(i=0;i+1<n;i+=2) raster_program_line(i,i+1,provoking_slot(pg,i));
@@ -2731,12 +3285,20 @@ static void raster_batch_vertices(int fixed)
         break;
     case NV_PRIM_QUADS:
         for (i = 0; i + 3 < n; i += 4) {
+#if defined(_WIN32)
+            if(s_hw_program_active && hw_polygon_modes_active()) {hw_program_quad(i,i+1,i+2,i+3,provoking_slot(pg,i));continue;}
+#endif
+            if(pg->regs[NV_PGRAPH_SETUPRASTER]&(NV_PGRAPH_SETUPRASTER_FRONTFACEMODE|NV_PGRAPH_SETUPRASTER_BACKFACEMODE)){raster_software_polygon(i,i+1,i+2,i+3,4,provoking_slot(pg,i));continue;}
             raster_program_triangle(i,i+1,i+2,provoking_slot(pg,i));
             raster_program_triangle(i,i+2,i+3,provoking_slot(pg,i));
         }
         break;
     case NV_PRIM_QUAD_STRIP:
         for (i = 0; i + 3 < n; i += 2) {
+#if defined(_WIN32)
+            if(s_hw_program_active && hw_polygon_modes_active()) {hw_program_quad(i,i+1,i+3,i+2,provoking_slot(pg,i));continue;}
+#endif
+            if(pg->regs[NV_PGRAPH_SETUPRASTER]&(NV_PGRAPH_SETUPRASTER_FRONTFACEMODE|NV_PGRAPH_SETUPRASTER_BACKFACEMODE)){raster_software_polygon(i,i+1,i+3,i+2,4,provoking_slot(pg,i));continue;}
             raster_program_triangle(i,i+1,i+3,provoking_slot(pg,i));
             raster_program_triangle(i,i+3,i+2,provoking_slot(pg,i));
         }
@@ -2746,28 +3308,51 @@ static void raster_batch_vertices(int fixed)
     }
 }
 
+static unsigned primitive_min_vertices(void)
+{
+    return s_gpu.prim==NV_PRIM_POINTS ? 1u : s_gpu.prim<=NV_PRIM_LINE_STRIP ? 2u : 3u;
+}
+
 static void raster_batch(void)
 {
     uint32_t i;
     uint32_t before = s_gpu.tris_drawn;
 
-    if (s_gpu.idx_count < (s_gpu.prim==NV_PRIM_POINTS ? 1u : s_gpu.prim<=NV_PRIM_LINE_STRIP ? 2u : 3u))
+    if (s_gpu.idx_count < primitive_min_vertices())
         return;
+    if(s_gpu.format&0xF000u)note_unhandled(NV097_SET_SURFACE_FORMAT,s_gpu.format);
+    struct PGRAPHState *smooth_pg=&nv2a_get_state()->pgraph;
+    if(!(smooth_pg->regs[NV_PGRAPH_ANTIALIASING]&NV_PGRAPH_ANTIALIASING_ENABLE)) {
+        uint32_t raster=smooth_pg->regs[NV_PGRAPH_SETUPRASTER];
+        int lines=s_gpu.prim>=NV_PRIM_LINES && s_gpu.prim<=NV_PRIM_LINE_STRIP,fill=0;
+        if(s_gpu.prim>=NV_PRIM_TRIANGLES) {
+            unsigned front=GET_MASK(raster,NV_PGRAPH_SETUPRASTER_FRONTFACEMODE),back=GET_MASK(raster,NV_PGRAPH_SETUPRASTER_BACKFACEMODE);
+            lines=front==2 || back==2;fill=front==0 || back==0;
+        }
+        if(lines && (raster&NV_PGRAPH_SETUPRASTER_LINESMOOTHENABLE))note_unhandled(NV097_SET_LINE_SMOOTH_ENABLE,1);
+        if(fill && (raster&NV_PGRAPH_SETUPRASTER_POLYSMOOTHENABLE))note_unhandled(NV097_SET_POLY_SMOOTH_ENABLE,1);
+    }
 #if defined(_WIN32)
     if(hw_enabled()) s_hw_topology=s_gpu.prim==NV_PRIM_POINTS?D3D11_PRIMITIVE_TOPOLOGY_POINTLIST:s_gpu.prim<=NV_PRIM_LINE_STRIP?D3D11_PRIMITIVE_TOPOLOGY_LINELIST:D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-    else
 #endif
-    if(s_gpu.prim>NV_PRIM_LINE_STRIP && (nv2a_get_state()->pgraph.regs[NV_PGRAPH_SETUPRASTER]&
-       (NV_PGRAPH_SETUPRASTER_FRONTFACEMODE|NV_PGRAPH_SETUPRASTER_BACKFACEMODE))) {
-        fprintf(stderr,"[STOP] non-solid polygons require a hardware raster consumer\n");
-        exit(5);
-    }
     static int no_vsh = -1;
     if (no_vsh < 0)
         no_vsh = getenv("RECOMP_NO_VSH") != NULL;
     if ((s_gpu.xf_mode & 3) == 2 && !no_vsh) {
         raster_batch_vertices(0);
         return;
+    }
+#if defined(_WIN32)
+    if(!hw_enabled())
+#endif
+    if((s_gpu.xf_mode&3)==0) {
+        struct PGRAPHState *fixed=&nv2a_get_state()->pgraph;
+        if((fixed->regs[NV_PGRAPH_CSV0_C]&(NV_PGRAPH_CSV0_C_LIGHTING|NV_PGRAPH_CSV0_C_LIGHT_TWO_SIDE_ENABLE)) ||
+           GET_MASK(fixed->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_SKIN) ||
+           ((fixed->regs[NV_PGRAPH_CSV0_D]&NV_PGRAPH_CSV0_D_POINTPARAMSENABLE) &&
+            (GET_MASK(fixed->regs[NV_PGRAPH_SETUPRASTER],NV_PGRAPH_SETUPRASTER_FRONTFACEMODE)==1 || GET_MASK(fixed->regs[NV_PGRAPH_SETUPRASTER],NV_PGRAPH_SETUPRASTER_BACKFACEMODE)==1)) || s_gpu.prim==NV_PRIM_POINTS || s_gpu.attr[0].size<4 || !batch_is_screen_space()) {
+            raster_batch_vertices(1);return;
+        }
     }
     /* CSV1 texgen and texture matrices belong to the original fixed vertex
      * path. Program output coordinates must not be generated a second time. */
@@ -2778,30 +3363,40 @@ static void raster_batch(void)
             uint32_t mask=NV_PGRAPH_CSV1_A_T0_S<<(component*3+(stage%2)*16);
             uint32_t mode=GET_MASK(pg->regs[stage<2?NV_PGRAPH_CSV1_A:NV_PGRAPH_CSV1_B],mask);
             if(mode) {
-#if defined(_WIN32)
-                if(hw_enabled() && mode<=NV_PGRAPH_CSV1_A_T0_S_OBJECT_LINEAR) {fixed_texture=1;continue;}
-#endif
+                if(mode<=NV_PGRAPH_CSV1_A_T0_S_OBJECT_LINEAR || ((mode==4 || mode==5) && component<3) || (mode==3 && component<2)) {fixed_texture=1;continue;}
                 fprintf(stderr,"[STOP] fixed vertex texgen requires consumer: stage=%u component=%u mode=%u\n",stage,component,mode);
                 exit(5);
             }
         }
         if(pg->texture_matrix_enable[stage]) {
-#if defined(_WIN32)
-            if(hw_enabled()) {fixed_texture=1;continue;}
-#endif
-            fprintf(stderr,"[STOP] fixed vertex texture matrix requires consumer: stage=%u\n",stage);
-            exit(5);
+            fixed_texture=1;
         }
     }
+    if((s_gpu.xf_mode&3)==0 && fixed_texture
 #if defined(_WIN32)
-    if(hw_enabled() && (fixed_texture || s_gpu.attr[0].size<4 || (pg->regs[NV_PGRAPH_CSV0_C]&NV_PGRAPH_CSV0_C_LIGHTING) || s_gpu.prim==NV_PRIM_POINTS || !batch_is_screen_space())) {
-        if((s_gpu.xf_mode&3)!=0 || GET_MASK(pg->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_SKIN)!=0)
-            hw_check(E_NOTIMPL,"fixed vertex mode or skinning");
+       && !hw_enabled()
+#endif
+    ) {raster_batch_vertices(1);return;}
+#if defined(_WIN32)
+    uint32_t raster=pg->regs[NV_PGRAPH_SETUPRASTER];
+    int polygon_point_params=(pg->regs[NV_PGRAPH_CSV0_D]&NV_PGRAPH_CSV0_D_POINTPARAMSENABLE) &&
+        (GET_MASK(raster,NV_PGRAPH_SETUPRASTER_FRONTFACEMODE)==1 || GET_MASK(raster,NV_PGRAPH_SETUPRASTER_BACKFACEMODE)==1);
+    if(hw_enabled() && (polygon_point_params || fixed_texture || (pg->regs[NV_PGRAPH_CSV0_C]&NV_PGRAPH_CSV0_C_LIGHT_TWO_SIDE_ENABLE) || GET_MASK(pg->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_SKIN)!=0 || s_gpu.attr[0].size<4 || (pg->regs[NV_PGRAPH_CSV0_C]&NV_PGRAPH_CSV0_C_LIGHTING) || s_gpu.prim==NV_PRIM_POINTS || !batch_is_screen_space())) {
+        if((s_gpu.xf_mode&3)!=0)
+            hw_check(E_NOTIMPL,"fixed vertex mode");
         if(GET_MASK(pg->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_FOGGENMODE)>NV_PGRAPH_CSV0_D_FOGGENMODE_FOG_X)
             hw_check(E_NOTIMPL,"fixed vertex fog generation");
         raster_batch_vertices(1);return;
     }
 #endif
+#if defined(_WIN32)
+    if(hw_enabled() && (hw_polygon_modes_active() || (s_gpu.prim>=NV_PRIM_LINES && s_gpu.prim<=NV_PRIM_LINE_STRIP))) {
+        raster_batch_vertices(2);return;
+    }
+#endif
+    if(s_gpu.prim>NV_PRIM_LINE_STRIP && (pg->regs[NV_PGRAPH_SETUPRASTER]&(NV_PGRAPH_SETUPRASTER_FRONTFACEMODE|NV_PGRAPH_SETUPRASTER_BACKFACEMODE))) {raster_batch_vertices(2);return;}
+    if(GET_MASK(pg->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_SKIN)!=0)
+        note_unhandled(NV097_SET_SKIN_MODE,GET_MASK(pg->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_SKIN));
     if (pg->regs[NV_PGRAPH_CSV0_C] & NV_PGRAPH_CSV0_C_LIGHTING) {
         fprintf(stderr,"[STOP] fixed vertex lighting requires consumer: mode=%u primitive=%u\n",
                 s_gpu.xf_mode & 3, s_gpu.prim);
@@ -2944,6 +3539,13 @@ static void draw_primitive(void)
 
     if (!s_gpu.prim || !s_gpu.idx_count)
         return;
+    for(unsigned stage=0;stage<4;stage++)if(texture_volume(&s_gpu.texs[stage]) && texture_stage_samples((s_gpu.rc.stage_program>>(stage*5))&31)) {
+        Texture *t=&s_gpu.texs[stage];unsigned mode=(s_gpu.rc.stage_program>>(stage*5))&31,w=texture_address_w(stage);
+        if((mode!=13 && mode!=2) || w<1 || w>5){fprintf(stderr,"[STOP] volume requires DOT_STR/PROJECT3D and established W addressing\n");exit(5);}
+        if(mode==13)texture_dot_source(stage,mode);
+        uint32_t bytes=texture_volume_bytes(t);struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
+        t->offset=dma_resolve((t->dma_format&3)==2?pg->dma_b:pg->dma_a,t->dma_offset,bytes);
+    }
     s_gpu.draws++;
     if (s_ftrace == 2 && (s_gpu.draws % 200) == 0)
         fprintf(stderr, "  [GPU] draw #%u\n", s_gpu.draws);
@@ -3159,14 +3761,14 @@ static void draw_inline_array(void)
         goto out;
 
     count = (s_gpu.inline_count * 4) / vsize;
-    if (count < 3 || count > NV_MAX_INDICES)
+    if (count < primitive_min_vertices() || count > NV_MAX_INDICES)
         goto out;
     for (a = 0; a < NV_VERTEX_ATTRS; a++)
         if (s_gpu.attr[a].size)
             s_gpu.attr[a].stride = vsize;
 
     for (i = 0; i < count; i++)
-        s_gpu.idx[i] = i;
+        { s_gpu.idx[i] = i; s_gpu.idx_edge[i]=s_gpu.inline_edge[(i+1)*vsize/4-1]; }
     s_gpu.idx_count = count;
 
     s_gpu.inline_active = 1;
@@ -3197,7 +3799,7 @@ static void draw_immediate(void)
     VertexAttr saved[NV_VERTEX_ATTRS];
     uint32_t i;
 
-    if (s_gpu.imm_count < 3)
+    if (s_gpu.imm_count < primitive_min_vertices())
         return;
 
     memcpy(saved, s_gpu.attr, sizeof saved);
@@ -3215,7 +3817,7 @@ static void draw_immediate(void)
     }
 
     for (i = 0; i < s_gpu.imm_count && i < NV_MAX_INDICES; i++)
-        s_gpu.idx[i] = (uint16_t)i;
+        { s_gpu.idx[i] = i; s_gpu.idx_edge[i]=s_gpu.inline_edge[i*IMM_VERTEX_DWORDS]; }
     s_gpu.idx_count = i;
 
     /* fetch_attr bounds-checks against inline_count dwords. */
@@ -3239,6 +3841,7 @@ static void imm_emit_vertex(void)
         return;
     require_batch_space("immediate", at, IMM_VERTEX_DWORDS, NV_MAX_INLINE);
     memcpy(&s_gpu.inline_buf[at], s_gpu.imm_attr, sizeof s_gpu.imm_attr);
+    s_gpu.inline_edge[at]=(uint8_t)nv2a_get_state()->pgraph.edge_flag;
     s_gpu.imm_count++;
 }
 
@@ -3259,6 +3862,75 @@ static int imm_vertex_method(uint32_t method, uint32_t param)
     uint32_t attr, c;
     float *a;
     v.u = param;
+
+    /* Legacy texture bases are explicit: stage 3 has a different 4F gap. */
+    if (method >= NV097_SET_TEXCOORD0_2F && method < NV097_SET_TEXCOORD3_4S + 8) {
+        static const uint32_t bases[4][4] = {
+            {NV097_SET_TEXCOORD0_2F,NV097_SET_TEXCOORD0_4F,NV097_SET_TEXCOORD0_2S,NV097_SET_TEXCOORD0_4S},
+            {NV097_SET_TEXCOORD1_2F,NV097_SET_TEXCOORD1_4F,NV097_SET_TEXCOORD1_2S,NV097_SET_TEXCOORD1_4S},
+            {NV097_SET_TEXCOORD2_2F,NV097_SET_TEXCOORD2_4F,NV097_SET_TEXCOORD2_2S,NV097_SET_TEXCOORD2_4S},
+            {NV097_SET_TEXCOORD3_2F,NV097_SET_TEXCOORD3_4F,NV097_SET_TEXCOORD3_2S,NV097_SET_TEXCOORD3_4S}
+        };
+        for (unsigned stage=0;stage<4;stage++) {
+            uint32_t attribute=9+stage;
+            if (method>=bases[stage][0] && method<bases[stage][0]+8) {
+                s_gpu.imm_attr[attribute][2]=0;s_gpu.imm_attr[attribute][3]=1;
+                method=NV097_SET_VERTEX_DATA2F_M+attribute*8+method-bases[stage][0];break;
+            }
+            if (method>=bases[stage][1] && method<bases[stage][1]+16) {
+                method=NV097_SET_VERTEX_DATA4F_M+attribute*16+method-bases[stage][1];break;
+            }
+            if (method==bases[stage][2]) {
+                method=NV097_SET_VERTEX_DATA2S+attribute*4;break;
+            }
+            if (method>=bases[stage][3] && method<bases[stage][3]+8) {
+                method=NV097_SET_VERTEX_DATA4S_M+attribute*8+method-bases[stage][3];break;
+            }
+        }
+    } else if (method == NV097_SET_FOG_COORD) {
+        s_gpu.imm_attr[5][1]=s_gpu.imm_attr[5][2]=s_gpu.imm_attr[5][3]=v.f;
+        method=NV097_SET_VERTEX_DATA4F_M+5*16;
+    }
+
+    /* Legacy setters share the existing generic standing-attribute consumer.
+     * Three-component colours and weights supply the NV097 missing-component
+     * defaults on each write, including partial writes before vertex emission. */
+    int normalized_normal = 0;
+    if (method >= NV097_SET_NORMAL3F && method < NV097_SET_WEIGHT4F + 16) {
+        uint32_t first = 0, components = 0, attribute = 0;
+        if (method >= NV097_SET_NORMAL3F && method < NV097_SET_NORMAL3F + 12) {
+            first=NV097_SET_NORMAL3F;components=3;attribute=2;
+        } else if (method >= NV097_SET_NORMAL3S && method < NV097_SET_NORMAL3S + 8) {
+            normalized_normal=1;
+            method=NV097_SET_VERTEX_DATA4S_M+2*8+method-NV097_SET_NORMAL3S;
+        } else if (method >= NV097_SET_DIFFUSE_COLOR4F && method < NV097_SET_DIFFUSE_COLOR4F + 16) {
+            first=NV097_SET_DIFFUSE_COLOR4F;components=4;attribute=3;
+        } else if (method >= NV097_SET_DIFFUSE_COLOR3F && method < NV097_SET_DIFFUSE_COLOR3F + 12) {
+            first=NV097_SET_DIFFUSE_COLOR3F;components=3;attribute=3;
+            s_gpu.imm_attr[3][3]=1;
+        } else if (method == NV097_SET_DIFFUSE_COLOR4UB) {
+            method=NV097_SET_VERTEX_DATA4UB+3*4;
+        } else if (method >= NV097_SET_SPECULAR_COLOR4F && method < NV097_SET_SPECULAR_COLOR4F + 16) {
+            first=NV097_SET_SPECULAR_COLOR4F;components=4;attribute=4;
+        } else if (method >= NV097_SET_SPECULAR_COLOR3F && method < NV097_SET_SPECULAR_COLOR3F + 12) {
+            first=NV097_SET_SPECULAR_COLOR3F;components=3;attribute=4;
+            s_gpu.imm_attr[4][3]=1;
+        } else if (method == NV097_SET_SPECULAR_COLOR4UB) {
+            method=NV097_SET_VERTEX_DATA4UB+4*4;
+        } else if (method == NV097_SET_WEIGHT1F) {
+            first=NV097_SET_WEIGHT1F;components=1;attribute=1;
+            s_gpu.imm_attr[1][1]=s_gpu.imm_attr[1][2]=0;s_gpu.imm_attr[1][3]=1;
+        } else if (method >= NV097_SET_WEIGHT2F && method < NV097_SET_WEIGHT2F + 8) {
+            first=NV097_SET_WEIGHT2F;components=2;attribute=1;
+            s_gpu.imm_attr[1][2]=0;s_gpu.imm_attr[1][3]=1;
+        } else if (method >= NV097_SET_WEIGHT3F && method < NV097_SET_WEIGHT3F + 12) {
+            first=NV097_SET_WEIGHT3F;components=3;attribute=1;
+            s_gpu.imm_attr[1][3]=1;
+        } else if (method >= NV097_SET_WEIGHT4F && method < NV097_SET_WEIGHT4F + 16) {
+            first=NV097_SET_WEIGHT4F;components=4;attribute=1;
+        }
+        if (components)method=NV097_SET_VERTEX_DATA4F_M+attribute*16+method-first;
+    }
 
     if (method >= NV097_SET_VERTEX4F && method < NV097_SET_VERTEX4F + 16) {
         c = (method - NV097_SET_VERTEX4F) / 4;
@@ -3335,6 +4007,10 @@ static int imm_vertex_method(uint32_t method, uint32_t param)
         a = s_gpu.imm_attr[attr];
         a[c * 2]     = (float)(int16_t)(param & 0xFFFF);
         a[c * 2 + 1] = (float)(int16_t)(param >> 16);
+        if (normalized_normal) {
+            a[c * 2] = fmaxf(-1.0f, normalized_vertex_short(a[c * 2]));
+            a[c * 2 + 1] = fmaxf(-1.0f, normalized_vertex_short(a[c * 2 + 1]));
+        }
         s_gpu.imm_used |= (uint16_t)(1u << attr);
         if (attr == 0 && c == 1)
             imm_emit_vertex();
@@ -3382,13 +4058,31 @@ static NV_NOINLINE void tex_stage_method(uint32_t method, uint32_t param)
         t->palette_set = 1;
         break;
     case NV097_SET_TEXTURE_ADDRESS:
-        /* Four bits per axis. 1 is wrap, 3 clamp-to-edge; mirror and border
-         * fall back to clamp, wrong at an edge rather than everywhere. */
+        /* The sampler consumes the same per-axis addressing enums on both
+         * software and native paths. Border colour is standing stage state. */
         t->addr_u =  param        & 0xF;
         t->addr_v = (param >>  8) & 0xF;
+        nv2a_get_state()->pgraph.regs[NV_PGRAPH_TEXADDRESS0+stage*4]=param;
+        break;
+    case NV097_SET_TEXTURE_BORDER_COLOR:
+        t->border_color = param;
+        nv2a_get_state()->pgraph.regs[NV_PGRAPH_BORDERCOLOR0 + stage * 4] = param;
         break;
     case NV097_SET_TEXTURE_CONTROL0:
         nv2a_get_state()->pgraph.regs[NV_PGRAPH_TEXCTL0_0 + stage * 4] = param;
+        break;
+    case NV097_SET_TEXTURE_SET_BUMP_ENV_MAT:
+    case NV097_SET_TEXTURE_SET_BUMP_ENV_MAT+4:
+    case NV097_SET_TEXTURE_SET_BUMP_ENV_MAT+8:
+    case NV097_SET_TEXTURE_SET_BUMP_ENV_MAT+12:
+        if(stage) {
+            static const unsigned swizzle[]={NV_PGRAPH_BUMPMAT00,NV_PGRAPH_BUMPMAT01,NV_PGRAPH_BUMPMAT11,NV_PGRAPH_BUMPMAT10};
+            nv2a_get_state()->pgraph.regs[swizzle[(reg-NV097_SET_TEXTURE_SET_BUMP_ENV_MAT)/4]+(stage-1)*4]=param;
+        }
+        break;
+    case NV097_SET_TEXTURE_SET_BUMP_ENV_SCALE:
+    case NV097_SET_TEXTURE_SET_BUMP_ENV_OFFSET:
+        if(stage)nv2a_get_state()->pgraph.regs[(reg==NV097_SET_TEXTURE_SET_BUMP_ENV_SCALE?NV_PGRAPH_BUMPSCALE1:NV_PGRAPH_BUMPOFFSET1)+(stage-1)*4]=param;
         break;
     case NV097_SET_TEXTURE_CONTROL1:
         t->pitch = param >> 16;          /* linear formats only */
@@ -3415,7 +4109,9 @@ void nv2a_pb_index_words(const uint32_t *words,uint32_t count)
     require_batch_space("index",s_gpu.idx_count,count*2,NV_MAX_INDICES);
     for (uint32_t i=0;i<count;++i) {
         uint32_t value=words[i];
+        s_gpu.idx_edge[s_gpu.idx_count]=(uint8_t)nv2a_get_state()->pgraph.edge_flag;
         s_gpu.idx[s_gpu.idx_count++]=(uint16_t)value;
+        s_gpu.idx_edge[s_gpu.idx_count]=(uint8_t)nv2a_get_state()->pgraph.edge_flag;
         s_gpu.idx[s_gpu.idx_count++]=(uint16_t)(value>>16);
     }
 }
@@ -3454,7 +4150,8 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
 #endif
         break;
     case NV097_SET_SURFACE_PITCH:
-        s_gpu.pitch = param & 0xFFFF;      /* colour pitch; zeta is the top half */
+        s_gpu.pitch = param & 0xFFFF;
+        s_gpu.zeta_pitch = param >> 16;
         break;
     case NV097_SET_SURFACE_COLOR_OFFSET:
         if (s_ftrace == 2)
@@ -3619,6 +4316,7 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
          * because the format is only fully known at END. */
         if (s_gpu.prim) {
             require_batch_space("inline", s_gpu.inline_count, 1, NV_MAX_INLINE);
+            s_gpu.inline_edge[s_gpu.inline_count]=(uint8_t)nv2a_get_state()->pgraph.edge_flag;
             s_gpu.inline_buf[s_gpu.inline_count++] = param;
         }
         break;
@@ -3639,8 +4337,10 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
         if (!s_gpu.prim)
             break;
         require_batch_space("index", s_gpu.idx_count, count, NV_MAX_INDICES);
-        for (i = 0; i < count; i++)
+        for (i = 0; i < count; i++) {
+            s_gpu.idx_edge[s_gpu.idx_count]=(uint8_t)nv2a_get_state()->pgraph.edge_flag;
             s_gpu.idx[s_gpu.idx_count++] = start + i;
+        }
         break;
     }
 
@@ -3652,6 +4352,7 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
     case NV097_ARRAY_ELEMENT32:
         if (s_gpu.prim) {
             require_batch_space("index", s_gpu.idx_count, 1, NV_MAX_INDICES);
+            s_gpu.idx_edge[s_gpu.idx_count]=(uint8_t)nv2a_get_state()->pgraph.edge_flag;
             s_gpu.idx[s_gpu.idx_count++] = param;
         }
         break;
@@ -3919,14 +4620,14 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
  * same consumer handles both diagnostic and ordinary calls. */
 static int nv2a_pb_exec_active(uint32_t subch, uint32_t method, uint32_t param, uint8_t *output)
 {
-    if (subch == 0 && method >= NV_TEX_FIRST && method <= NV_TEX_LAST) {
+    if (method >= NV_TEX_FIRST && method <= NV_TEX_LAST) {
         tex_stage_method(method, param);
         return 0;
     }
-    if (subch != 0) {                      /* 3D class lives on subchannel 0 */
-        note_unhandled(method, param);
-        return 0;
-    }
+    /* PGRAPH has already selected the bound class and published this
+     * subchannel's context. Kelvin methods share the same consumers on all
+     * eight subchannels; the channel number is not a class identity. */
+    (void)subch;
     if (method >= 0x0B00 && method < 0x0B80) {    /* TRANSFORM_PROGRAM(i) */
         nv2a_vsh_program_word(param);
         return 0;
@@ -4020,26 +4721,17 @@ typedef struct PbCheckpoint {
     PbState state;
     uint32_t texture_registers[sizeof s_tex_reg/sizeof s_tex_reg[0]];
     uint8_t texture_set[sizeof s_tex_set];
-    uint32_t zeta_next,zeta_address[4],zeta_compressed[4],zeta_present[4];
 } PbCheckpoint;
 int nv2a_gpu_save_checkpoint(FILE *out) {
     if(!out || !xbox_CheckpointFrozen()) return 0;
     nv2a_pb_checkpoint_publish();PbCheckpoint *saved=calloc(1,sizeof *saved);if(!saved) return 0;
     saved->state_bytes=sizeof saved->state;saved->state=s_gpu;
     memcpy(saved->texture_registers,s_tex_reg,sizeof s_tex_reg);memcpy(saved->texture_set,s_tex_set,sizeof s_tex_set);
-    saved->zeta_next=(uint32_t)s_zbuf_next;
 #if defined(_WIN32)
     saved->hardware=(uint32_t)hw_enabled();
 #endif
-    for(unsigned i=0;i<4;i++) {
-        saved->zeta_address[i]=s_zbufs[i].offset;saved->zeta_compressed[i]=s_zbufs[i].compressed;
-        saved->zeta_present[i]=s_zbufs[i].z && s_zbufs[i].stencil;
-    }
-    int ok=fwrite("XBGPUC",6,1,out)==1 && fwrite(saved,sizeof *saved,1,out)==1 &&
+    int ok=fwrite("XBGPUR",6,1,out)==1 && fwrite(saved,sizeof *saved,1,out)==1 &&
         nv2a_save_checkpoint(out) && nv2a_vsh_save_checkpoint(out);
-    for(unsigned i=0;ok && i<4;i++) if(saved->zeta_present[i])
-        ok=fwrite(s_zbufs[i].z,sizeof(float)*NV_ZBUF_W*NV_ZBUF_H,1,out)==1 &&
-           fwrite(s_zbufs[i].stencil,NV_ZBUF_W*NV_ZBUF_H,1,out)==1;
 #if defined(_WIN32)
     if(ok && saved->hardware) ok=hw_save_depths(out);
 #endif
@@ -4048,7 +4740,7 @@ int nv2a_gpu_save_checkpoint(FILE *out) {
 int nv2a_gpu_load_checkpoint(FILE *in) {
     if(!in || !xbox_CheckpointFrozen()) return 0;
     char magic[6];PbCheckpoint *saved=malloc(sizeof *saved);if(!saved) return 0;
-    int ok=fread(magic,6,1,in)==1 && !memcmp(magic,"XBGPUC",6) && fread(saved,sizeof *saved,1,in)==1 &&
+    int ok=fread(magic,6,1,in)==1 && !memcmp(magic,"XBGPUR",6) && fread(saved,sizeof *saved,1,in)==1 &&
         saved->state_bytes==sizeof saved->state && saved->state.idx_count<=NV_MAX_INDICES &&
         saved->state.inline_count<=NV_MAX_INLINE && saved->state.imm_count<=NV_MAX_INLINE/IMM_VERTEX_DWORDS;
 #if defined(_WIN32)
@@ -4056,18 +4748,11 @@ int nv2a_gpu_load_checkpoint(FILE *in) {
 #else
     ok=ok && !saved->hardware;
 #endif
-    void *registers=NULL,*vsh=NULL;ZetaBuffer zeta[4]={0};
+    void *registers=NULL,*vsh=NULL;
 #if defined(_WIN32)
     HwDepth *depths=NULL;HwColor *colors=NULL;
 #endif
     if(ok) ok=(registers=nv2a_prepare_checkpoint(in))!=NULL && (vsh=nv2a_vsh_prepare_checkpoint(in))!=NULL;
-    for(unsigned i=0;ok && i<4;i++) {
-        ok=saved->zeta_present[i]<=1;if(!ok || !saved->zeta_present[i]) continue;
-        zeta[i].offset=saved->zeta_address[i];zeta[i].compressed=saved->zeta_compressed[i];
-        zeta[i].z=malloc(sizeof(float)*NV_ZBUF_W*NV_ZBUF_H);zeta[i].stencil=malloc(NV_ZBUF_W*NV_ZBUF_H);
-        ok=zeta[i].z && zeta[i].stencil && fread(zeta[i].z,sizeof(float)*NV_ZBUF_W*NV_ZBUF_H,1,in)==1 &&
-            fread(zeta[i].stencil,NV_ZBUF_W*NV_ZBUF_H,1,in)==1;
-    }
 #if defined(_WIN32)
     if(ok && saved->hardware) ok=hw_prepare_depths(in,&depths,&colors);
 #endif
@@ -4077,13 +4762,11 @@ int nv2a_gpu_load_checkpoint(FILE *in) {
 #endif
         nv2a_apply_checkpoint(registers);nv2a_vsh_apply_checkpoint(vsh);s_gpu=saved->state;
         memcpy(s_tex_reg,saved->texture_registers,sizeof s_tex_reg);memcpy(s_tex_set,saved->texture_set,sizeof s_tex_set);
-        for(unsigned i=0;i<4;i++) {free(s_zbufs[i].z);free(s_zbufs[i].stencil);s_zbufs[i]=zeta[i];memset(&zeta[i],0,sizeof zeta[i]);}
-        s_zbuf_next=(int)saved->zeta_next;s_surface=NULL;
+        s_surface=NULL;
     }
 #if defined(_WIN32)
     hw_free_depths(depths);hw_free_colors(colors);
 #endif
-    for(unsigned i=0;i<4;i++){free(zeta[i].z);free(zeta[i].stencil);}
     free(registers);free(vsh);free(saved);return ok;
 }
 
@@ -4376,3 +5059,5 @@ void nv2a_pb_exec_report(void)
     }
     }    fflush(stderr);
 }
+
+

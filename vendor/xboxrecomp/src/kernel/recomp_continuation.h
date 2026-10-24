@@ -18,6 +18,8 @@ typedef struct RecompContFrame {
     struct RecompContFrame *parent;
     void *jumps;
     void (*on_leave)(struct RecompContFrame *);
+    void (*on_unwind)(struct RecompContFrame *);
+    int retained; /* Native frame rebuild preserves its guest-owned resources. */
 } RecompContFrame;
 
 uint64_t recomp_cont_enter(RecompContFrame *, uint32_t,
@@ -26,6 +28,7 @@ void recomp_cont_leave(RecompContFrame *);
 void recomp_cont_site(RecompContFrame *, uint64_t);
 void recomp_cont_invalid(void);
 int recomp_cont_active(void);
+int recomp_cont_recovering(uint32_t function);
 int recomp_cont_snapshot_ready(void);
 uint32_t recomp_cont_root_function(void);
 RecompContFrame *recomp_cont_current(void);
@@ -34,11 +37,13 @@ size_t recomp_cont_jump_count(const RecompContFrame *);
 uint32_t recomp_cont_jump_buffer(const RecompContFrame *, size_t);
 int recomp_cont_jump_known(const RecompContFrame *, uint32_t);
 void recomp_cont_unwind(RecompContFrame *, uint32_t);
+void recomp_cont_prepare_unwind(RecompContFrame *);
 uint64_t recomp_cont_jump_restore(RecompContFrame *, uint32_t);
 uint64_t recomp_cont_jump_return(RecompContFrame *);
 int recomp_cont_save(FILE *);
 int recomp_cont_load(FILE *);
 int recomp_cont_validate(FILE *, uint32_t *);
+RecompContFrame *recomp_cont_transfer_owner(uint32_t frame_ebp);
 void recomp_cont_prepare_transfer(uint32_t frame_ebp, uint32_t target);
 void xbox_ExceptionContinue(uint32_t target, uint32_t frame_ebp);
 void recomp_cont_discard_root(void);

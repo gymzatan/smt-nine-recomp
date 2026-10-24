@@ -13,6 +13,7 @@
  */
 
 #include "xbox_memory_layout.h"
+#include "recomp_fpu_state.h"
 #include "kernel.h"
 #include "guest_vmem.h"
 #include "recomp_continuation.h"
@@ -1061,6 +1062,12 @@ int g_force_return = 0;
 RECOMP_TLS uint16_t g_fp_control_word = 0x037Fu;
 RECOMP_TLS int g_fp_cmp = 0;
 RECOMP_TLS uint16_t g_fp_cc = 0x4000;
+RECOMP_TLS uint16_t g_fp_status_word, g_fp_tag_word = 0xffffu;
+RECOMP_TLS uint16_t g_fp_opcode, g_fp_code_selector, g_fp_data_selector;
+RECOMP_TLS uint32_t g_fp_instruction_pointer, g_fp_data_pointer;
+RECOMP_TLS uint32_t g_mxcsr = 0x1f80u;
+RECOMP_TLS uint8_t g_fp_raw[8][10];
+RECOMP_TLS uint8_t g_fp_alias_dirty;
 
 /* Defined below, with the other guest registers. */
 extern RECOMP_TLS uint32_t g_ebp;
@@ -1113,6 +1120,8 @@ int recomp_guest_longjmp(uint32_t buf_va, uint32_t value)
             continue;
         if (s_jmp[i].owner && !recomp_cont_jump_known(s_jmp[i].owner,buf_va))
             return 0;
+
+        if(s_jmp[i].owner)recomp_cont_prepare_unwind(s_jmp[i].owner);
 
         /* The callee-saved registers and the stack, exactly as the CRT's
          * longjmp restores them: esp is the setjmp-time esp plus the return
@@ -1579,11 +1588,16 @@ RECOMP_TLS uint32_t g_ebp = 0;
  * wrong way. Thread-local, because `std` and the `cld` that undoes it can land
  * in different lifted bodies of the same guest routine. */
 RECOMP_TLS int g_df = 0;
+RECOMP_TLS uint32_t g_eflags = 0x202u;
 
 void xbox_CaptureGuestRegisters(XboxGuestRegisters *state)
 {
     RecompMmx *mm[] = {&g_mm0,&g_mm1,&g_mm2,&g_mm3,&g_mm4,&g_mm5,&g_mm6,&g_mm7};
     RecompXmm *xmm[] = {&g_xmm0,&g_xmm1,&g_xmm2,&g_xmm3,&g_xmm4,&g_xmm5,&g_xmm6,&g_xmm7};
+    if(g_fp_alias_dirty) {
+        uint64_t *aliases[]={&g_mm0.q,&g_mm1.q,&g_mm2.q,&g_mm3.q,&g_mm4.q,&g_mm5.q,&g_mm6.q,&g_mm7.q};
+        recomp_fp_sync_slots(&g_fp_alias_dirty,g_fp_stack,g_fp_raw,aliases,0xffu);
+    }
     memset(state,0,sizeof *state);
     state->eax=g_eax; state->ecx=g_ecx; state->edx=g_edx; state->esp=g_esp;
     state->ebx=g_ebx; state->esi=g_esi; state->edi=g_edi; state->ebp=g_ebp;
@@ -1594,7 +1608,18 @@ void xbox_CaptureGuestRegisters(XboxGuestRegisters *state)
         memcpy(state->xmm[i],xmm[i],sizeof state->xmm[i]);
     }
     state->fp_top=g_fp_top; state->fp_cmp=g_fp_cmp; state->df=g_df;
+    state->eflags=g_eflags;
     state->fp_control_word=g_fp_control_word; state->fp_cc=g_fp_cc;
+    state->fp_status_word=g_fp_status_word;
+    state->fp_tag_word=g_fp_tag_word;
+    state->fp_opcode=g_fp_opcode;
+    state->fp_code_selector=g_fp_code_selector;
+    state->fp_data_selector=g_fp_data_selector;
+    state->fp_instruction_pointer=g_fp_instruction_pointer;
+    state->fp_data_pointer=g_fp_data_pointer;
+    state->mxcsr=g_mxcsr;
+    memcpy(state->fp_raw,g_fp_raw,sizeof state->fp_raw);
+
     state->interrupt_state=(uint32_t)xbox_CpuInterruptState();
     state->irql=(uint32_t)xbox_CurrentIrql();
 }
@@ -1602,7 +1627,8 @@ void xbox_CaptureGuestRegisters(XboxGuestRegisters *state)
 int xbox_ValidateGuestRegisters(const XboxGuestRegisters *state)
 {
     return state && state->fp_top>=0 && state->fp_top<8 &&
-        (state->df==0 || state->df==1) && state->interrupt_state<=3 && state->irql<=255;
+        (state->df==0 || state->df==1) && state->interrupt_state<=3 && state->irql<=255 &&
+        !(state->mxcsr&~0xffbfu);
 }
 int xbox_RestoreGuestRegisters(const XboxGuestRegisters *state)
 {
@@ -1618,7 +1644,18 @@ int xbox_RestoreGuestRegisters(const XboxGuestRegisters *state)
         memcpy(xmm[i],state->xmm[i],sizeof state->xmm[i]);
     }
     g_fp_top=state->fp_top; g_fp_cmp=state->fp_cmp; g_df=state->df;
+    g_eflags=state->eflags;
     g_fp_control_word=state->fp_control_word; g_fp_cc=state->fp_cc;
+    g_fp_status_word=state->fp_status_word;
+    g_fp_tag_word=state->fp_tag_word;
+    g_fp_opcode=state->fp_opcode;
+    g_fp_code_selector=state->fp_code_selector;
+    g_fp_data_selector=state->fp_data_selector;
+    g_fp_instruction_pointer=state->fp_instruction_pointer;
+    g_fp_data_pointer=state->fp_data_pointer;
+    g_mxcsr=state->mxcsr;
+    memcpy(g_fp_raw,state->fp_raw,sizeof state->fp_raw);g_fp_alias_dirty=0;
+
     xbox_CpuLeaveInterrupt((int)state->interrupt_state);
     xbox_IrqlLeaveInterrupt((int)state->irql);
     xbox_IrqlBindThreadPcr(state->fs_base);
@@ -2077,6 +2114,13 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
         MEM32_INIT(XBOX_FS_BASE + 0x04, XBOX_STACK_TOP);   /* Stack base (high address) */
         MEM32_INIT(XBOX_FS_BASE + 0x08, XBOX_STACK_BASE);  /* Stack limit (low address) */
         MEM32_INIT(XBOX_FS_BASE + 0x18, XBOX_FS_BASE);     /* Self pointer */
+        /* The processor's standing DPC stack has process lifetime. Its guest
+         * allocation and PCR identity are retained by the memory checkpoint. */
+        uint32_t dpc_stack=xbox_HeapAlloc(0x3000,16);
+        if(!dpc_stack) {fprintf(stderr,"[STOP] main PCR has no DPC stack\n");return FALSE;}
+        MEM32_INIT(XBOX_FS_BASE+0x58,0);
+        MEM32_INIT(XBOX_FS_BASE+0x5c,dpc_stack+0x3000);
+
 
         /*
          * fs:[0x20] - On Xbox KPCR, this is the Prcb pointer.
@@ -2107,6 +2151,16 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
         MEM32_INIT(XBOX_FS_BASE + 0x28, FAKE_TLS_VA);
         /* TLS[0x28] = pointer to RW data area */
         MEM32_INIT(FAKE_TLS_VA + 0x28, FAKE_RWDATA_VA);
+        /* The KPCR current-thread field owns the outstanding IRP list. */
+        MEM32_INIT(FAKE_TLS_VA + 0x34, FAKE_TLS_VA + 0x34);
+        MEM32_INIT(FAKE_TLS_VA + 0x38, FAKE_TLS_VA + 0x34);
+        MEM32_INIT(FAKE_TLS_VA + 0x3c, FAKE_TLS_VA + 0x3c);
+        MEM32_INIT(FAKE_TLS_VA + 0x40, FAKE_TLS_VA + 0x3c);
+        *(uint8_t *)XBOX_VA(FAKE_TLS_VA + 0x4b) = 1;
+        MEM32_INIT(FAKE_TLS_VA + 0x124, FAKE_TLS_VA + 0x124);
+        MEM32_INIT(FAKE_TLS_VA + 0x128, FAKE_TLS_VA + 0x124);
+        MEM32_INIT(FAKE_TLS_VA + 0x134, FAKE_TLS_VA + 0x134);
+        MEM32_INIT(FAKE_TLS_VA + 0x138, FAKE_TLS_VA + 0x134);
 
         /*
          * XBE TLS directory.
@@ -2887,14 +2941,11 @@ uint32_t xbox_AllocThreadTib(void)
 {
     /* XBOX_VA is scoped to the loader; the same arithmetic, spelled here. */
     #define TIB_VA(va) ((void *)((uintptr_t)(va) + g_memory_offset))
-    const uint32_t tib_size = 0x40;
+    const uint32_t tib_size = 0x60;
     uint32_t tib, block, thread_data, total;
 
-    if (!g_tls_total)
-        return 0;                    /* image has no TLS; nothing to copy */
-
     total = g_tls_total;
-    tib = xbox_HeapAlloc(tib_size + total + g_tls_thread_size, 16);
+    tib = xbox_HeapAlloc(tib_size + total + g_tls_thread_size + 0x140 + 15 + 0x3000, 16);
     if (!tib)
         return 0;
     block       = tib + tib_size;
@@ -2902,14 +2953,29 @@ uint32_t xbox_AllocThreadTib(void)
 
     /* The TIB itself, copied so stack bounds and the fields the title filled
      * in are inherited, then the two that must not be. */
-    memcpy(TIB_VA(tib), TIB_VA(XBOX_TIB_MAIN), tib_size);
-    memcpy(TIB_VA(block), TIB_VA(g_tls_template_va), total);
+    memcpy(TIB_VA(tib), TIB_VA(XBOX_TIB_MAIN), 0x40);
+    memset(TIB_VA(tib+0x40),0,tib_size-0x40);
+    if (total) memcpy(TIB_VA(block), TIB_VA(g_tls_template_va), total);
     memset(TIB_VA(thread_data), 0, g_tls_thread_size);
 
     *(uint32_t *)TIB_VA(tib + 0x00) = 0xFFFFFFFFu;   /* own SEH chain    */
-    *(uint32_t *)TIB_VA(block)      = thread_data;   /* slot 0           */
+    if (total) *(uint32_t *)TIB_VA(block) = thread_data; /* image TLS slot 0 */
     *(uint32_t *)TIB_VA(tib + 0x04) = block + total; /* fs:[4], see above*/
 
+    uint32_t thread = thread_data + g_tls_thread_size;
+    memset(TIB_VA(thread), 0, 0x140);
+    *(uint32_t *)TIB_VA(thread + 0x28) = *(uint32_t *)TIB_VA(*(uint32_t *)TIB_VA(XBOX_TIB_MAIN + 0x28) + 0x28);
+    for(unsigned offset=0x34;offset<=0x3c;offset+=8) {
+        *(uint32_t *)TIB_VA(thread+offset)=thread+offset;
+        *(uint32_t *)TIB_VA(thread+offset+4)=thread+offset;
+    }
+    *(uint8_t *)TIB_VA(thread+0x4b)=1;
+    *(uint32_t *)TIB_VA(thread + 0x124) = thread + 0x124;
+    *(uint32_t *)TIB_VA(thread + 0x128) = thread + 0x124;
+    *(uint32_t *)TIB_VA(thread + 0x134) = thread + 0x134;
+    *(uint32_t *)TIB_VA(thread + 0x138) = thread + 0x134;
+    *(uint32_t *)TIB_VA(tib + 0x28) = thread;
+    *(uint32_t *)TIB_VA(tib + 0x5c) = ((thread + 0x140 + 15) & ~15u) + 0x3000;
     return tib;
     #undef TIB_VA
 }
@@ -3381,7 +3447,7 @@ int xbox_SavePhysicalMemory(FILE *out)
     state.thread_stacks=(uint32_t)g_thread_stacks_used;
     state.tls_template=g_tls_template_va;state.tls_total=g_tls_total;state.tls_thread_size=g_tls_thread_size;
     state.reclaim=(uint32_t)xbox_HeapReclaimEnabled();xbox_CaptureWorkerStackUsage(state.worker_stacks);
-    int ok=fwrite("XBPHYS",6,1,out)==1 && fwrite(&state,sizeof state,1,out)==1 &&
+    int ok=fwrite("XBPCRS",6,1,out)==1 && fwrite(&state,sizeof state,1,out)==1 &&
         fwrite(g_heap_blocks,sizeof g_heap_blocks[0],state.heap_count,out)==state.heap_count &&
         fwrite(g_contig_blocks,sizeof g_contig_blocks[0],state.contig_count,out)==state.contig_count &&
         xbox_SaveDmaPageIdentities(out) &&
@@ -3396,7 +3462,7 @@ int xbox_LoadPhysicalMemory(FILE *in)
     if (!xbox_CheckpointFrozen() || guest_vmem_active() || !g_mapping_handle ||
         !g_contig_mapping || !g_memory_size || !g_nv2a_memory) return 0;
     char magic[6];MemoryCheckpoint state;
-    if (fread(magic,6,1,in)!=1 || memcmp(magic,"XBPHYS",6) || fread(&state,sizeof state,1,in)!=1 ||
+    if (fread(magic,6,1,in)!=1 || memcmp(magic,"XBPCRS",6) || fread(&state,sizeof state,1,in)!=1 ||
         state.ram_bytes!=g_memory_size || state.contiguous_bytes!=XBOX_CONTIG_SIZE || state.ramin_bytes!=0x100000 ||
         state.heap_count>XBOX_HEAP_MAX_BLOCKS || state.contig_count>CONTIG_MAX_BLOCKS ||
         state.heap_next<XBOX_HEAP_BASE || state.heap_next>XBOX_HEAP_TOP ||

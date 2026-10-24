@@ -46,8 +46,9 @@ void nv2a_vsh_decode_instruction(const uint32_t words[4], Nv2aVshInstruction *in
  * The hardware's signed output-W bounds are applied before interpolation. */
 typedef struct {
     float pos[4];
-    float d0[4], d1[4];
+    float d0[4], d1[4], b0[4], b1[4];
     float fog[4];
+    float point_size;
     float tex[4][4];
 } Nv2aVshOutput;
 
@@ -69,6 +70,8 @@ const uint32_t *nv2a_vsh_program(int *length, uint32_t *inputs);
  * FINAL flag within program memory), which the caller treats as "cannot
  * transform this batch" rather than drawing garbage. */
 int  nv2a_vsh_run(const float in[NV2A_VSH_INPUTS][4], Nv2aVshOutput *out);
+struct PGRAPHState;
+int nv2a_vsh_fixed_run(const float in[NV2A_VSH_INPUTS][4], const struct PGRAPHState *state, Nv2aVshOutput *out);
 
 /* Direct access, for the self-test. */
 void nv2a_vsh_set_constant(uint32_t index, const float v[4]);

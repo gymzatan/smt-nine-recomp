@@ -56,7 +56,15 @@ static void load(void) {
     assert(xbox_RestoreGuestRegisters(&state));assert(recomp_cont_load(f));
     assert(fclose(f)==0);
 }
+static void unwind_owner(RecompContFrame *frame) {
+    assert(frame->function==0x11000 || frame->function==0x12000);
+    MEM32(frame->function==0x11000?0x20054:0x20050)++;
+}
 void guest_cpu_yield(void) {
+    if(recomp_cont_active()) {
+        RecompContFrame *child=recomp_cont_current();
+        child->on_unwind=unwind_owner;child->parent->on_unwind=unwind_owner;
+    }
     if(saving && MEM32(0x20048)==2) {
         XboxGuestRegisters state;xbox_CaptureGuestRegisters(&state);
         FILE *f=fopen(snapshot,"wb");assert(f);
@@ -71,6 +79,7 @@ static void check(void) {
     assert(g_eax==7 && g_esp==0x80000);
     assert(MEM32(0x20040)==1 && MEM32(0x20044)==0 && MEM32(0x20048)==4);
     assert(!recomp_cont_active());
+    assert(MEM32(0x20050)==WITH_CONTINUATIONS && !MEM32(0x20054));
 }
 int main(int argc,char **argv) {
     assert(argc==3);snapshot=argv[2];ram=fixture_memory_init();
@@ -85,14 +94,14 @@ int main(int argc,char **argv) {
 }
 '''
     (work/'memory.c').write_text(memory,encoding='utf-8')
-    libraries=list((root.parents[1]/'build/xboxrecomp/src').glob('*/*.lib'))
+    libraries=list((root.parents[1]/'build/native/xboxrecomp/src').glob('*/*.lib'))
     assert len(libraries)==8
     libraries.append(root.parents[1]/'build_dsp_jit/x86_64-pc-windows-msvc/release/dsp56300_emu_ffi.lib')
     monkeypatch=pytest.MonkeyPatch()
     try:
         for mode,enabled in [('original',False),('continuation',True)]:
             body=translate(monkeypatch,enabled,PROGRAM,setjmp_fn=0x14000,longjmp_fn=0x15000)
-            source=work/(mode+'.c');source.write_text(prefix+body+suffix,encoding='utf-8')
+            source=work/(mode+'.c');source.write_text(f'#define WITH_CONTINUATIONS {int(enabled)}\n'+prefix+body+suffix,encoding='utf-8')
             result=subprocess.run([compiler,'/nologo','/O2','/Gy','/MD','/utf-8',
                 '/DWIN32_LEAN_AND_MEAN','/DNOMINMAX','/D_CRT_SECURE_NO_WARNINGS',
                 '/I'+str(root/'src'),'/I'+str(root/'templates/runtime'),
@@ -100,7 +109,7 @@ int main(int argc,char **argv) {
                 str(root/'src/kernel/recomp_continuation.c'),'/Fe:'+str(work/(mode+'.exe')),
                 '/link','/OPT:REF',*[str(p) for p in libraries],
                 'kernel32.lib','user32.lib','gdi32.lib','advapi32.lib','ole32.lib','shell32.lib',
-                'd3d11.lib','dxgi.lib','dxguid.lib','d3dcompiler.lib','winmm.lib','xaudio2_8.lib',
+                'd3d11.lib','d3d12.lib','dxgi.lib','dxguid.lib','d3dcompiler.lib','winmm.lib','xaudio2_8.lib',
                 'xinput.lib','bcrypt.lib','ntdll.lib','userenv.lib','ws2_32.lib'],
                 cwd=work,capture_output=True,text=True,errors='replace')
             assert result.returncode==0,result.stdout+result.stderr

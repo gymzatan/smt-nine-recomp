@@ -1,13 +1,14 @@
 /* The original NV2A vertex interpreter has already produced screen-space
  * outputs. This binding carries those outputs to D3D11 without interpreting
- * an Xbox vertex program again. The buffer layout is Nv2aVshOutput. */
+ * an Xbox vertex program again. The upload keeps the fixed eight-vector
+ * position/color/fog/texture protocol independent of interpreter output fields. */
 const char *d3d8_shaders_nv2a_output_source(void)
 {
     static const char source[] =
         "cbuffer ScreenCB:register(b0) { float4 screen; };\n"
         "struct VI { float4 pos:POSITION; float4 d0:COLOR0; float4 d1:COLOR1; float4 fog:TEXCOORD4; float4 tc0:TEXCOORD0; float4 tc1:TEXCOORD1; float4 tc2:TEXCOORD2; float4 tc3:TEXCOORD3; };\n"
-        "struct VO { float4 pos:SV_POSITION; noperspective float4 color0:COLOR0; noperspective float4 color1:COLOR1; float4 tc0:TEXCOORD0; float4 tc1:TEXCOORD1; float4 tc2:TEXCOORD2; float4 tc3:TEXCOORD3; noperspective float fog:TEXCOORD4; noperspective float z:TEXCOORD5; };\n"
-        "VO main(VI i) { VO o; o.pos=screen.z!=0 ? i.pos : float4((i.pos.x/screen.x*2-1)*i.pos.w,(1-i.pos.y/screen.y*2)*i.pos.w,0,i.pos.w); o.color0=i.d0; o.color1=i.d1; o.fog=i.fog.x; o.z=i.pos.z; o.tc0=i.tc0; o.tc1=i.tc1; o.tc2=i.tc2; o.tc3=i.tc3; return o; }\n";
+        "struct VO { float4 pos:SV_POSITION; noperspective float4 color0:COLOR0; noperspective float4 color1:COLOR1; float4 tc0:TEXCOORD0; float4 tc1:TEXCOORD1; float4 tc2:TEXCOORD2; float4 tc3:TEXCOORD3; noperspective float fog:TEXCOORD4; noperspective float2 z:TEXCOORD5; };\n"
+        "VO main(VI i) { VO o; o.pos=screen.z!=0 ? i.pos : float4((i.pos.x/screen.x*2-1)*i.pos.w,(1-i.pos.y/screen.y*2)*i.pos.w,0,i.pos.w); o.color0=i.d0; o.color1=i.d1; o.fog=i.fog.x; o.z=float2(i.pos.z,0); o.tc0=i.tc0; o.tc1=i.tc1; o.tc2=i.tc2; o.tc3=i.tc3; return o; }\n";
     return source;
 }
 HRESULT d3d8_shaders_bind_nv2a_outputs(float width, float height, int raw_position)

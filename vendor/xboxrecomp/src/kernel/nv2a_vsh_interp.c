@@ -28,6 +28,7 @@
  * the runtime's screen-space epilogue (RCC of R12.w, then a MAD into oPos).
  */
 #include "nv2a_vsh_interp.h"
+#include "../nv2a/nv2a_state.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -518,7 +519,10 @@ int nv2a_vsh_run(const float in[NV2A_VSH_INPUTS][4], Nv2aVshOutput *out)
             out->pos[3] = clamp_away_zero_inf(out->pos[3]);
             memcpy(out->d0, outregs[3], sizeof out->d0);
             memcpy(out->d1, outregs[4], sizeof out->d1);
+            memcpy(out->b0, outregs[7], sizeof out->b0);
+            memcpy(out->b1, outregs[8], sizeof out->b1);
             memcpy(out->fog, outregs[5], sizeof out->fog);
+            out->point_size=outregs[6][0];
             memcpy(out->tex[0], outregs[9], sizeof out->tex[0]);
             memcpy(out->tex[1], outregs[10], sizeof out->tex[1]);
             memcpy(out->tex[2], outregs[11], sizeof out->tex[2]);
@@ -527,4 +531,160 @@ int nv2a_vsh_run(const float in[NV2A_VSH_INPUTS][4], Nv2aVshOutput *out)
         }
     }
     return 0;
+}
+
+
+/* Fixed inputs use the same uploaded XF/LT authority as the native fixed
+ * consumer. This feeds the original software output/raster path. */
+static float fixed_dot3(const float *a,const float *b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+static void fixed_normalize(float *v) {
+    float length=sqrtf(fixed_dot3(v,v));
+    if(length)for(unsigned c=0;c<3;c++)v[c]/=length;
+}
+static void fixed_transform(const float *p,unsigned base,float *result) {
+    for(unsigned c=0;c<4;c++)result[c]=p[0]*s_const[base+c][0]+p[1]*s_const[base+c][1]+p[2]*s_const[base+c][2]+p[3]*s_const[base+c][3];
+}
+static float fixed_saturate(float value) { return fminf(1,fmaxf(0,value)); }
+static float fixed_rational(float x,const float *k,float ceiling) {
+    if(x<=-k[0])return 0;
+    float denominator=k[1]*x+k[2];
+    if(denominator==0)return ceiling;
+    if(denominator<0)return 0;
+    return fminf(ceiling,fmaxf(0,(x+k[0])/denominator));
+}
+static void fixed_lt(const uint32_t *source,float *result) { memcpy(result,source,16); }
+static const float *fixed_source(unsigned binding,const float *material,const float in[NV2A_VSH_INPUTS][4]) {
+    return binding==0?material:in[binding==1?3:4];
+}
+int nv2a_vsh_fixed_run(const float in[NV2A_VSH_INPUTS][4],const struct PGRAPHState *pg,Nv2aVshOutput *out) {
+    uint32_t control=pg->regs[NV_PGRAPH_CSV0_C],mode=pg->regs[NV_PGRAPH_CSV0_D];
+    unsigned skin=(mode&NV_PGRAPH_CSV0_D_SKIN)>>26;
+    float eye[4],normal[4],normal_input[4]={in[2][0],in[2][1],in[2][2],0};
+    if(skin>6)return 0;
+    memset(out,0,sizeof *out);
+    fixed_transform(in[0],8,eye);fixed_transform(normal_input,12,normal);
+    if(skin) {
+        unsigned count=(skin+3)/2;float remaining=1;
+        memset(eye,0,sizeof eye);memset(normal,0,sizeof normal);
+        for(unsigned bone=0;bone<count;bone++) {
+            float weight=(skin&1) && bone==count-1?remaining:in[1][bone],position[4],n[4];remaining-=weight;
+            fixed_transform(in[0],8+bone*8,position);fixed_transform(normal_input,12+bone*8,n);
+            for(unsigned c=0;c<4;c++){eye[c]+=position[c]*weight;normal[c]+=n[c]*weight;}
+        }
+    }
+    if(control&NV_PGRAPH_CSV0_C_NORMALIZATION_ENABLE)fixed_normalize(normal);
+    memcpy(out->d0,in[3],16);memcpy(out->d1,in[4],16);memcpy(out->b0,in[7],16);memcpy(out->b1,in[8],16);
+    int lighting=(control&NV_PGRAPH_CSV0_C_LIGHTING)!=0,two_side=(control&NV_PGRAPH_CSV0_C_LIGHT_TWO_SIDE_ENABLE)!=0;
+    if(lighting) {
+        float to_eye[3]={0};
+        if(control&NV_PGRAPH_CSV0_C_LOCALEYE) {
+            for(unsigned c=0;c<3;c++)to_eye[c]=s_const[56][c]/s_const[56][3]-eye[c]/eye[3];
+            fixed_normalize(to_eye);
+        }
+        for(unsigned face=0;face<(two_side?2u:1u);face++) {
+            unsigned src[4];float scene[4],emission[4],n[3],*diffuse=face?out->b0:out->d0,*specular=face?out->b1:out->d1;
+            for(unsigned c=0;c<4;c++)src[c]=face?(pg->back_material_sources>>(c*2))&3u:(control>>(25-c*2))&3u;
+            fixed_lt(pg->ltctxa[face?NV_IGRAPH_XF_LTCTXA_BR_AMB:NV_IGRAPH_XF_LTCTXA_FR_AMB],scene);
+            fixed_lt(pg->ltctxa[face?NV_IGRAPH_XF_LTCTXA_BCM_COL:NV_IGRAPH_XF_LTCTXA_CM_COL],emission);
+            const float *emissive=fixed_source(src[0],scene,in),*ambient=fixed_source(src[1],scene,in);
+            for(unsigned c=0;c<3;c++) {
+                n[c]=face?-normal[c]:normal[c];
+                diffuse[c]=src[0]==0 || src[1]==0 ? scene[c] : emissive[c]+ambient[c]*emission[c];
+                if(src[0]==0 && src[1]!=0)diffuse[c]+=ambient[c]*emission[c];
+                else if(src[0]!=0 && src[1]==0)diffuse[c]+=emissive[c]*emission[c];
+                specular[c]=0;
+            }
+            diffuse[3]=src[2]==0?(face?pg->back_material_alpha:pg->material_alpha):in[src[2]==1?3:4][3];specular[3]=in[4][3];
+            for(unsigned light=0;light<8;light++) {
+                unsigned type=(mode>>(light*2))&3u;if(!type)continue;
+                float vp[3],half[3],ndh,attenuation=1;
+                if(type==1) {
+                    memcpy(vp,pg->light_infinite_direction[light],12);fixed_normalize(vp);
+                    if(control&NV_PGRAPH_CSV0_C_LOCALEYE) {for(unsigned c=0;c<3;c++)half[c]=vp[c]+to_eye[c];}
+                    else memcpy(half,pg->light_infinite_half_vector[light],12);
+                } else {
+                    for(unsigned c=0;c<3;c++)vp[c]=pg->light_local_position[light][c]-eye[c]/eye[3];
+                    float distance=sqrtf(fixed_dot3(vp,vp)),range;memcpy(&range,pg->ltc1[NV_IGRAPH_XF_LTC1_r0+light],4);
+                    if(distance>range)continue;
+                    fixed_normalize(vp);const float *a=pg->light_local_attenuation[light];attenuation=1/(a[0]+a[1]*distance+a[2]*distance*distance);
+                    for(unsigned c=0;c<3;c++)half[c]=vp[c]+to_eye[c];
+                }
+                if(type==3) {
+                    float direction[4],falloff[4];fixed_lt(pg->ltctxa[NV_IGRAPH_XF_LTCTXA_L0_SPT+light*2],direction);fixed_lt(pg->ltctxa[NV_IGRAPH_XF_LTCTXA_L0_K+light*2],falloff);
+                    float spot=fixed_dot3(direction,vp)+direction[3];attenuation*=spot<=0?0:spot>=1?1:fixed_rational(spot,falloff,1);
+                }
+                float ndv=fmaxf(0,fixed_dot3(n,vp));ndh=fmaxf(0,fixed_dot3(n,half));
+                const float *coeff=face?pg->back_specular_params:pg->specular_params;float pf=0;
+                if(ndv>0) {
+                    if(type==1 && !(control&NV_PGRAPH_CSV0_C_LOCALEYE))pf=fixed_rational(ndh,coeff,10000);
+                    else {
+                        float raw=fixed_dot3(n,half),ss=raw*raw,hd=fixed_dot3(half,half);
+                        float numerator=ss+hd*coeff[3],denominator=ss*coeff[4]+hd*coeff[5];
+                        if(raw>=0 && numerator>0)pf=denominator==0?10000:denominator<0?0:fminf(10000,numerator/denominator);
+                    }
+                }
+                float amb[4],dif[4],spec[4],one[4]={1,1,1,1};unsigned base=(face?NV_IGRAPH_XF_LTCTXB_L0_BAMB:NV_IGRAPH_XF_LTCTXB_L0_AMB)+light*6;
+                fixed_lt(pg->ltctxb[base],amb);fixed_lt(pg->ltctxb[base+1],dif);fixed_lt(pg->ltctxb[base+2],spec);
+                const float *a=fixed_source(src[1],one,in),*d=fixed_source(src[2],one,in),*s=fixed_source(src[3],one,in);
+                for(unsigned c=0;c<3;c++){diffuse[c]+=a[c]*amb[c]*attenuation+d[c]*dif[c]*attenuation*ndv;specular[c]+=s[c]*spec[c]*attenuation*pf;}
+            }
+        }
+    }
+    if(!(control&NV_PGRAPH_CSV0_C_SPECULAR_ENABLE)) {
+        memset(out->d1,0,16);memset(out->b1,0,16);out->d1[3]=out->b1[3]=1;
+    } else {
+        if(!(control&NV_PGRAPH_CSV0_C_SEPARATE_SPECULAR)) {
+            if(lighting)for(unsigned c=0;c<3;c++){out->d0[c]+=out->d1[c];out->b0[c]+=out->b1[c];}
+            memcpy(out->d1,in[4],16);memcpy(out->b1,in[lighting?4:8],16);
+        }
+        if(!(control&NV_PGRAPH_CSV0_C_ALPHA_FROM_MATERIAL_SPECULAR))out->d1[3]=out->b1[3]=1;
+    }
+    if(!lighting && two_side){memset(out->b0,0,16);memset(out->b1,0,16);out->b0[3]=out->b1[3]=1;}
+    for(unsigned c=0;c<4;c++){out->d0[c]=fixed_saturate(out->d0[c]);out->d1[c]=fixed_saturate(out->d1[c]);out->b0[c]=fixed_saturate(out->b0[c]);out->b1[c]=fixed_saturate(out->b1[c]);}
+    float p[4];fixed_transform(skin?eye:in[0],0,p);p[3]=clamp_away_zero_inf(p[3]);
+    out->pos[0]=p[0]/p[3]+s_const[59][0];out->pos[1]=p[1]/p[3]+s_const[59][1];out->pos[2]=p[2]/p[3];out->pos[3]=p[3];
+    out->point_size=fmaxf(1,pg->regs[NV_PGRAPH_POINTSIZE]/8.0f);
+    if(mode&NV_PGRAPH_CSV0_D_POINTPARAMSENABLE) {
+        float distance=sqrtf(fixed_dot3(eye,eye));const float *params=pg->point_params;
+        float minimum=fminf(params[7],63.875f),maximum=fminf(params[3]+minimum,63.875f);
+        float size=(1/sqrtf(params[0]+params[1]*distance+params[2]*distance*distance)+params[6])*params[3]+params[7];
+        out->point_size=fminf(fmaxf(size,minimum),maximum);
+    }
+    unsigned fog=(mode&NV_PGRAPH_CSV0_D_FOGGENMODE)>>22;out->fog[0]=in[5][0];
+    if(fog==0)out->fog[0]=fixed_saturate(in[4][3]);
+    else if(fog==1)out->fog[0]=sqrtf(fixed_dot3(eye,eye));
+    else if(fog==2 || fog==3){out->fog[0]=fixed_dot3(s_const[57],eye)+s_const[57][3];if(fog==3)out->fog[0]=fabsf(out->fog[0]);}
+    else if(fog!=NV_PGRAPH_CSV0_D_FOGGENMODE_FOG_X)return 0;
+    float texgen_reflection[3],texgen_sphere_denominator=0;
+    int texgen_reflection_ready=0,texgen_sphere_ready=0;
+    for(unsigned stage=0;stage<4;stage++) {
+        float tex[4];memcpy(tex,in[9+stage],16);uint32_t state=pg->regs[stage<2?NV_PGRAPH_CSV1_A:NV_PGRAPH_CSV1_B];
+        for(unsigned c=0;c<4;c++) {
+            unsigned gen=(state>>(4+c*3+(stage%2)*16))&7u;
+            if(gen==4 && c<3) {tex[c]=normal[c];continue;}
+            if((gen==5 && c<3) || (gen==3 && c<2)) {
+                if(!texgen_reflection_ready) {
+                    float u[4]={0,0,1,0};
+                    if(!(mode&NV_PGRAPH_CSV0_D_TEXGEN_REF)){memcpy(u,eye,12);fixed_normalize(u);}
+                    float dot=fixed_dot3(u,normal);
+                    for(unsigned j=0;j<3;j++)texgen_reflection[j]=u[j]-2*dot*normal[j];
+                    texgen_reflection_ready=1;
+                }
+                tex[c]=texgen_reflection[c];
+                if(gen==3) {
+                    if(!texgen_sphere_ready) {
+                        float shifted[3]={texgen_reflection[0],texgen_reflection[1],texgen_reflection[2]+1};
+                        texgen_sphere_denominator=2*sqrtf(fixed_dot3(shifted,shifted));
+                        texgen_sphere_ready=1;
+                    }
+                    tex[c]=tex[c]/texgen_sphere_denominator+.5f;
+                }
+                continue;
+            }
+            if(gen>2)return 0;
+            if(gen) {const float *input=gen==1?eye:in[0],*plane=s_const[64+stage*8+c];tex[c]=input[0]*plane[0]+input[1]*plane[1]+input[2]*plane[2]+input[3]*plane[3];}
+        }
+        if(pg->texture_matrix_enable[stage])fixed_transform(tex,68+stage*8,out->tex[stage]);else memcpy(out->tex[stage],tex,16);
+    }
+    return 1;
 }

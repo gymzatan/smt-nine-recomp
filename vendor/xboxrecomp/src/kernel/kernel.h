@@ -560,6 +560,9 @@ typedef char  xbox_host_char;
 const wchar_t *xbox_LastHostPath(void);
 
 BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, DWORD buf_size);
+unsigned xbox_path_rule_count(void);
+int xbox_path_device_rule(unsigned,char*,DWORD,ULONG*);
+BOOL xbox_translate_device_path(unsigned,const char*,xbox_host_char*,DWORD);
 
 /* Optional: a project sets this to see the guest paths the kernel translates
  * (for example to print who opened a file). NULL by default; called before the
@@ -705,15 +708,20 @@ NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
     XBOX_FILE_INFORMATION_CLASS FileInformationClass,
     PXBOX_ANSI_STRING FileName, BOOLEAN RestartScan);
 
+/* Control requests retain the original guest buffers and eight-byte IOSB
+ * through IRP completion. All pointer arguments identify mapped guest memory;
+ * the native entry uses the same guest callback addresses as the IRP APIs. */
+typedef struct _XBOX_IO_STATUS_BLOCK32 { NTSTATUS Status; ULONG Information; } XBOX_IO_STATUS_BLOCK32, *PXBOX_IO_STATUS_BLOCK32;
+
 NTSTATUS __stdcall xbox_NtFsControlFile(
     HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
-    PXBOX_IO_STATUS_BLOCK IoStatusBlock, ULONG FsControlCode,
+    PXBOX_IO_STATUS_BLOCK32 IoStatusBlock, ULONG FsControlCode,
     PVOID InputBuffer, ULONG InputBufferLength,
     PVOID OutputBuffer, ULONG OutputBufferLength);
 
 NTSTATUS __stdcall xbox_NtDeviceIoControlFile(
     HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
-    PXBOX_IO_STATUS_BLOCK IoStatusBlock, ULONG IoControlCode,
+    PXBOX_IO_STATUS_BLOCK32 IoStatusBlock, ULONG IoControlCode,
     PVOID InputBuffer, ULONG InputBufferLength,
     PVOID OutputBuffer, ULONG OutputBufferLength);
 
@@ -749,13 +757,19 @@ NTSTATUS __stdcall xbox_NtDuplicateObject(HANDLE SourceHandle, PHANDLE TargetHan
  * Synchronization (kernel_sync.c)
  * ============================================================================ */
 
+NTSTATUS xbox_kernel_create_named(uint32_t ordinal,PHANDLE output,PXBOX_OBJECT_ATTRIBUTES attributes,uint32_t first,uint32_t second);
+NTSTATUS xbox_kernel_close_handle(HANDLE handle);
+void xbox_kernel_make_temporary(PVOID object);
 NTSTATUS __stdcall xbox_NtCreateEvent(PHANDLE EventHandle, PXBOX_OBJECT_ATTRIBUTES ObjectAttributes, ULONG EventType, BOOLEAN InitialState);
 NTSTATUS __stdcall xbox_NtSetEvent(HANDLE EventHandle, PLONG PreviousState);
+NTSTATUS __stdcall xbox_NtResetEvent(HANDLE EventHandle, PLONG PreviousState);
+NTSTATUS __stdcall xbox_NtPulseEvent(HANDLE EventHandle, PLONG PreviousState);
 NTSTATUS __stdcall xbox_NtCreateSemaphore(PHANDLE SemaphoreHandle, PXBOX_OBJECT_ATTRIBUTES ObjectAttributes, LONG InitialCount, LONG MaximumCount);
 NTSTATUS __stdcall xbox_NtReleaseSemaphore(HANDLE SemaphoreHandle, LONG ReleaseCount, PLONG PreviousCount);
+NTSTATUS __stdcall xbox_NtSignalAndWaitForSingleObjectEx(HANDLE Signal, HANDLE Wait, KPROCESSOR_MODE WaitMode, BOOLEAN Alertable, PLARGE_INTEGER Timeout);
 NTSTATUS __stdcall xbox_NtWaitForSingleObject(HANDLE Handle, BOOLEAN Alertable, PLARGE_INTEGER Timeout);
 NTSTATUS __stdcall xbox_NtWaitForSingleObjectEx(HANDLE Handle, KPROCESSOR_MODE WaitMode, BOOLEAN Alertable, PLARGE_INTEGER Timeout);
-NTSTATUS __stdcall xbox_NtWaitForMultipleObjectsEx(ULONG Count, HANDLE Handles[], ULONG WaitType, BOOLEAN Alertable, PLARGE_INTEGER Timeout);
+NTSTATUS __stdcall xbox_NtWaitForMultipleObjectsEx(ULONG Count, HANDLE Handles[], ULONG WaitType, KPROCESSOR_MODE WaitMode, BOOLEAN Alertable, PLARGE_INTEGER Timeout);
 NTSTATUS __stdcall xbox_NtSuspendThread(HANDLE ThreadHandle, PULONG PreviousSuspendCount);
 NTSTATUS __stdcall xbox_NtResumeThread(HANDLE ThreadHandle, PULONG PreviousSuspendCount);
 NTSTATUS __stdcall xbox_NtClearEvent(HANDLE EventHandle);
@@ -789,6 +803,7 @@ VOID    __stdcall xbox_HalRequestSoftwareInterrupt(KIRQL RequestIrql);
 VOID    __stdcall xbox_HalDisableSystemInterrupt(ULONG BusInterruptLevel, KIRQL Irql);
 ULONG   __stdcall xbox_HalGetInterruptVector(ULONG BusInterruptLevel, PKIRQL Irql);
 VOID    __stdcall xbox_HalInitiateShutdown(void);
+void xbox_HalNotifyShutdown(void);
 BOOLEAN __stdcall xbox_HalIsResetOrShutdownPending(void);
 
 KIRQL   __fastcall xbox_KfRaiseIrql(KIRQL NewIrql);
@@ -802,9 +817,17 @@ int     xbox_IrqlBlocksInterrupts(void);
 /* CPU IF and STI's following-instruction shadow share the device gate. */
 int     xbox_CpuInterruptFlag(void);
 int     xbox_CpuInterruptState(void);
+NTSTATUS xbox_kernel_wait_acquire(ULONG,const HANDLE *,HANDLE *,uint32_t *);
+void    xbox_kernel_wait_release_objects(ULONG,const uint32_t *);
+int     xbox_kernel_wait_release_cpu(void);
+NTSTATUS xbox_kernel_reject_timer_signal(HANDLE);
+int     xbox_kernel_wait_signal_done(void);
+void    xbox_kernel_wait_mark_signalled(void);
 int     xbox_kernel_wait_tracked(void);
 uint32_t xbox_kernel_wait_begin(uint32_t);
 void    xbox_kernel_wait_boundary(uint32_t);
+void    xbox_kernel_wait_apc_begin(uint32_t);
+void    xbox_kernel_wait_apc_end(void);
 void    xbox_kernel_set_checkpoint_hook(void (*)(void));
 typedef struct XboxThreadCreationState {
     int32_t call_count, mode;
@@ -838,6 +861,8 @@ int xbox_CheckpointApplyThreads(void *, XboxCheckpointRoot *, unsigned *);
 void xbox_CheckpointFreeThreads(void *);
 void xbox_RunGuestRoot(void (*)(void));
 unsigned xbox_CheckpointGuestRootCount(void);
+void guest_cpu_join(void);
+int guest_cpu_is_held(void);
 void guest_cpu_part(void);
 int xbox_SaveDmaPageIdentities(FILE *);
 void *xbox_PrepareDmaPageIdentities(FILE *);
@@ -845,11 +870,12 @@ void xbox_ApplyDmaPageIdentities(void *);
 int xbox_SaveIoNamespace(FILE *);
 void *xbox_PrepareIoNamespace(FILE *);
 void xbox_ApplyIoNamespace(void *);
+void xbox_DiscardIoNamespace(void *);
 int xbox_CheckpointSetGameImage(const void *, size_t);
 int xbox_CheckpointSaveMachine(FILE *, DWORD);
 int xbox_CheckpointLoadMachine(FILE *, int, DWORD);
 typedef struct XboxFileOpenState {
-    DWORD access, share, flags;
+    DWORD access, share, flags, options, device;
     int64_t position;
     WCHAR path[MAX_PATH];
 } XboxFileOpenState;
@@ -858,6 +884,15 @@ int xbox_ValidateFileOpenState(const XboxFileOpenState *);
 HANDLE xbox_RestoreFileOpenState(const XboxFileOpenState *);
 void xbox_FileHandleDuplicated(HANDLE, HANDLE, int);
 void xbox_FileHandleClosed(HANDLE);
+uint32_t xbox_FileHandleDevice(HANDLE);
+BOOL xbox_FileObjectPath(PXBOX_OBJECT_ATTRIBUTES,WCHAR*,DWORD);
+NTSTATUS xbox_kernel_prepare_file_open(PXBOX_OBJECT_ATTRIBUTES,WCHAR*,DWORD,uint32_t*,int*);
+NTSTATUS xbox_kernel_create_driver_file(PHANDLE,ACCESS_MASK,PXBOX_OBJECT_ATTRIBUTES,PXBOX_IO_STATUS_BLOCK,PLARGE_INTEGER,ULONG,ULONG,ULONG,ULONG,int*);
+void xbox_kernel_release_file_device(uint32_t);
+unsigned xbox_kernel_file_device_type(HANDLE);
+NTSTATUS xbox_kernel_file_volume_status(HANDLE);
+NTSTATUS xbox_kernel_dismount_file_volume(HANDLE);
+
 int xbox_CheckpointWriteObjects(FILE *);
 int xbox_CheckpointLoadObjects(FILE *, const XboxCheckpointRoot *, unsigned);
 typedef struct XboxCriticalSectionState {
@@ -874,7 +909,13 @@ int xbox_CheckpointLoadDevices(FILE *);
 int nv2a_gpu_save_checkpoint(FILE *);
 int nv2a_gpu_load_checkpoint(FILE *);
 void xbox_CheckpointEnd(void);
-DWORD   xbox_checkpoint_wait(ULONG, const HANDLE *, BOOL, BOOLEAN, DWORD);
+#define XBOX_WAIT_USER_APC 0x10000u
+int xbox_DeliverThreadApcs(BOOLEAN user_apcs);
+int xbox_ThreadApcsEnabled(void);
+DWORD xbox_nt_timeout_to_ms(PLARGE_INTEGER Timeout);
+uint32_t xbox_QueueThreadWaitBegin(void);
+void xbox_QueueThreadWaitEnd(uint32_t queue);
+DWORD   xbox_checkpoint_wait(ULONG, const HANDLE *, BOOL, KPROCESSOR_MODE, BOOLEAN, DWORD);
 void    xbox_CpuCli(void);
 void    xbox_CpuSti(void);
 void    xbox_CpuCompleteStiShadow(void);
@@ -967,14 +1008,18 @@ extern PVOID xbox_IoDeviceObjectType;
 extern PVOID xbox_IoCompletionObjectType;
 extern PVOID xbox_IoFileObjectType;
 
+PVOID   __stdcall xbox_IoAllocateIrp(CCHAR StackSize);
+VOID    __stdcall xbox_IoFreeIrp(PVOID Irp);
+PVOID   __stdcall xbox_IoBuildAsynchronousFsdRequest(ULONG MajorFunction, PVOID DeviceObject, PVOID Buffer, ULONG Length, PLARGE_INTEGER StartingOffset, PXBOX_IO_STATUS_BLOCK IoStatusBlock);
 VOID    __stdcall xbox_IoInitializeIrp(PVOID Irp, USHORT PacketSize, CCHAR StackSize);
-VOID    __stdcall xbox_IoStartNextPacket(PVOID DeviceObject, BOOLEAN Cancelable);
-VOID    __stdcall xbox_IoStartNextPacketByKey(PVOID DeviceObject, BOOLEAN Cancelable, ULONG Key);
-VOID    __stdcall xbox_IoStartPacket(PVOID DeviceObject, PVOID Irp, PULONG Key, PVOID CancelFunction);
+VOID    __stdcall xbox_IoQueueThreadIrp(PVOID Irp);
+VOID    __stdcall xbox_IoStartNextPacket(PVOID DeviceObject);
+VOID    __stdcall xbox_IoStartNextPacketByKey(PVOID DeviceObject, ULONG Key);
+VOID    __stdcall xbox_IoStartPacket(PVOID DeviceObject, PVOID Irp, PULONG Key);
 NTSTATUS __stdcall xbox_IoSetIoCompletion(PVOID IoCompletion, PVOID KeyContext, PVOID ApcContext, NTSTATUS IoStatus, ULONG_PTR IoStatusInformation);
 VOID    __stdcall xbox_IoMarkIrpMustComplete(PVOID Irp);
 NTSTATUS __stdcall xbox_IoSynchronousDeviceIoControlRequest(ULONG IoControlCode, PVOID DeviceObject, PVOID InputBuffer, ULONG InputBufferLength, PVOID OutputBuffer, ULONG OutputBufferLength, PULONG ReturnedOutputBufferLength, BOOLEAN InternalDeviceIoControl);
-NTSTATUS __stdcall xbox_IoBuildDeviceIoControlRequest(ULONG IoControlCode, PVOID DeviceObject, PVOID InputBuffer, ULONG InputBufferLength, PVOID OutputBuffer, ULONG OutputBufferLength, BOOLEAN InternalDeviceIoControl, HANDLE Event, PXBOX_IO_STATUS_BLOCK IoStatusBlock);
+PVOID   __stdcall xbox_IoBuildDeviceIoControlRequest(ULONG IoControlCode, PVOID DeviceObject, PVOID InputBuffer, ULONG InputBufferLength, PVOID OutputBuffer, ULONG OutputBufferLength, BOOLEAN InternalDeviceIoControl, HANDLE Event, PXBOX_IO_STATUS_BLOCK IoStatusBlock);
 NTSTATUS __stdcall xbox_IoSynchronousFsdRequest(ULONG MajorFunction, PVOID DeviceObject, PVOID Buffer, ULONG Length, PLARGE_INTEGER StartingOffset);
 PVOID   __stdcall xbox_IoBuildSynchronousFsdRequest(ULONG MajorFunction, PVOID DeviceObject, PVOID Buffer, ULONG Length, PLARGE_INTEGER StartingOffset, HANDLE Event, PXBOX_IO_STATUS_BLOCK IoStatusBlock);
 NTSTATUS __stdcall xbox_IoInvalidDeviceRequest(PVOID DeviceObject, PVOID Irp);
@@ -987,6 +1032,12 @@ NTSTATUS __stdcall xbox_IoCreateSymbolicLink(PXBOX_ANSI_STRING SymbolicLinkName,
 /* Target of a link registered by xbox_IoCreateSymbolicLink, or NULL.
  * Looked up by exact link name, e.g. "\\??\\Z:". */
 const char* xbox_LookupSymbolicLink(const char* link);
+uint32_t xbox_LookupSymbolicLinkTarget(const char* link);
+int xbox_SymbolicLinkPath(const char*,const char*,wchar_t*,DWORD);
+NTSTATUS xbox_kernel_init_devices(void);
+NTSTATUS xbox_RegisterSymbolicLink(uint32_t object,PXBOX_ANSI_STRING name);
+void xbox_UnlinkSymbolicLink(uint32_t object);
+void xbox_ReleaseSymbolicLink(uint32_t object);
 NTSTATUS __stdcall xbox_IoDeleteSymbolicLink(PXBOX_ANSI_STRING SymbolicLinkName);
 
 /* ============================================================================

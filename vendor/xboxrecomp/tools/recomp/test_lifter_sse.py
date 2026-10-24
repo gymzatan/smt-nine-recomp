@@ -187,8 +187,8 @@ class CvtPi2PsTest(unittest.TestCase):
     def test_mmx_source_is_lifted(self):
         lifted = Lifter().lift_instruction(
             _insn("cvtpi2ps", "xmm0, mm0", [_xmm("xmm0"), _xmm("mm0")]))
-        self.assertEqual(len(lifted), 1)
-        self.assertIn("XMM_FROM_PI(xmm0, mm0)", lifted[0])
+        self.assertEqual(lifted[0], "recomp_mmx_enter();")
+        self.assertIn("XMM_FROM_PI(xmm0, mm0)", lifted[1])
 
     def test_memory_source_is_lifted(self):
         lifted = Lifter().lift_instruction(

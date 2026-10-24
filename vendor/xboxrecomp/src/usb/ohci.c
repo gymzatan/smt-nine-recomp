@@ -46,8 +46,7 @@ extern OHCI_TLS uint32_t g_ebx, g_esi, g_edi;
 extern OHCI_TLS uint32_t g_fs_base;
 extern uint32_t xbox_AllocThreadTib(void);
 
-/* The vector XPP takes for USB0. HalGetInterruptVector(1) returns 1 here, and
- * the bus interrupt level is what the XDK passes. */
+/* USB0's bus interrupt level, before HalGetInterruptVector adds 0x30. */
 #define OHCI_VECTOR  1
 
 /* ---- OHCI 1.0a operational registers, by byte offset ------------------- */
@@ -871,7 +870,7 @@ static int ohci_call_isr(OhciController *hc)
     g_esp -= 4; *(uint32_t *)(mem + g_esp) = 0xDEADBEEFu;  /* return address */
 
     { int _if = xbox_CpuEnterInterrupt();
-      int _irql = xbox_IrqlEnterInterrupt(16);
+      int _irql = xbox_IrqlEnterInterrupt((int)*(uint32_t *)(mem + kinterrupt + 12));
       fn(); xbox_IrqlLeaveInterrupt(_irql); xbox_CpuLeaveInterrupt(_if); }
 
     xbox_worker_stack_free(slot);
@@ -894,7 +893,13 @@ static void ohci_raise(OhciController *hc, uint32_t source)
     if (!(enable & INTR_MIE) || !(enable & source))
         return;
 
+    guest_cpu_join();
+    if (xbox_IrqlBlocksInterrupts() || !xbox_GetConnectedInterrupt(OHCI_VECTOR)) {
+        guest_cpu_part();
+        return;
+    }
     claimed = ohci_call_isr(hc);
+    guest_cpu_part();
     if (s_trace || claimed >= 0) {
         static unsigned n;
         if (n++ < 20) {
@@ -1166,6 +1171,8 @@ static DWORD WINAPI ohci_thread(LPVOID unused)
 
         /* Keep the level pending until the guest unmasks it. A timeout must
          * not deliver through CPU IF or the existing IRQL gate. */
+        if (!xbox_GetConnectedInterrupt(OHCI_VECTOR))
+            continue;
         if (xbox_IrqlBlocksInterrupts()) {
             if (!s_worker.held_off_warned) {
                 s_worker.held_off_warned = 1;

@@ -73,6 +73,8 @@ def _build_and_run(source):
         args = ([cc, "/nologo", "/W0", "/O2", str(c), "/Fe:" + str(exe)]
                 if Path(cc).stem.lower() == "cl"
                 else [cc, "-w", "-O2", str(c), "-o", str(exe)])
+        include=Path(__file__).resolve().parents[2]/'src'
+        args.insert(1, ('/I' if Path(cc).stem.lower()=='cl' else '-I')+str(include))
         built = subprocess.run(args, cwd=tmp, capture_output=True, text=True)
         assert built.returncode == 0, built.stdout + built.stderr + source
         return subprocess.run([str(exe)], cwd=tmp, capture_output=True, text=True)

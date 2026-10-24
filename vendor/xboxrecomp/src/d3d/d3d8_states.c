@@ -11,6 +11,7 @@
  */
 
 #include "d3d8_internal.h"
+#include <d3d11_1.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -25,6 +26,7 @@ static ID3D11SamplerState      *g_sampler_states[4] = { NULL, NULL, NULL, NULL }
 
 /* Last known render state identity for dirty detection */
 static DWORD g_last_blend_hash = 0;
+static DWORD g_last_logic_state = 0;
 static DWORD g_last_raster_hash = 0;
 static D3D11_DEPTH_STENCIL_DESC g_last_ds_desc;
 static D3D11_SAMPLER_DESC g_last_sampler_desc[4];
@@ -131,8 +133,10 @@ static void update_blend_state(const DWORD *rs)
     D3D11_BLEND_DESC bd;
     HRESULT hr;
 
-    if (hash == g_last_blend_hash && g_blend_state) return;
+    DWORD logic=rs[D3DRS_NV2ALOGICOP];
+    if (hash == g_last_blend_hash && logic == g_last_logic_state && g_blend_state) return;
     g_last_blend_hash = hash;
+    g_last_logic_state = logic;
 
     if (g_blend_state) {
         ID3D11BlendState_Release(g_blend_state);
@@ -149,7 +153,31 @@ static void update_blend_state(const DWORD *rs)
     bd.RenderTarget[0].BlendOpAlpha = bd.RenderTarget[0].BlendOp;
     bd.RenderTarget[0].RenderTargetWriteMask = (UINT8)(rs[D3DRS_COLORWRITEENABLE] & 0x0F);
 
-    hr = ID3D11Device_CreateBlendState(d3d8_GetD3D11Device(), &bd, &g_blend_state);
+    if(logic) {
+        static const D3D11_LOGIC_OP operations[16]={
+            D3D11_LOGIC_OP_CLEAR,D3D11_LOGIC_OP_AND,D3D11_LOGIC_OP_AND_REVERSE,D3D11_LOGIC_OP_COPY,
+            D3D11_LOGIC_OP_AND_INVERTED,D3D11_LOGIC_OP_NOOP,D3D11_LOGIC_OP_XOR,D3D11_LOGIC_OP_OR,
+            D3D11_LOGIC_OP_NOR,D3D11_LOGIC_OP_EQUIV,D3D11_LOGIC_OP_INVERT,D3D11_LOGIC_OP_OR_REVERSE,
+            D3D11_LOGIC_OP_COPY_INVERTED,D3D11_LOGIC_OP_OR_INVERTED,D3D11_LOGIC_OP_NAND,D3D11_LOGIC_OP_SET};
+        ID3D11Device *device=d3d8_GetD3D11Device();ID3D11Device1 *extended=NULL;
+        D3D11_FEATURE_DATA_D3D11_OPTIONS options={0};
+        hr=ID3D11Device_CheckFeatureSupport(device,D3D11_FEATURE_D3D11_OPTIONS,&options,sizeof options);
+        if(SUCCEEDED(hr) && !options.OutputMergerLogicOp)hr=DXGI_ERROR_UNSUPPORTED;
+        if(SUCCEEDED(hr))hr=ID3D11Device_QueryInterface(device,&IID_ID3D11Device1,(void **)&extended);
+        if(SUCCEEDED(hr)) {
+            D3D11_BLEND_DESC1 desc={0};ID3D11BlendState1 *state=NULL;
+            D3D11_RENDER_TARGET_BLEND_DESC1 *target=&desc.RenderTarget[0];
+            target->SrcBlend=target->SrcBlendAlpha=D3D11_BLEND_ONE;
+            target->DestBlend=target->DestBlendAlpha=D3D11_BLEND_ZERO;
+            target->BlendOp=target->BlendOpAlpha=D3D11_BLEND_OP_ADD;
+            target->LogicOpEnable=TRUE;target->LogicOp=operations[logic&15];
+            target->RenderTargetWriteMask=bd.RenderTarget[0].RenderTargetWriteMask;
+            hr=ID3D11Device1_CreateBlendState1(extended,&desc,&state);
+            ID3D11Device1_Release(extended);
+            if(SUCCEEDED(hr))g_blend_state=(ID3D11BlendState *)state;
+        }
+        if(FAILED(hr))fprintf(stderr,"[COLOUR LOGIC] selected backend cannot execute the original logic operation\n");
+    } else hr = ID3D11Device_CreateBlendState(d3d8_GetD3D11Device(), &bd, &g_blend_state);
     if (FAILED(hr))
         fprintf(stderr, "D3D8: CreateBlendState failed: 0x%08lX\n", hr);
 }
@@ -285,7 +313,12 @@ void d3d8_states_apply_sampler(DWORD stage)
         tss[D3DTSS_MIPFILTER]);
     sd.AddressU = d3d8_to_d3d11_address(tss[D3DTSS_ADDRESSU] ? tss[D3DTSS_ADDRESSU] : D3DTADDRESS_WRAP);
     sd.AddressV = d3d8_to_d3d11_address(tss[D3DTSS_ADDRESSV] ? tss[D3DTSS_ADDRESSV] : D3DTADDRESS_WRAP);
-    sd.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+    sd.AddressW = d3d8_to_d3d11_address(tss[D3DTSS_NV2AADDRESSW]);
+    DWORD border = tss[D3DTSS_BORDERCOLOR];
+    sd.BorderColor[0] = ((border >> 16) & 255) / 255.0f;
+    sd.BorderColor[1] = ((border >> 8) & 255) / 255.0f;
+    sd.BorderColor[2] = (border & 255) / 255.0f;
+    sd.BorderColor[3] = (border >> 24) / 255.0f;
     sd.MaxAnisotropy = tss[D3DTSS_MAXANISOTROPY] ? tss[D3DTSS_MAXANISOTROPY] : 1;
     sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
     sd.MaxLOD = D3D11_FLOAT32_MAX;
@@ -335,6 +368,7 @@ void d3d8_states_shutdown(void)
         }
     }
     g_last_blend_hash = 0;
+    g_last_logic_state = 0;
     g_last_raster_hash = 0;
 }
 
@@ -364,3 +398,4 @@ void d3d8_states_apply(void)
             d3d8_states_apply_sampler(s);
     }
 }
+

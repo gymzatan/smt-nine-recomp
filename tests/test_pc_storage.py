@@ -20,6 +20,19 @@ def test_directory_storage_and_save_roundtrip(tmp_path):
 void xbox_log(int level, const char *category, const char *format, ...) {}
 void xbox_path_set_language_media(const char *, const char *);
 const char *xbox_LookupSymbolicLink(const char *name) { return NULL; }
+int xbox_SymbolicLinkPath(const char *name,const char *rest,wchar_t *path,DWORD capacity) { return 0; }
+/* Object ownership is exercised by the integrated kernel fixture. */
+extern NTSTATUS NTAPI NtClose(HANDLE);
+NTSTATUS xbox_kernel_close_handle(HANDLE handle) { return NtClose(handle); }
+NTSTATUS xbox_kernel_prepare_file_open(PXBOX_OBJECT_ATTRIBUTES oa,WCHAR *path,DWORD size,uint32_t *device,int *volume) {
+    *device=0;*volume=0;return xbox_FileObjectPath(oa,path,size)?0:STATUS_OBJECT_PATH_NOT_FOUND;
+}
+void xbox_kernel_release_file_device(uint32_t device) { assert(!device); }
+NTSTATUS xbox_kernel_create_driver_file(PHANDLE a,ACCESS_MASK b,PXBOX_OBJECT_ATTRIBUTES c,PXBOX_IO_STATUS_BLOCK d,PLARGE_INTEGER e,ULONG f,ULONG g,ULONG h,ULONG i,int *handled) {*handled=0;return 0;}
+NTSTATUS xbox_kernel_file_volume_status(HANDLE handle) { return 0; }
+NTSTATUS xbox_kernel_dismount_file_volume(HANDLE handle) { return STATUS_INVALID_DEVICE_REQUEST; }
+
+
 /* This isolated filesystem fixture observes the renderer write boundary;
  * real GPU ownership and invalidation are checked by the renderer suite. */
 static void *expected_write;static size_t expected_bytes;static unsigned write_open,write_calls;
@@ -83,7 +96,7 @@ int main(void) {
     built = subprocess.run([compiler,'/nologo','/O2','/MD','/Gy','/utf-8',
         '/I'+str(kernel),'/I'+str(ROOT/'vendor/xboxrecomp/src'),'/I'+str(ROOT/'vendor/xboxrecomp/include'),str(source),
         str(kernel/'kernel_path.c'),str(kernel/'kernel_file.c'),'/Fe:'+str(tmp_path/'probe.exe'),
-        '/link','/OPT:REF','shell32.lib'],cwd=tmp_path,capture_output=True,text=True)
+        '/link','/OPT:REF','shell32.lib','ntdll.lib'],cwd=tmp_path,capture_output=True,text=True)
     assert built.returncode == 0, built.stdout+built.stderr
     checked = subprocess.run([str(tmp_path/'probe.exe')],cwd=tmp_path,capture_output=True,text=True)
     assert checked.returncode == 0, checked.stdout+checked.stderr

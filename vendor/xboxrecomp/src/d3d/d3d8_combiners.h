@@ -141,6 +141,17 @@ typedef enum NV2ATextureMode {
     NV2A_TEXMODE_NONE    = 3,  /* No texture bound */
     NV2A_TEXMODE_PASSTHRU = 4,
     NV2A_TEXMODE_CLIPPLANE = 5,
+    NV2A_TEXMODE_DEPENDENT_AR = 6,
+    NV2A_TEXMODE_DEPENDENT_GB = 7,
+    NV2A_TEXMODE_BUMP = 8,
+    NV2A_TEXMODE_BUMP_LUM = 9,
+    NV2A_TEXMODE_DOTPRODUCT = 10,
+    NV2A_TEXMODE_DOT_ST = 11,
+    NV2A_TEXMODE_DOT_STR_CUBE = 12,
+    NV2A_TEXMODE_DOT_RFLCT_SPEC = 13,
+    NV2A_TEXMODE_DOT_RFLCT_DIFF = 14,
+    NV2A_TEXMODE_DOT_RFLCT_SPEC_CONST = 15,
+    NV2A_TEXMODE_DOT_STR = 17,
 } NV2ATextureMode;
 
 /* ================================================================
@@ -239,6 +250,14 @@ typedef struct NV2ACombinerState {
     DWORD alpha_kill_mask;
     DWORD projected_mask;
     DWORD clip_plane_mode;
+    DWORD color_key_mode[NV2A_MAX_TEXTURES];
+    DWORD dependent_source[NV2A_MAX_TEXTURES];
+    DWORD shadow_mask,shadow_project_mask,shadow_function;
+    DWORD shadow_bits[NV2A_MAX_TEXTURES];
+    DWORD luma_mask;
+    DWORD dot_mapping[NV2A_MAX_TEXTURES];
+    DWORD dot_2d_mask;
+    DWORD volume_mask;
 } NV2ACombinerState;
 
 /* ================================================================
@@ -259,6 +278,9 @@ typedef struct NV2APSConstants {
     UINT  alpha_test_enable;                /* 0 or 1 */
     UINT  fog_enable;                       /* 0 or 1 */
     UINT  alpha_only[NV2A_MAX_TEXTURES];     /* A8 sampling uses white RGB */
+    UINT  color_key[NV2A_MAX_TEXTURES], color_key_mask[NV2A_MAX_TEXTURES];
+    float bump_matrix[NV2A_MAX_TEXTURES][4];
+    float bump_lum_coord[NV2A_MAX_TEXTURES][4];
 } NV2APSConstants;
 
 /* ================================================================

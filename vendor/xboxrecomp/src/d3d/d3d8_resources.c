@@ -504,14 +504,14 @@ void d3d8_convert_linear_pixels(D3DFORMAT fmt, UINT width, UINT height,
     switch (fmt) {
     case D3DFMT_AL8:
     case D3DFMT_LIN_AL8: {
-        /* 8-bit packed: high nibble alpha, low nibble luma.
-         * Expand to 16-bit A8L8 (byte0 = luma, byte1 = alpha). */
+        /* NV097 AY8 shares the full byte between luminance and alpha.
+         * Preserve the existing A8L8 upload representation. */
         for (y = 0; y < height; y++) {
             const BYTE *s = src + (size_t)y * width;
             BYTE *d = dst + (size_t)y * width * 2;
             for (x = 0; x < width; x++) {
-                d[x * 2 + 0] = (BYTE)(((s[x] & 0x0F) << 4) | (s[x] & 0x0F));
-                d[x * 2 + 1] = (BYTE)(((s[x] >> 4) << 4) | (s[x] >> 4));
+                d[x * 2 + 0] = s[x];
+                d[x * 2 + 1] = s[x];
             }
         }
         break;

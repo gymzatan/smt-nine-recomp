@@ -39,9 +39,9 @@ class FpuReverseFormTest(unittest.TestCase):
         self.assertIn("fp_top() = RECOMP_FP_PC(MEMF(eax + 0x10) - fp_top());", lifted[0])
 
     def test_reverse_pop_forms_use_the_reversed_operand_order(self):
-        self.assertIn("fp_st1() = RECOMP_FP_PC(fp_top() / fp_st1()); fp_pop();",
+        self.assertIn("fp_st1() = RECOMP_FP_PC(fp_top() / fp_st1()); recomp_fp_commit((unsigned)(&(fp_st1()) - g_fp_stack)); fp_pop();",
                       _lift("fdivrp", "st(1)", [])[0])
-        self.assertIn("fp_st1() = RECOMP_FP_PC(fp_top() - fp_st1()); fp_pop();",
+        self.assertIn("fp_st1() = RECOMP_FP_PC(fp_top() - fp_st1()); recomp_fp_commit((unsigned)(&(fp_st1()) - g_fp_stack)); fp_pop();",
                       _lift("fsubrp", "st(1)", [])[0])
 
     def test_forward_forms_keep_their_original_operand_order(self):

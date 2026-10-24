@@ -13,7 +13,7 @@ class FpuLifterTest(unittest.TestCase):
 
         self.assertEqual(
             Lifter().lift_instruction(instruction),
-            ["{ double _t = fp_top(); fp_push(_t); } /* fld st(0) */"],
+            ["recomp_fp_push_copy(&fp_stack_top, (fp_stack_top + 0) & 7u); /* fld st(0) */"],
         )
 
     def test_fst_does_not_pop_and_fstp_does(self):
@@ -63,7 +63,7 @@ class FpuLifterTest(unittest.TestCase):
         self.assertEqual(
             Lifter().lift_instruction(instruction),
             ["fp_top() = RECOMP_FP_PC(fp_top() / MEMF(0x123456)); "
-             "/* fdiv dword ptr [0x00123456] */"],
+             "recomp_fp_commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fdiv dword ptr [0x00123456] */"],
         )
 
     def test_register_arithmetic_updates_st0_without_popping(self):
@@ -72,7 +72,7 @@ class FpuLifterTest(unittest.TestCase):
 
         self.assertEqual(
             Lifter().lift_instruction(instruction),
-            ["fp_top() = RECOMP_FP_PC(fp_top() * fp_st1()); /* fmul st(1) */"],
+            ["fp_top() = RECOMP_FP_PC(fp_top() * fp_st1()); recomp_fp_commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fmul st(1) */"],
         )
 
     def test_translated_functions_share_runtime_fpu_state(self):
@@ -101,12 +101,12 @@ class FpuLifterTest(unittest.TestCase):
         self.assertNotIn("int _fp_top = 0", generated)
 
     def test_runtime_template_exports_shared_fpu_state(self):
-        root = Path(__file__).resolve().parents[2]
+        root = Path(__file__).resolve().parents[4]
         runtime_types = (
-            root / "templates" / "runtime" / "recomp_types.h"
+            root / "config" / "recomp_types.h"
         ).read_text()
         main = (
-            root / "templates" / "new-game" / "src" / "main.c"
+            root / "game" / "src" / "main.c"
         ).read_text()
 
         self.assertIn("extern RECOMP_TLS double g_fp_stack[8];", runtime_types)

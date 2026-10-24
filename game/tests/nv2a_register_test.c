@@ -52,8 +52,25 @@ static uint8_t *fixture_shared_ram(size_t bytes)
 }
 ptrdiff_t g_xbox_mem_offset;
 int xbox_CheckpointFrozen(void) { return 0; }
+#ifdef NINE_FIFO_NOTIFICATION_PROBE
+static DWORD s_fifo_fixture_producer;
+static volatile LONG s_fifo_fixture_notifications,s_fifo_fixture_passes;
+static HANDLE s_fifo_fixture_wake;
+BOOL WINAPI fifo_fixture_SetEvent(HANDLE event)
+{
+    if(GetCurrentThreadId()==s_fifo_fixture_producer) {
+        s_fifo_fixture_wake=event;
+        InterlockedIncrement(&s_fifo_fixture_notifications);
+    }
+    return SetEvent(event);
+}
+#endif
 static SRWLOCK s_fixture_devices=SRWLOCK_INIT;
-void xbox_CheckpointDeviceEnter(unsigned device) { (void)device;AcquireSRWLockShared(&s_fixture_devices); }
+void xbox_CheckpointDeviceEnter(unsigned device) { (void)device;AcquireSRWLockShared(&s_fixture_devices);
+#ifdef NINE_FIFO_NOTIFICATION_PROBE
+InterlockedIncrement(&s_fifo_fixture_passes);
+#endif
+ }
 void xbox_CheckpointDeviceLeave(unsigned device) { (void)device;ReleaseSRWLockShared(&s_fixture_devices); }
 void xbox_CheckpointDeviceCreating(unsigned device) { (void)device; }
 void xbox_CheckpointDeviceCreated(unsigned device) { (void)device; }
@@ -1160,6 +1177,9 @@ static int check_fifo_worker(NV2AState *gpu,uint8_t *ram,uint8_t *ramin)
     s_worker_entered=CreateEvent(NULL,FALSE,FALSE,NULL);
     s_worker_continue=CreateEvent(NULL,FALSE,FALSE,NULL);
     assert(s_worker_entered && s_worker_continue && nv2a_fifo_start(gpu, 1));
+#ifdef NINE_FIFO_NOTIFICATION_PROBE
+    s_fifo_fixture_producer=GetCurrentThreadId();
+#endif
     AcquireSRWLockExclusive(&s_fixture_devices);
     /* A frozen worker cannot consume
      * or acknowledge these submitted bytes until the device barrier opens. */
@@ -1171,11 +1191,26 @@ static int check_fifo_worker(NV2AState *gpu,uint8_t *ram,uint8_t *ramin)
     assert(r[NV_PFIFO_CACHE1_DMA_GET]==4 && s_packet_seen==0);
     assert(nv2a_mmio_read(gpu,0x800044,4)==4);
     assert(nv2a_guest_read32(0xFD800044u)==4);
+#ifdef NINE_FIFO_NOTIFICATION_PROBE
+    /* Drain only the retained initial event while its worker is blocked. */
+    assert(s_fifo_fixture_wake && s_fifo_fixture_notifications>0);
+    DWORD retained=WaitForSingleObject(s_fifo_fixture_wake,0);
+    assert(retained==WAIT_OBJECT_0 || retained==WAIT_TIMEOUT);
+    LONG notifications=ReadAcquire(&s_fifo_fixture_notifications);
+    LONG passes=ReadAcquire(&s_fifo_fixture_passes);
+#endif
     nv2a_guest_write32(0xFD800040u,36);
     nv2a_mmio_write(gpu,0x100410,0x10000,4);
     assert(nv2a_mmio_read(gpu,0x100410,4)==0);
     nv2a_mmio_write(gpu,0x800040,36,4); /* PUT must not wait for the blocked consumer. */
+#ifdef NINE_FIFO_NOTIFICATION_PROBE
+    assert(ReadAcquire(&s_fifo_fixture_notifications)==notifications);
+    assert(ReadAcquire(&gpu->pfifo.fifo_kick)==3);
+#endif
     SetEvent(s_worker_continue);nv2a_fifo_wait_idle(gpu);
+#ifdef NINE_FIFO_NOTIFICATION_PROBE
+    assert(ReadAcquire(&s_fifo_fixture_passes)>passes);
+#endif
     assert(s_packet_seen==8 && r[NV_PFIFO_CACHE1_DMA_GET]==36);
     CloseHandle(s_worker_entered);s_worker_entered=NULL;CloseHandle(s_worker_continue);
     nv2a_mmio_write(gpu,0x800040,68,4);nv2a_fifo_wait_idle(gpu);

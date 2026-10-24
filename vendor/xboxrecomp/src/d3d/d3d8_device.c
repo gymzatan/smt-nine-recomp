@@ -413,8 +413,10 @@ static void d3d8_init_default_states(D3D8DeviceState *state)
     /* Default texture stage states:
      * By default each stage reads its own texcoord set (0,1,2,3). */
     memset(state->tss, 0, sizeof(state->tss));
-    for (int s = 0; s < MAX_TEXTURE_STAGES; s++)
+    for (int s = 0; s < MAX_TEXTURE_STAGES; s++) {
         state->tss[s][D3DTSS_TEXCOORDINDEX] = (DWORD)s;
+        state->tss[s][D3DTSS_NV2AADDRESSW] = D3DTADDRESS_WRAP;
+    }
 
     /* Identity matrices */
     for (int i = 0; i < MAX_TRANSFORMS; i++) {

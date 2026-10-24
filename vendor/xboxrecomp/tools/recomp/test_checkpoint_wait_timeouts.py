@@ -10,7 +10,7 @@ import pytest
 def wait_timeout_probe(tmp_path_factory):
     root = Path(__file__).resolve().parents[2]
     source = (root / 'src/kernel/kernel_sync.c').read_text(encoding='utf-8')
-    body = source[source.index('DWORD xbox_checkpoint_wait('):source.index('NTSTATUS __stdcall xbox_NtWaitForSingleObject(')]
+    body = source[source.index('static DWORD checkpoint_wait('):source.index('NTSTATUS __stdcall xbox_NtSignalAndWaitForSingleObjectEx(')]
     program = r'''
 #include <windows.h>
 #include <mmsystem.h>
@@ -33,6 +33,28 @@ static DWORD observed_objects(DWORD count,const HANDLE *objects,BOOL all,DWORD m
     DWORD result=observed_sleep(ms,alertable);
     return result?result:WAIT_TIMEOUT;
 }
+typedef int KPROCESSOR_MODE;
+#define UserMode 1
+#define XBOX_WAIT_USER_APC 0x10000u
+int xbox_ThreadApcsEnabled(void) {return 0;}
+uint32_t xbox_QueueThreadWaitBegin(void) {return 0;}
+void xbox_QueueThreadWaitEnd(uint32_t queue) {(void)queue;}
+int xbox_DeliverThreadApcs(BOOLEAN user) {(void)user;return 0;}
+typedef LONG NTSTATUS;
+NTSTATUS xbox_kernel_wait_acquire(ULONG count,const HANDLE *source,HANDLE *owned,uint32_t *tokens) {
+    for(ULONG i=0;i<count;i++){owned[i]=source[i];tokens[i]=i;}return 0;
+}
+void xbox_kernel_wait_release_objects(ULONG count,const uint32_t *tokens) {(void)count;(void)tokens;}
+int xbox_kernel_wait_release_cpu(void) {return 0;}
+NTSTATUS xbox_kernel_reject_timer_signal(HANDLE h) {(void)h;return 0;}
+int xbox_kernel_wait_signal_done(void) {return 0;}
+void xbox_kernel_wait_mark_signalled(void) {}
+void xbox_kernel_wait_apc_begin(uint32_t remaining) {(void)remaining;}
+void xbox_kernel_wait_apc_end(void) {}
+NTSTATUS NTAPI NtSignalAndWaitForSingleObject(HANDLE signal,HANDLE wait,BOOLEAN alertable,PLARGE_INTEGER due) {
+    (void)signal;(void)wait;(void)alertable;(void)due;abort();return 0;
+}
+void guest_cpu_join(void) {}
 int xbox_kernel_wait_tracked(void) {return tracked;}
 uint32_t xbox_kernel_wait_begin(uint32_t ms) {return restored==INFINITE?ms:restored;}
 void xbox_kernel_wait_boundary(uint32_t remaining) {
@@ -54,7 +76,7 @@ int main(int argc,char **argv) {
             if(period)assert(timeBeginPeriod(1)==TIMERR_NOERROR);
             for(tracked=0;tracked<2;tracked++) {
                 calls=0;QueryPerformanceCounter(&begin);
-                for(int i=0;i<20;i++)assert(xbox_checkpoint_wait(0,NULL,FALSE,FALSE,2)==WAIT_TIMEOUT);
+                for(int i=0;i<20;i++)assert(xbox_checkpoint_wait(0,NULL,FALSE,UserMode,FALSE,2)==WAIT_TIMEOUT);
                 QueryPerformanceCounter(&end);
                 printf("period=%d tracked=%d calls=%lu elapsed_ms=%.6f\n",period,tracked,calls,(double)(end.QuadPart-begin.QuadPart)*1000/frequency.QuadPart);
             }
@@ -66,19 +88,19 @@ int main(int argc,char **argv) {
     for(DWORD ms=0;ms<=10;ms++) {
         for(int pause=0;pause<2;pause++) {
             calls=0;wall=waited=0;pause_once=pause;
-            DWORD result=xbox_checkpoint_wait(count,objects,count==2,FALSE,ms);
+            DWORD result=xbox_checkpoint_wait(count,objects,count==2,UserMode,FALSE,ms);
             fprintf(stderr,"count=%lu request=%lu pause=%d calls=%lu waited=%llu result=%lu\n",count,ms,pause,calls,waited,result);
             assert(result==WAIT_TIMEOUT && calls==1 && waited==ms);
         }
     }
     calls=0;wall=waited=0;restored=2;
-    assert(xbox_checkpoint_wait(count,objects,count==2,FALSE,1000)==WAIT_TIMEOUT);
+    assert(xbox_checkpoint_wait(count,objects,count==2,UserMode,FALSE,1000)==WAIT_TIMEOUT);
     assert(calls==1 && waited==2);restored=INFINITE;
     calls=0;wall=waited=0;forced_result=WAIT_IO_COMPLETION;
-    assert(xbox_checkpoint_wait(count,objects,count==2,TRUE,INFINITE)==WAIT_IO_COMPLETION);
+    assert(xbox_checkpoint_wait(count,objects,count==2,UserMode,TRUE,INFINITE)==WAIT_IO_COMPLETION);
     assert(calls==1 && last_slice==10);
     calls=0;wall=waited=0;forced_result=WAIT_FAILED;
-    assert(xbox_checkpoint_wait(count,objects,count==2,FALSE,1000)==WAIT_FAILED);
+    assert(xbox_checkpoint_wait(count,objects,count==2,UserMode,FALSE,1000)==WAIT_FAILED);
     assert(calls==1 && last_slice==10);
     return 0;
 }

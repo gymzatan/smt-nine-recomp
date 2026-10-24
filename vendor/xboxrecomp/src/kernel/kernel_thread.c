@@ -185,23 +185,14 @@ NTSTATUS __stdcall xbox_KeDelayExecutionThread(
         LARGE_INTEGER now;
         GetSystemTimeAsFileTime((LPFILETIME)&now);
         LONGLONG diff = Interval->QuadPart - now.QuadPart;
-        if (diff <= 0 && !xbox_kernel_wait_tracked())
+        if (diff <= 0 && !xbox_kernel_wait_tracked() && !xbox_ThreadApcsEnabled())
             return STATUS_SUCCESS; /* Already past */
         ms = diff<=0?0:(DWORD)(diff / 10000);
     }
 
-    if (xbox_kernel_wait_tracked()) {
-        DWORD result=xbox_checkpoint_wait(0,NULL,FALSE,Alertable,ms);
-        return result==WAIT_IO_COMPLETION?STATUS_ALERTED:STATUS_SUCCESS;
-    } else if (Alertable) {
-        DWORD result = SleepEx(ms, TRUE);
-        if (result == WAIT_IO_COMPLETION)
-            return STATUS_ALERTED;
-    } else {
-        Sleep(ms);
-    }
-
-    return STATUS_SUCCESS;
+    DWORD result=xbox_checkpoint_wait(0,NULL,FALSE,WaitMode,Alertable,ms);
+    if(result==XBOX_WAIT_USER_APC)return (NTSTATUS)0xc0;
+    return result==WAIT_IO_COMPLETION?STATUS_ALERTED:STATUS_SUCCESS;
 }
 
 /* ============================================================================
@@ -321,7 +312,8 @@ NTSTATUS __stdcall xbox_NtDuplicateObject(
     ULONG Options)
 {
     HANDLE hProcess = GetCurrentProcess();
-    DWORD dwOptions = 0;
+    /* Xbox duplicates object identity without a desired-access parameter. */
+    DWORD dwOptions = DUPLICATE_SAME_ACCESS;
 
     if (!TargetHandle)
         return STATUS_INVALID_PARAMETER;
@@ -329,16 +321,20 @@ NTSTATUS __stdcall xbox_NtDuplicateObject(
     /* Xbox DUPLICATE_CLOSE_SOURCE = 0x1, same as Win32 */
     if (Options & 0x1)
         dwOptions |= DUPLICATE_CLOSE_SOURCE;
-    /* Xbox DUPLICATE_SAME_ACCESS = 0x2, same as Win32 */
-    if (Options & 0x2)
-        dwOptions |= DUPLICATE_SAME_ACCESS;
-
+    *TargetHandle = NULL;
     if (!DuplicateHandle(hProcess, SourceHandle, hProcess, TargetHandle,
                          0, FALSE, dwOptions)) {
+        DWORD error=GetLastError();
+#ifdef _WIN32
+        if(Options&1)xbox_FileHandleClosed(SourceHandle);
+#endif
         xbox_log(XBOX_LOG_ERROR, XBOX_LOG_THREAD,
-            "NtDuplicateObject: DuplicateHandle failed (error %u)", GetLastError());
-        return STATUS_UNSUCCESSFUL;
+            "NtDuplicateObject: DuplicateHandle failed (error %u)", error);
+        return error==ERROR_INVALID_HANDLE?STATUS_INVALID_HANDLE:STATUS_INSUFFICIENT_RESOURCES;
     }
+#ifdef _WIN32
+    xbox_FileHandleDuplicated(SourceHandle,*TargetHandle,(Options&1)!=0);
+#endif
 
     xbox_log(XBOX_LOG_DEBUG, XBOX_LOG_THREAD,
         "NtDuplicateObject: source=%p → target=%p (options=0x%X)",

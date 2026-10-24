@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdlib.h>
 
 /* A project may set this to watch every guest path the kernel translates (for
  * example to print who opened a file). NULL by default. */
@@ -47,7 +48,9 @@ typedef struct {
 
 static const path_rule s_rules[] = {
     { "\\Device\\CdRom0\\",                   0, NULL,         NULL          },
+    { "\\Device\\CdRom0",                     0, NULL,         NULL          },
     { "\\Device\\Harddisk0\\Partition1\\",    2, NULL,         NULL          },
+    { "\\Device\\Harddisk0\\Partition1",      2, NULL,         NULL          },
     /* Xbox volume paths use ordinary PC directories. Root system-volume
      * access uses SystemData; paths below it retain the game asset mapping. */
     { "\\Device\\Harddisk0\\Partition2\\",    0, NULL,         NULL          },
@@ -73,27 +76,53 @@ static const path_rule s_rules[] = {
 };
 #define PATH_RULE_COUNT ((int)(sizeof(s_rules) / sizeof(s_rules[0])))
 
-/*
- * Rewrite a path through a drive letter the title mapped for itself.
- *
- * Titles do their own mounting. Wreckless calls IoCreateSymbolicLink at guest
- * 0x000E9B1D to link "\??\Z:" to "\Device\Harddisk0\Partition1\", then loads
- * every asset through z:\. kernel_io.c has recorded that link since it was
- * written, but nothing ever read the table back, so the static rule below --
- * Z: is the cache partition, which is true of the console in general and wrong
- * for this title -- sent every asset open to the save directory and it failed
- * with ERROR_FILE_NOT_FOUND.
- *
- * Accepts "Z:\rest" and "\??\Z:\rest"; the table is keyed on the "\??\Z:" form
- * the kernel actually registers.
- *
- * Deliberately conservative: the rewritten path is returned only when it
- * matches a static rule. A link whose target this layer has no rule for would
- * otherwise turn a path that translated adequately into one that does not
- * translate at all.
- *
- * Returns 1 and fills `out` on success, 0 to leave the path alone.
- */
+/* Physical device identities are drawn from this same path table. The rule
+ * index is retained in the existing object record, including across snapshots. */
+unsigned xbox_path_rule_count(void) {return PATH_RULE_COUNT;}
+int xbox_path_device_rule(unsigned rule,char *name,DWORD capacity,ULONG *type) {
+    if(!rule || rule>PATH_RULE_COUNT)return 0;
+    const char *prefix=s_rules[rule-1].prefix;
+    if(!match_prefix(prefix,"\\Device\\"))return 0;
+    size_t length=strlen(prefix);if(prefix[length-1]=='\\')--length;
+    for(unsigned i=0;i+1<rule;i++) {
+        size_t earlier=strlen(s_rules[i].prefix);
+        if(earlier && s_rules[i].prefix[earlier-1]=='\\')--earlier;
+        if(earlier==length) {
+            size_t j=0;while(j<length && tolower((unsigned char)prefix[j])==tolower((unsigned char)s_rules[i].prefix[j]))++j;
+            if(j==length)return 0;
+        }
+    }
+    if(name) {if(length>=capacity)return 0;memcpy(name,prefix,length);name[length]=0;}
+    if(type)*type=match_prefix(prefix,"\\Device\\CdRom")?2:7;
+    return 1;
+}
+#if defined(_WIN32)
+static BOOL xbox_translate_path_impl(const char*,xbox_host_char*,DWORD);
+#endif
+BOOL xbox_translate_device_path(unsigned rule,const char *rest,xbox_host_char *output,DWORD capacity) {
+    char name[64];if(!rest || !xbox_path_device_rule(rule,name,sizeof name,NULL))return FALSE;
+    size_t head=strlen(name),tail=strlen(rest);
+    if(head+tail+1>UINT16_MAX)return FALSE;
+    char *path=malloc(head+tail+2);if(!path)return FALSE;
+    memcpy(path,name,head);if(tail)path[head++]='\\';memcpy(path+head,rest,tail+1);
+#if defined(_WIN32)
+    BOOL ok=xbox_translate_path_impl(path,output,capacity);
+#else
+    BOOL ok=xbox_translate_path(path,output,capacity);
+#endif
+    free(path);return ok;
+}
+
+/* Drive spellings share the same link identity in the existing I/O map. */
+static int split_symlink_path(const char *path,char link[7],const char **rest) {
+    if(!path)return 0;
+    if(match_prefix(path,"\\??\\") && path[4] && path[5]==':')path+=4;
+    if(!path[0] || path[1]!=':')return 0;
+    memcpy(link,"\\??\\",4);link[4]=(char)toupper((unsigned char)path[0]);link[5]=':';link[6]=0;
+    *rest=path+2;while(**rest=='\\' || **rest=='/')++*rest;return 1;
+}
+
+#if !defined(_WIN32)
 static int resolve_symlink(const char* xbox_path, char* out, size_t out_size)
 {
     char        link[8];
@@ -102,22 +131,7 @@ static int resolve_symlink(const char* xbox_path, char* out, size_t out_size)
     size_t      tlen, rlen;
     int         i;
 
-    if (!xbox_path || !out || out_size == 0)
-        return 0;
-
-    if (match_prefix(xbox_path, "\\??\\") && xbox_path[4] && xbox_path[5] == ':')
-        xbox_path += 4;
-    if (!xbox_path[0] || xbox_path[1] != ':')
-        return 0;
-    rest = xbox_path + 2;
-
-    link[0] = '\\';
-    link[1] = '?';
-    link[2] = '?';
-    link[3] = '\\';
-    link[4] = (char)toupper((unsigned char)xbox_path[0]);
-    link[5] = ':';
-    link[6] = '\0';
+    if(!out || !out_size || !split_symlink_path(xbox_path,link,&rest))return 0;
 
     target = xbox_LookupSymbolicLink(link);
     if (!target || !target[0])
@@ -143,6 +157,8 @@ static int resolve_symlink(const char* xbox_path, char* out, size_t out_size)
     }
     return 0;
 }
+
+#endif
 
 /* ======================================================================== */
 /* Shared by both backends, for the same reason as xbox_LastFileError: the
@@ -272,7 +288,7 @@ static void xbox_remember_host_path(const wchar_t *p)
 
 
 
-BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, DWORD buf_size)
+static BOOL xbox_translate_path_impl(const char* xbox_path, xbox_host_char* host_path_buf, DWORD buf_size)
 {
     const char*  remainder = NULL;
     const WCHAR* base_dir  = NULL;
@@ -286,13 +302,19 @@ BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, D
         xbox_path_init(NULL, NULL);
 
     {
-        char linked[512];
-        if (resolve_symlink(xbox_path, linked, sizeof(linked)))
-            return xbox_translate_path(linked, host_path_buf, buf_size);
+        char link[7];const char *rest;
+        if(split_symlink_path(xbox_path,link,&rest)) {
+            int resolved=xbox_SymbolicLinkPath(link,rest,host_path_buf,buf_size);
+            if(resolved<0)return FALSE;
+            if(resolved) {
+                return TRUE;
+            }
+        }
     }
 
     for (int i = 0; i < PATH_RULE_COUNT; i++) {
         skip = match_prefix(xbox_path, s_rules[i].prefix);
+        if(skip && s_rules[i].prefix[skip-1]!='\\' && xbox_path[skip] && xbox_path[skip]!='\\' && xbox_path[skip]!='/')skip=0;
         if (skip) {
             remainder = xbox_path + skip;
             const WCHAR *roots[]={s_game_dir,s_save_dir,s_partition1_dir,s_user_dir};
@@ -312,8 +334,6 @@ BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, D
     return TRUE;
 
 translate:
-    if (g_xbox_path_hook)
-        g_xbox_path_hook(xbox_path);
     fprintf(stderr, "  [PATH] %s\n", xbox_path);
     fflush(stderr);
     {
@@ -349,12 +369,17 @@ translate:
         }
 
         XBOX_TRACE(XBOX_LOG_PATH, "%s -> %S", xbox_path, host_path_buf);
-        xbox_remember_host_path(host_path_buf);
         return TRUE;
     }
 }
 
 /* ======================================================================== */
+BOOL xbox_translate_path(const char *path,xbox_host_char *output,DWORD capacity) {
+    if(!xbox_translate_path_impl(path,output,capacity))return FALSE;
+    if(g_xbox_path_hook)g_xbox_path_hook(path);
+    xbox_remember_host_path(output);return TRUE;
+}
+
 #else /* !_WIN32  -- POSIX / Linux */
 /* ======================================================================== */
 
@@ -460,6 +485,7 @@ BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, D
 
     for (int i = 0; i < PATH_RULE_COUNT; i++) {
         skip = match_prefix(xbox_path, s_rules[i].prefix);
+        if(skip && s_rules[i].prefix[skip-1]!='\\' && xbox_path[skip] && xbox_path[skip]!='\\' && xbox_path[skip]!='/')skip=0;
         if (skip) {
             remainder = xbox_path + skip;
             const char *roots[]={s_game_dir,s_save_dir,s_partition1_dir,s_user_dir};

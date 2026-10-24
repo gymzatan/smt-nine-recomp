@@ -487,23 +487,48 @@ static const char *output_map_suffix(NV2AOutputMapping map)
     }
 }
 
+static int emit_texture_dot(char *buf,int bufsize,int off,unsigned identifier,unsigned coordinate_stage,unsigned source,unsigned mapping,const char *result)
+{
+    EMIT("float3 dot_color%d=r_t%d.rgb;\n",identifier,source);
+    if(mapping==1)EMIT("dot_color%d=(dot_color%d*255.0-128.0)/127.0;\n",identifier,identifier);
+    else if(mapping==2 || mapping==3) {
+        EMIT("float3 dot_raw%d=dot_color%d*255.0;\n",identifier,identifier);
+        if(mapping==2)EMIT("dot_color%d=float3(dot_raw%d.x>=128?dot_raw%d.x-255.5:dot_raw%d.x+0.5,dot_raw%d.y>=128?dot_raw%d.y-255.5:dot_raw%d.y+0.5,dot_raw%d.z>=128?dot_raw%d.z-255.5:dot_raw%d.z+0.5)/127.5;\n",identifier,identifier,identifier,identifier,identifier,identifier,identifier,identifier,identifier,identifier);
+        else EMIT("dot_color%d=float3(dot_raw%d.x>=128?dot_raw%d.x-256:dot_raw%d.x,dot_raw%d.y>=128?dot_raw%d.y-256:dot_raw%d.y,dot_raw%d.z>=128?dot_raw%d.z-256:dot_raw%d.z)/127.0;\n",identifier,identifier,identifier,identifier,identifier,identifier,identifier,identifier,identifier,identifier);
+    }
+    else if(mapping==4) {
+        EMIT("uint4 hilo_raw%u=uint4(r_t%u*255.0); dot_color%u=float3(float((hilo_raw%u.a<<8)|hilo_raw%u.r)/65535.0,float((hilo_raw%u.g<<8)|hilo_raw%u.b)/65535.0,1);\n",identifier,source,identifier,identifier,identifier,identifier,identifier);
+    }
+    EMIT("float %s=dot(input.tc%u.xyz,dot_color%u);\n",result,coordinate_stage,identifier);
+    return off;
+}
+
 int d3d8_combiners_generate_hlsl(const NV2ACombinerState *state,
                                  char *buf, int bufsize)
 {
     int off = 0, i, j;
     for (i = 0; i < 4; ++i) {
-        if (state->tex_mode[i] >= NV2A_TEXMODE_NONE) continue;
+        if (state->tex_mode[i] >= NV2A_TEXMODE_NONE && state->tex_mode[i] != NV2A_TEXMODE_DEPENDENT_AR && state->tex_mode[i] != NV2A_TEXMODE_DEPENDENT_GB && state->tex_mode[i] != NV2A_TEXMODE_BUMP && state->tex_mode[i] != NV2A_TEXMODE_BUMP_LUM && state->tex_mode[i] != NV2A_TEXMODE_DOT_ST && state->tex_mode[i] != NV2A_TEXMODE_DOT_STR_CUBE && state->tex_mode[i] != NV2A_TEXMODE_DOT_RFLCT_SPEC && state->tex_mode[i] != NV2A_TEXMODE_DOT_RFLCT_DIFF && state->tex_mode[i] != NV2A_TEXMODE_DOT_RFLCT_SPEC_CONST && state->tex_mode[i] != NV2A_TEXMODE_DOT_STR) continue;
         EMIT("%s tex%d : register(t%d);\nSamplerState samp%d : register(s%d);\n",
-             state->tex_mode[i] == NV2A_TEXMODE_CUBEMAP ? "TextureCube" :
+             (state->volume_mask&(1u<<i)) ? "Texture3D" :
+             ((state->tex_mode[i] == NV2A_TEXMODE_CUBEMAP || state->tex_mode[i] == NV2A_TEXMODE_DOT_STR_CUBE || state->tex_mode[i] == NV2A_TEXMODE_DOT_RFLCT_SPEC || state->tex_mode[i] == NV2A_TEXMODE_DOT_RFLCT_DIFF || state->tex_mode[i] == NV2A_TEXMODE_DOT_RFLCT_SPEC_CONST) && !(state->dot_2d_mask&(1u<<i))) ? "TextureCube" :
              state->tex_mode[i] == NV2A_TEXMODE_3D ? "Texture3D" : "Texture2D", i, i, i, i);
     }
-    EMIT("cbuffer CombinerCB : register(b0) { float4 c0[8]; float4 c1[8]; float4 fc0; float4 fc1; float4 fog_color; float alpha_ref; uint alpha_func; uint alpha_test_enable; uint fog_enable; uint4 alpha_only; };\n");
+    if(state->dot_2d_mask)EMIT("float2 dot_remap_2d(float3 d) { float3 a=abs(d); if(a.x>a.y && a.x>a.z)return float2(d.x>0?-d.z:d.z,d.y)/a.x; if(a.y>a.x && a.y>a.z)return float2(d.x,d.y>0?-d.z:d.z)/a.y; return float2(d.z>0?d.x:-d.x,d.y)/a.z; }\n");
+    EMIT("cbuffer CombinerCB : register(b0) { float4 c0[8]; float4 c1[8]; float4 fc0; float4 fc1; float4 fog_color; float alpha_ref; uint alpha_func; uint alpha_test_enable; uint fog_enable; uint4 alpha_only; uint4 color_key, color_key_mask; float4 bump_matrix[4], bump_lum_coord[4]; };\n");
     if (state->native_coordinates) {
-        EMIT("cbuffer NativeCB : register(b1) { uint4 clip_x[2]; uint4 clip_y[2]; float4 depth_params; uint4 native_flags; uint4 surface_bounds; };\n");
-        EMIT("struct PS_IN { float4 pos:SV_POSITION; noperspective float4 color0:COLOR0; noperspective float4 color1:COLOR1; float4 tc0:TEXCOORD0; float4 tc1:TEXCOORD1; float4 tc2:TEXCOORD2; float4 tc3:TEXCOORD3; noperspective float fog:TEXCOORD4; noperspective float z:TEXCOORD5; };\n");
+        EMIT("cbuffer NativeCB : register(b1) { uint4 clip_x[2]; uint4 clip_y[2]; float4 depth_params; uint4 native_flags; uint4 surface_bounds; float4 depth_offset; uint4 stipple_flags; uint4 stipple_pattern[8]; };\n");
+        EMIT("struct PS_IN { float4 pos:SV_POSITION; noperspective float4 color0:COLOR0; noperspective float4 color1:COLOR1; float4 tc0:TEXCOORD0; float4 tc1:TEXCOORD1; float4 tc2:TEXCOORD2; float4 tc3:TEXCOORD3; noperspective float fog:TEXCOORD4; noperspective float2 z:TEXCOORD5; };\n");
         EMIT("struct PS_OUT { float4 color:SV_TARGET; float depth:SV_DEPTH; };\nPS_OUT main(PS_IN input) {\n");
+        /* Derivatives precede per-pixel clipping. The slope is measured in
+         * guest pixels, and offset is applied before the original depth clip. */
+        /* HLSL SV_Position.w is W, unlike GLSL's reciprocal W. The Vulkan
+         * compiler already requests DX position-W semantics for this shader. */
+        EMIT("float nv_depth = native_flags.z != 0 ? input.pos.w : input.z.x; float slope_offset=0; if(depth_offset.x != 0) { float slope=depth_offset.z!=0 ? input.z.y : max(abs(ddx(input.z.x)),abs(ddy(input.z.x)))*float(native_flags.w); slope_offset=depth_offset.x*slope; } nv_depth+=depth_offset.y; nv_depth+=slope_offset;\n");
         EMIT("uint2 pixel = uint2(input.pos.xy / float(native_flags.w)); if(any(pixel < surface_bounds.xy) || any(pixel >= surface_bounds.zw)) discard; bool contained = false; [unroll] for(uint k=0;k<8;k++) { uint cx=clip_x[k/4][k%%4], cy=clip_y[k/4][k%%4]; contained = contained || (pixel.x >= (cx&4095) && pixel.x <= ((cx>>16)&4095) && pixel.y >= (cy&4095) && pixel.y <= ((cy>>16)&4095)); } if (contained == (native_flags.x != 0)) discard;\n");
-        EMIT("float nv_depth = native_flags.z != 0 ? 1.0/input.pos.w : input.z; if(native_flags.y != 0 && (nv_depth < depth_params.x || nv_depth > depth_params.y)) discard; nv_depth = clamp(nv_depth, depth_params.x, depth_params.y);\n");
+        EMIT("if(stipple_flags.x != 0) { uint row=31-(pixel.y&31); if((stipple_pattern[row/4][row%%4] & (1u<<((pixel.x&31)^7)))==0) discard; }\n");
+        EMIT("if(native_flags.y != 0 && (nv_depth < depth_params.x || nv_depth > depth_params.y)) discard; nv_depth = clamp(nv_depth, depth_params.x, depth_params.y);\n");
+        EMIT("if(depth_params.w==16) { uint bits=asuint(nv_depth); nv_depth=nv_depth>0 && bits>0x3c000000 ? float(min((bits-0x3c000000)>>11,65535u)) : 0; } else if(depth_params.w==24) { nv_depth=nv_depth>0 ? float(min(asuint(nv_depth)>>7,0xfeffffu)) : 0; } else nv_depth=floor(max(0,nv_depth));\n");
     } else {
         EMIT("struct PS_IN { float4 pos:SV_POSITION; float4 color0:COLOR0; float4 color1:COLOR1; float3 tc0:TEXCOORD0; float3 tc1:TEXCOORD1; float3 tc2:TEXCOORD2; float3 tc3:TEXCOORD3; };\nfloat4 main(PS_IN input):SV_TARGET {\n");
     }
@@ -512,13 +537,38 @@ int d3d8_combiners_generate_hlsl(const NV2ACombinerState *state,
     EMIT("float4 r_zero=0, r_c0=c0[0], r_c1=c1[0], r_fog=fog_color, r_v0=input.color0, r_v1=input.color1;\n");
     if (state->native_coordinates) EMIT("r_fog.a = input.fog;\n");
     for (i = 0; i < 4; ++i) {
-        if (state->tex_mode[i] == NV2A_TEXMODE_PASSTHRU) {
+        if(state->tex_mode[i] == NV2A_TEXMODE_DOTPRODUCT || state->tex_mode[i] == NV2A_TEXMODE_DOT_ST || state->tex_mode[i] == NV2A_TEXMODE_DOT_STR_CUBE || state->tex_mode[i] == NV2A_TEXMODE_DOT_RFLCT_SPEC || state->tex_mode[i] == NV2A_TEXMODE_DOT_RFLCT_DIFF || state->tex_mode[i] == NV2A_TEXMODE_DOT_RFLCT_SPEC_CONST || state->tex_mode[i] == NV2A_TEXMODE_DOT_STR) {
+            if(i==3 && state->tex_mode[2]==NV2A_TEXMODE_DOT_RFLCT_DIFF)EMIT("float dot_stage3=dot_stage2_next;\n");
+            else { char result[24];snprintf(result,sizeof(result),"dot_stage%d",i);off=emit_texture_dot(buf,bufsize,off,i,i,state->dependent_source[i],state->dot_mapping[i],result);if(off<0)return -1; }
+            if(state->tex_mode[i]==NV2A_TEXMODE_DOT_RFLCT_DIFF) { off=emit_texture_dot(buf,bufsize,off,4,3,state->dependent_source[3],state->dot_mapping[3],"dot_stage2_next");if(off<0)return -1; }
+        }
+        if(state->tex_mode[i] == NV2A_TEXMODE_DOTPRODUCT) {
+            EMIT("float4 r_t%d=0;\n",i);
+        } else if(state->tex_mode[i] == NV2A_TEXMODE_DOT_RFLCT_DIFF) {
+            EMIT("float4 r_t%d=tex%d.SampleLevel(samp%d,%sfloat3(dot_stage1,dot_stage2,dot_stage2_next)%s,0);\n",i,i,i,state->dot_2d_mask&(1u<<i)?"dot_remap_2d(":"",state->dot_2d_mask&(1u<<i)?")":"");
+        } else if(state->tex_mode[i] == NV2A_TEXMODE_DOT_RFLCT_SPEC || state->tex_mode[i] == NV2A_TEXMODE_DOT_RFLCT_SPEC_CONST) {
+            EMIT("float3 reflection_normal=float3(dot_stage1,dot_stage2,dot_stage3),reflection_eye=%s; float3 reflection_direction=2*reflection_normal*dot(reflection_normal,reflection_eye)/dot(reflection_normal,reflection_normal)-reflection_eye; float4 r_t%d=tex%d.SampleLevel(samp%d,%sreflection_direction%s,0);\n",state->tex_mode[i]==NV2A_TEXMODE_DOT_RFLCT_SPEC_CONST?"bump_matrix[3].xyz":"float3(input.tc1.w,input.tc2.w,input.tc3.w)",i,i,i,state->dot_2d_mask&(1u<<i)?"dot_remap_2d(":"",state->dot_2d_mask&(1u<<i)?")":"");
+        } else if(state->tex_mode[i] == NV2A_TEXMODE_DOT_STR_CUBE) {
+            EMIT("float4 r_t%d=tex%d.SampleLevel(samp%d,%sfloat3(dot_stage1,dot_stage2,dot_stage3)%s,0);\n",i,i,i,state->dot_2d_mask&(1u<<i)?"dot_remap_2d(":"",state->dot_2d_mask&(1u<<i)?")":"");
+        } else if(state->tex_mode[i] == NV2A_TEXMODE_DOT_STR) {
+            if(state->volume_mask&(1u<<i))EMIT("float4 r_t%d=tex%d.SampleLevel(samp%d,float3(dot_stage1,dot_stage2,dot_stage3),0);\n",i,i,i);
+            else EMIT("float4 r_t%d=tex%d.SampleLevel(samp%d,float2(dot_stage1,dot_stage2)*bump_lum_coord[%d].zw,0);\n",i,i,i,i);
+        } else if(state->tex_mode[i] == NV2A_TEXMODE_DOT_ST) {
+            EMIT("float4 r_t%d=tex%d.SampleLevel(samp%d,float2(dot_stage%d,dot_stage%d)*bump_lum_coord[%d].zw,0);\n",i,i,i,i-1,i,i);
+        } else if (state->tex_mode[i] == NV2A_TEXMODE_PASSTHRU) {
             EMIT("float4 r_t%d=saturate(input.tc%d);\n",i,i);
         } else if (state->tex_mode[i] == NV2A_TEXMODE_CLIPPLANE) {
             for (j=0;j<4;j++) EMIT("if(input.tc%d[%d] %s 0) discard;\n",i,j,(state->clip_plane_mode>>(i*4+j))&1 ? ">=" : "<");
             EMIT("float4 r_t%d=0;\n",i);
+        } else if (state->tex_mode[i] == NV2A_TEXMODE_BUMP || state->tex_mode[i] == NV2A_TEXMODE_BUMP_LUM) {
+            EMIT("float2 bump_input%d=r_t%d.bg*255.0; bump_input%d=float2(bump_input%d.x>=128?bump_input%d.x-256:bump_input%d.x,bump_input%d.y>=128?bump_input%d.y-256:bump_input%d.y)/127.0;\n",i,state->dependent_source[i],i,i,i,i,i,i,i);
+            EMIT("float2 bump_delta%d=float2(dot(bump_matrix[%d].xz,bump_input%d),dot(bump_matrix[%d].yw,bump_input%d)); float4 r_t%d=tex%d.SampleLevel(samp%d,(input.tc%d.xy+bump_delta%d)*bump_lum_coord[%d].zw,0);\n",i,i,i,i,i,i,i,i,i,i,i);
+        } else if (state->tex_mode[i] == NV2A_TEXMODE_DEPENDENT_AR || state->tex_mode[i] == NV2A_TEXMODE_DEPENDENT_GB) {
+            EMIT("float4 r_t%d=tex%d.SampleLevel(samp%d,r_t%d.%s,0);\n",i,i,i,state->dependent_source[i],state->tex_mode[i]==NV2A_TEXMODE_DEPENDENT_AR?"ar":"gb");
         } else if (state->tex_mode[i] == NV2A_TEXMODE_NONE) {
             EMIT("float4 r_t%d=float4(0,0,0,1);\n", i);
+        } else if (state->tex_mode[i] == NV2A_TEXMODE_3D && (state->projected_mask & (1u << i))) {
+            EMIT("float4 r_t%d=tex%d.SampleLevel(samp%d,input.tc%d.xyz/input.tc%d.w,0);\n",i,i,i,i,i);
         } else if (state->tex_mode[i] == NV2A_TEXMODE_CUBEMAP || state->tex_mode[i] == NV2A_TEXMODE_3D) {
             EMIT("float4 r_t%d=tex%d.SampleLevel(samp%d,input.tc%d.xyz,0);\n", i,i,i,i);
         } else if (state->projected_mask & (1u << i)) {
@@ -526,8 +576,28 @@ int d3d8_combiners_generate_hlsl(const NV2ACombinerState *state,
         } else {
             EMIT("float4 r_t%d=tex%d.SampleLevel(samp%d,input.tc%d.xy,0);\n",i,i,i,i);
         }
+        if(state->luma_mask&(1u<<i))EMIT("r_t%d=float4(r_t%d.rrr,1);\n",i,i);
+        if(state->tex_mode[i] == NV2A_TEXMODE_BUMP_LUM)EMIT("r_t%d*=bump_lum_coord[%d].x*r_t%d.r+bump_lum_coord[%d].y;\n",i,i,state->dependent_source[i],i);
+        if(state->shadow_mask&(1u<<i)) {
+            if(state->shadow_function==0)EMIT("r_t%d=0;\n",i);
+            else if(state->shadow_function==7)EMIT("r_t%d=1;\n",i);
+            else {
+                static const char *comparison[]={"", "<", "==", "<=", ">", "!=", ">="};
+                if(state->shadow_function>7)return -1;
+                if(state->shadow_project_mask&(1u<<i))EMIT("float shadow_ref%d=clamp(input.tc%d.z/(input.tc%d.w!=0?input.tc%d.w:1),0,%u.0);\n",i,i,i,i,state->shadow_bits[i]==16?65535u:16777215u);
+                else EMIT("float shadow_ref%d=0;\n",i);
+                EMIT("r_t%d=(r_t%d.r %s shadow_ref%d)?float4(1,1,1,1):float4(0,0,0,0);\n",i,i,comparison[state->shadow_function],i);
+            }
+        }
         if (state->alpha_kill_mask & (1u << i)) EMIT("if(r_t%d.a == 0) discard;\n",i);
         if (state->tex_mode[i] != NV2A_TEXMODE_NONE) EMIT("if(alpha_only[%d]) r_t%d.rgb=1;\n",i,i);
+        if(state->color_key_mode[i]) {
+            EMIT("uint4 key_bytes%d=uint4(saturate(r_t%d)*255+0.5);uint key_pixel%d=(key_bytes%d.a<<24)|(key_bytes%d.r<<16)|(key_bytes%d.g<<8)|key_bytes%d.b; if((key_pixel%d&color_key_mask[%d])==(color_key[%d]&color_key_mask[%d])) {\n",i,i,i,i,i,i,i,i,i,i,i);
+            if(state->color_key_mode[i]==3) EMIT("discard;\n");
+            else if(state->color_key_mode[i]==2) EMIT("r_t%d=0;\n",i);
+            else EMIT("r_t%d.a=0;\n",i);
+            EMIT("}\n");
+        }
     }
     EMIT("float4 r_r0=float4(0,0,0,r_t0.a), r_r1=0, r_ef=0, r_v1r0sum=0;\n");
     for (i = 0; i < state->num_stages; ++i) {
@@ -639,6 +709,12 @@ static CombinerCacheEntry *get_combiner_shader(const NV2ACombinerState *state)
     memset(key.c0, 0, sizeof key.c0);
     memset(key.c1, 0, sizeof key.c1);
     key.final_c0 = key.final_c1 = 0;
+    for(int i=0;i<NV2A_MAX_COMBINER_STAGES;i++)
+        if(i>=key.num_stages)memset(&key.stages[i],0,sizeof key.stages[i]);
+    if(key.native_coordinates && !key.final_enabled) {
+        memset(key.final_input,0,sizeof key.final_input);
+        key.final_flags=0;
+    }
     state = &key;
     /* Adjacent unchanged keys reuse the existing cache entry directly.
      * Compare the original full key, including all nonconstant fields. */
@@ -824,7 +900,7 @@ BOOL d3d8_combiners_prepare_draw(void)
 {
     ID3D11DeviceContext *ctx;
     ID3D11PixelShader *ps;
-    NV2APSConstants constants;
+    NV2APSConstants constants={0};
     const DWORD *rs;
     int i;
 
@@ -880,6 +956,7 @@ BOOL d3d8_combiners_prepare_draw(void)
         for (i = 0; i < NV2A_MAX_TEXTURES; i++) {
             D3DFORMAT format = d3d8_base_format(d3d8_GetStageTexture(i));
             cb->alpha_only[i] = format == D3DFMT_A8 || format == D3DFMT_LIN_A8;
+            cb->color_key[i] = cb->color_key_mask[i] = 0;
         }
 
     }

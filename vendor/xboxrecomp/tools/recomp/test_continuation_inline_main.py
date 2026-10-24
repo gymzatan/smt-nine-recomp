@@ -89,7 +89,7 @@ int main(int argc,char **argv) {
 }
 '''
     (work/'memory.c').write_text(memory,encoding='utf-8')
-    libraries=list((root.parents[1]/'build/xboxrecomp/src').glob('*/*.lib'));assert len(libraries)==8
+    libraries=list((root.parents[1]/'build/native/xboxrecomp/src').glob('*/*.lib'));assert len(libraries)==8
     libraries.append(root.parents[1]/'build_dsp_jit/x86_64-pc-windows-msvc/release/dsp56300_emu_ffi.lib')
     monkeypatch=pytest.MonkeyPatch()
     try:
@@ -101,7 +101,7 @@ int main(int argc,char **argv) {
                 str(source),str(root/'src/kernel/kernel_hal.c'),str(root/'src/kernel/recomp_continuation.c'),
                 '/Fe:'+str(work/(mode+'.exe')),'/link','/OPT:REF',*[str(p) for p in libraries],
                 'kernel32.lib','user32.lib','gdi32.lib','advapi32.lib','ole32.lib','shell32.lib',
-                'd3d11.lib','dxgi.lib','dxguid.lib','d3dcompiler.lib','winmm.lib','xaudio2_8.lib',
+                'd3d11.lib','d3d12.lib','dxgi.lib','dxguid.lib','d3dcompiler.lib','winmm.lib','xaudio2_8.lib',
                 'xinput.lib','bcrypt.lib','ntdll.lib','userenv.lib','ws2_32.lib'],
                 cwd=work,capture_output=True,text=True,errors='replace')
             assert result.returncode==0,result.stdout+result.stderr

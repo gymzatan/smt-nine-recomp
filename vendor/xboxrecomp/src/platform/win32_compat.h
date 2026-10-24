@@ -135,6 +135,9 @@ HANDLE CreateEventW(LPSECURITY_ATTRIBUTES sa, BOOL manualReset, BOOL initialStat
 BOOL   SetEvent(HANDLE h);
 BOOL   ResetEvent(HANDLE h);
 BOOL   PulseEvent(HANDLE h);
+NTSTATUS NTAPI NtSetEvent(HANDLE h, PLONG previous);
+NTSTATUS NTAPI NtResetEvent(HANDLE h, PLONG previous);
+NTSTATUS NTAPI NtPulseEvent(HANDLE h, PLONG previous);
 
 /* ---- Semaphores ------------------------------------------------------- */
 HANDLE CreateSemaphoreA(LPSECURITY_ATTRIBUTES sa, LONG initial, LONG maximum, LPCSTR name);
