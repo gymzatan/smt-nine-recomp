@@ -4891,9 +4891,16 @@ typedef struct GuestUnwind {
     uint32_t address,phase,error_record,error_status,resume_target,resume_ebp;
 } GuestUnwind;
 static int bridge_unwind_registration_valid(uint32_t registration) {
-    uint32_t bottom=BRIDGE_MEM32(XBOX_FS_BASE+8),top=BRIDGE_MEM32(XBOX_FS_BASE+4);
+    /* The loader uses FS+4 for title TLS. Stack ownership already survives
+     * checkpoints separately; initial ESP is the exclusive upper bound. */
+    uint32_t bottom=XBOX_STACK_BASE,top=XBOX_STACK_TOP;
+    if(g_is_spawned_thread) {
+        uint64_t end=(uint64_t)g_thread_stack_top+16u;
+        if(!g_thread_stack_top || end>UINT32_MAX || end<XBOX_THREAD_STACK_SIZE)return 0;
+        bottom=(uint32_t)end-XBOX_THREAD_STACK_SIZE;top=g_thread_stack_top;
+    }
     if((registration&3u) || !bridge_va_mapped(registration,8))return 0;
-    if((!bottom || registration>=bottom) && (!top || (uint64_t)registration+8<=top))return 1;
+    if(registration>=bottom && (uint64_t)registration+8<=top)return 1;
     if(xbox_CurrentIrql()<DISPATCH_LEVEL || !BRIDGE_MEM32(XBOX_FS_BASE+0x58))return 0;
     top=BRIDGE_MEM32(XBOX_FS_BASE+0x5c);
     return top>=0x3000 && registration>=top-0x3000 && (uint64_t)registration+8<=top;

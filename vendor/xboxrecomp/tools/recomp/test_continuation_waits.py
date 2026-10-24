@@ -14,6 +14,7 @@ def native_waits(tmp_path_factory,request):
     root=Path(__file__).resolve().parents[2]
     work=tmp_path_factory.mktemp('continuation_wait')
     compiler=shutil.which('cl');assert compiler, 'requires existing MSVC environment'
+    seh_base=0x810000
     dpc=request.param=='dpc_wait'
     unwind=request.param.startswith('unwind_')
     unwind_collision=request.param=='unwind_collision'
@@ -22,6 +23,7 @@ def native_waits(tmp_path_factory,request):
     exception=request.param.startswith('exception_')
     exception_nested=request.param=='exception_nested'
     exception_divide=request.param=='exception_divide'
+    stack_top=0x800000 if dpc or unwind or exception else 0x80000
     signal_wait=request.param=='signal_wait'
     apc_wait=request.param.startswith('apc_')
     apc_post=request.param=='apc_post'
@@ -96,12 +98,12 @@ def native_waits(tmp_path_factory,request):
         program[0x11000]=bytes.fromhex('5589e5ff0500000200ff1524000200a304000200ff0508000200c9c3')
         program[0x11200]=bytes.fromhex('5589e5ff050c00020064a15c000000a31400020064a158000000a31800020031c9ff152800020068800002006a006a00ff1520000200ff0510000200c9c21000')
     if unwind:
-        target=0xffffffff if unwind_all else 0x81040 if unwind_collision else 0x81020
+        target=0xffffffff if unwind_all else seh_base+0x40 if unwind_collision else seh_base+0x20
         program[0x11000]=bytes.fromhex('5589e5ff05000002006878563412')+b'\x68'+(0 if unwind_synthetic else 0x20200).to_bytes(4,'little')+bytes.fromhex('68efbeadde')+b'\x68'+target.to_bytes(4,'little')+bytes.fromhex('ff1524000200a304000200ff0508000200c9c3')
         routine=bytes.fromhex('5589e5ff050c000200')
-        if request.param=='unwind_nested':routine+=bytes.fromhex('6878563412ff75086a006820100800ff1524000200')
+        if request.param=='unwind_nested':routine+=bytes.fromhex('6878563412ff75086a0068')+(seh_base+0x20).to_bytes(4,'little')+bytes.fromhex('ff1524000200')
         routine+=bytes.fromhex('dbe368800002006a006a00ff1520000200ff0510000200')
-        routine+=bytes.fromhex('8b4514c70020100800b803000000' if unwind_collision else 'b801000000')
+        routine+=(bytes.fromhex('8b4514c700')+(seh_base+0x20).to_bytes(4,'little')+bytes.fromhex('b803000000')) if unwind_collision else bytes.fromhex('b801000000')
         program[0x11200]=routine+bytes.fromhex('c9c3')
         program[0x11300]=bytes.fromhex('5589e5ff0514000200b801000000c9c3')
     if irp:
@@ -377,23 +379,23 @@ static void fixture_dpc_wait_call(void) {
 static void check(void) {
     if(DPC_WAIT) {
         assert(MEM32(0x2000c)==1 && MEM32(0x20010)==1 && MEM32(0x20014)>0x90000 && MEM32(0x20018)==MEM32(0x20014)-8);
-        assert(MEM32(XBOX_FS_BASE)==0x81000 && !MEM32(XBOX_FS_BASE+0x58) && MEM32(XBOX_FS_BASE+0x5c)==MEM32(0x20014));
+        assert(MEM32(XBOX_FS_BASE)==TEST_SEH_BASE && !MEM32(XBOX_FS_BASE+0x58) && MEM32(XBOX_FS_BASE+0x5c)==MEM32(0x20014));
         assert(xbox_CurrentIrql()==0);
     }
     if(APC_WAIT || UNWIND_WAIT)apc_float_state(0);
     if(UNWIND_WAIT) {
         assert(MEM32(0x2000c)==1 && MEM32(0x20010)==1);
         assert(MEM32(0x20014)==UNWIND_ALL);
-        assert(MEM32(XBOX_FS_BASE)==(UNWIND_ALL?0xffffffffu:UNWIND_COLLISION?0x81040:0x81020));
+        assert(MEM32(XBOX_FS_BASE)==(UNWIND_ALL?0xffffffffu:UNWIND_COLLISION?(TEST_SEH_BASE+0x40):(TEST_SEH_BASE+0x20)));
     }
     if(EXCEPTION_WAIT) {
         assert(MEM32(0x2000c)==1+EXCEPTION_NESTED && MEM32(0x20010)==1);
-        assert(BRIDGE_MEM32(XBOX_FS_BASE)==0x81000);
+        assert(BRIDGE_MEM32(XBOX_FS_BASE)==TEST_SEH_BASE);
         if(EXCEPTION_NESTED)assert(MEM32(0x20014)==1 && (MEM32(0x20018)&0x10));
     }
     assert(MEM32(0x20000)==1);
     if(TERMINATE || FILE_EXIT || FILE_CREATE_EXIT)assert(!MEM32(0x20008) && t_guest_terminated && g_eax==0x456 && MEM32(ke_current_thread()+0x120)==0x456);
-    else assert(g_esp==0x80000 && MEM32(0x20008)==1 && MEM32(0x20004)==EXPECTED_STATUS);
+    else assert(g_esp==TEST_STACK_TOP && MEM32(0x20008)==1 && MEM32(0x20004)==EXPECTED_STATUS);
     assert(!recomp_cont_active() && !t_kernel_wait && t_dispatch_depth==0);
     if(APC_WAIT || IRP_CALLBACK || SYNC_REQUEST || TERMINATE || DEVICE_DELETE || CONTROL_REQUEST || FILE_DEVICE || FILE_CREATE)assert(MEM32(0x2000c)==1 && MEM32(0x20010)==1);
     if(DEVICE_DELETE)assert(!ke_object_slot(MEM32(0x20098)));
@@ -629,7 +631,7 @@ int main(int argc,char **argv) {
         g_slot_ordinals[2]=161;g_slot_bridges[2]=bridge_KfLowerIrql;g_slot_arg_bytes[2]=0;
         MEM32(0x20028)=KERNEL_VA_BASE+8;
         if(!restored) {
-            MEM32(XBOX_FS_BASE)=0x81000;MEM32(XBOX_FS_BASE+4)=0x90000;MEM32(XBOX_FS_BASE+8)=0x60000;
+            MEM32(XBOX_FS_BASE)=TEST_SEH_BASE;
             MEM32(0x200cc)=0x11200;MEM32(0x200d0)=0;
         }
     }
@@ -638,10 +640,10 @@ int main(int argc,char **argv) {
         MEM32(0x20024)=KERNEL_VA_BASE+4;
         if(!restored) {
             apc_float_state(1);
-            MEM32(XBOX_FS_BASE)=0x81000;MEM32(XBOX_FS_BASE+4)=0x90000;MEM32(XBOX_FS_BASE+8)=0x60000;
-            MEM32(0x81000)=0x81020;MEM32(0x81004)=0x11200;
-            MEM32(0x81020)=UNWIND_ALL?0xffffffffu:0x81040;MEM32(0x81024)=0x11300;
-            MEM32(0x81040)=0xffffffffu;MEM32(0x81044)=0x11300;
+            MEM32(XBOX_FS_BASE)=TEST_SEH_BASE;
+            MEM32(TEST_SEH_BASE)=(TEST_SEH_BASE+0x20);MEM32((TEST_SEH_BASE+4))=0x11200;
+            MEM32((TEST_SEH_BASE+0x20))=UNWIND_ALL?0xffffffffu:(TEST_SEH_BASE+0x40);MEM32((TEST_SEH_BASE+0x24))=0x11300;
+            MEM32((TEST_SEH_BASE+0x40))=0xffffffffu;MEM32((TEST_SEH_BASE+0x44))=0x11300;
             memset(XBOX_TO_NATIVE(0x20200),0,0x50);MEM32(0x20200)=0x11111111;
         }
     }
@@ -649,8 +651,8 @@ int main(int argc,char **argv) {
         g_slot_ordinals[1]=302;g_slot_bridges[1]=bridge_RtlRaiseException;g_slot_arg_bytes[1]=4;
         MEM32(0x20024)=KERNEL_VA_BASE+4;
         if(!restored) {
-            MEM32(XBOX_FS_BASE)=0x81000;MEM32(XBOX_FS_BASE+4)=0x90000;MEM32(XBOX_FS_BASE+8)=0x60000;
-            MEM32(0x81000)=0xffffffffu;MEM32(0x81004)=0x11200;
+            MEM32(XBOX_FS_BASE)=TEST_SEH_BASE;
+            MEM32(TEST_SEH_BASE)=0xffffffffu;MEM32((TEST_SEH_BASE+4))=0x11200;
             memset(XBOX_TO_NATIVE(0x20200),0,0x100);MEM32(0x20200)=0x11111111;MEM32(0x20280)=0x22222222;
         }
     }
@@ -660,7 +662,7 @@ int main(int argc,char **argv) {
         ke_initialize_apc(apc,ke_current_thread(),KERNEL_POOL_FREE_APC,KERNEL_POOL_FREE_APC,0x11200,APC_MODE,0);
         assert(ke_insert_apc(apc,0,0));
     }
-    if(restored) load();else {g_esp=0x80000;PUSH32(g_esp,0x76543210);}
+    if(restored) load();else {g_esp=TEST_STACK_TOP;PUSH32(g_esp,0x76543210);}
     saving=!strcmp(argv[1],"save") || !strcmp(argv[1],"roundtrip");cold=!strcmp(argv[1],"save");
     HANDLE completing=(SYNC_PENDING || QUEUE_READY || TERMINATE_IRP || CONTROL_EXTERNAL || FILE_LIFECYCLE_PENDING || FILE_CREATE_PENDING)?CreateThread(NULL,0,complete_pending,NULL,0,NULL):NULL;
     began=GetTickCount64();run_guest(restored);check();
@@ -729,6 +731,7 @@ int main(int argc,char **argv) {
              f'#define APC_DEPTH {(2 if dpc or unwind else 1 if exception_divide else 3 if exception_nested else 2 if exception else 1 if create_pending or file_pending or file_packet and not file_cancel else int(not terminate_irp) if natural_exit else 2 if request.param=="apc_wait" or device_delete or file_device or file_create or control_dispatch or control_native or irp or sync and not sync_pending or terminate and not terminate_irp else 1)}\n'
              f'#define APC_MODE {0 if apc_post or apc_loop else 1}\n'
              f'#define EXPECTED_STATUS {0x12345678 if unwind else 5 if exception_divide else 42 if exception else 7 if file_jump else 0xc0000010 if irp_invalid else 192 if request.param=="apc_wait" else (0 if completion else 0x28200) if queue_ready else 258 if multiple or signal_wait or queue else 0}\n')
+    defines+=f'#define TEST_STACK_TOP 0x{stack_top:x}u\n#define TEST_SEH_BASE 0x{seh_base:x}u\n'
     defines+='#define TEST_XBE '+json.dumps(str(root/'tools/conformance/test.xbe'))+'\n'
     defines+='#define TEST_ROOT '+json.dumps(str(work))+'\n'
     libraries=list((root.parents[1]/'build/native/xboxrecomp/src').glob('*/*.lib'));assert len(libraries)==8

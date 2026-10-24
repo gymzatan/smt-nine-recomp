@@ -393,6 +393,9 @@ extern RECOMP_TLS uint32_t g_fs_base;
 /** Initial ESP value (top of stack, 16-byte aligned). */
 #define XBOX_STACK_TOP      (XBOX_STACK_BASE + XBOX_STACK_SIZE - 16)
 
+/** Allocation size used by xbox_AllocThreadStack and its owning thread. */
+#define XBOX_THREAD_STACK_SIZE  (512 * 1024)
+
 /* ================================================================
  * Worker stack slices (host-tick-driven titles)
  * ================================================================

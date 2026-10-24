@@ -253,10 +253,10 @@ static void seh_probe(void) {
     }
     assert(BRIDGE_MEM32(record+12)==seh_address && BRIDGE_MEM32(context+0x224)==seh_address);
     assert(BRIDGE_MEM32(context+0x230)==seh_stack && BRIDGE_MEM32(context+0x21c)==123);
-    assert(BRIDGE_MEM32(context+0x210)==0xabcdef && BRIDGE_MEM32(context+0x220)==0x81000);
+    assert(BRIDGE_MEM32(context+0x210)==0xabcdef && BRIDGE_MEM32(context+0x220)==0x810000);
     assert(BRIDGE_MEM32(context+0x22c)==0x202);check_float_context(context);
-    if(seh_mode==2 && registration==0x82000) {
-        BRIDGE_MEM32(dispatcher)=0x82020;g_eax=2;
+    if(seh_mode==2 && registration==0x820000) {
+        BRIDGE_MEM32(dispatcher)=0x820020;g_eax=2;
     } else {
         if(seh_mode==2)assert(BRIDGE_MEM32(record+4)&0x10);
         BRIDGE_MEM32(context+0x21c)=456;BRIDGE_MEM32(context+0x218)=7;
@@ -283,7 +283,7 @@ static void dpc_unwind_stack_probe(void) {
 static void dpc_stack_contract_probe(void) {
     uint32_t top=MEM32(XBOX_FS_BASE+0x5c),saved=g_esp;
     assert(top && g_esp==top-28 && MEM32(XBOX_FS_BASE)==0xffffffffu);
-    assert(MEM32(XBOX_FS_BASE+0x58)==top-8 && MEM32(top-4)==0x80000 && xbox_CurrentIrql()==2);
+    assert(MEM32(XBOX_FS_BASE+0x58)==top-8 && MEM32(top-4)==0x800000 && xbox_CurrentIrql()==2);
     bridge_KeIsExecutingDpc();assert(g_eax==1);
     assert(MEM32(g_esp+4)==0x29000 && MEM32(g_esp+8)==0x1234);
     assert(MEM32(g_esp+12)==0x5678 && MEM32(g_esp+16)==0x9abc);
@@ -318,7 +318,7 @@ static void unwind_contract_probe(void) {
     assert(MEM32(guard+4)==KERNEL_UNWIND_COLLISION_GUARD && MEM32(guard+8)==registration);
     assert(MEM32(record+4)==(unwind_mode==7?6:2));
     assert(context && dispatcher && MEM32(context)==0x10007 && MEM32(context+0x21c)==0x456);
-    assert(MEM32(context+0x224)==0x12345 && MEM32(context+0x230)==0x80010);
+    assert(MEM32(context+0x224)==0x12345 && MEM32(context+0x230)==0x800010);
     if(!unwind_calls)check_float_context(context);
     uint32_t guard_args[]={record,guard,context,dispatcher};
     assert(ke_call_guest(KERNEL_UNWIND_COLLISION_GUARD,guard_args,4,1)==3);
@@ -328,13 +328,24 @@ static void unwind_contract_probe(void) {
     assert(MEM32(dispatcher)==0xabcdef);MEM32(record+4)=flags;
     if(unwind_mode==10) {
         uint32_t top=g_esp;g_esp-=16;MEM32(g_esp-4)=0x12345;
-        MEM32(g_esp)=0x82020;MEM32(g_esp+4)=0;MEM32(g_esp+8)=record;MEM32(g_esp+12)=0x789;
-        bridge_RtlUnwind();g_esp+=16;assert(g_esp==top && MEM32(XBOX_FS_BASE)==0x82020);
+        MEM32(g_esp)=0x820020;MEM32(g_esp+4)=0;MEM32(g_esp+8)=record;MEM32(g_esp+12)=0x789;
+        bridge_RtlUnwind();g_esp+=16;assert(g_esp==top && MEM32(XBOX_FS_BASE)==0x820020);
     }
     ++unwind_calls;MEM32(context+0x210)=0x98765;MEM32(context+0x218)=9;
     MEM32(context+0x22c)=0x246;edit_float_context(context);
-    if(unwind_mode==2) {assert(unwind_calls==1);MEM32(dispatcher)=0x82020;g_eax=3;}
+    if(unwind_mode==2) {assert(unwind_calls==1);MEM32(dispatcher)=0x820020;g_eax=3;}
     else g_eax=unwind_mode==5?0:1;
+    g_esp+=20;
+}
+
+static unsigned owned_stack_dispatch_calls,owned_stack_unwind_calls;
+static uint32_t owned_stack_registration;
+static void owned_stack_probe(void) {
+    uint32_t record=MEM32(g_esp+4),registration=MEM32(g_esp+8);
+    assert(registration==owned_stack_registration && bridge_unwind_registration_valid(registration));
+    assert(MEM32(g_esp+12) && MEM32(g_esp+16));
+    if(MEM32(record+4)&2u){++owned_stack_unwind_calls;g_eax=1;}
+    else {++owned_stack_dispatch_calls;g_eax=0;}
     g_esp+=20;
 }
 
@@ -350,6 +361,7 @@ static void device_delete_probe(void) {
     ++device_delete_calls;xbox_ObfDereferenceObject(XBOX_TO_NATIVE(device));g_esp+=8;
 }
 recomp_func_t recomp_lookup(uint32_t va) {
+    if(va==0x1b500)return owned_stack_probe;
     if(va==0x1b400)return timer_scan_rearm_probe;
     if(va==0x1b100)return dpc_stack_contract_probe;
     if(va==0x1b200)return dpc_unwind_stack_probe;
@@ -453,10 +465,22 @@ static DWORD WINAPI event_wait_probe(LPVOID multiple) {
     pause_consumed=1;event_wait_call((int)(uintptr_t)multiple,0x90000);
     assert(g_eax==0);return 0;
 }
-static void setup(const char *path,const char *directory) {
+static void setup(const char *path,const char *directory,int with_tls) {
     FILE *file=fopen(path,"rb");assert(file);fseek(file,0,SEEK_END);
     long size=ftell(file);rewind(file);void *xbe=malloc(size);assert(xbe);
-    assert(fread(xbe,size,1,file)==1 && fclose(file)==0 && xbox_MemoryLayoutInit(xbe,size));free(xbe);
+    assert(fread(xbe,size,1,file)==1 && fclose(file)==0);
+    if(with_tls) {
+        /* Existing conformance XBE leaves this header area unused. The real
+         * loader rounds the16-byte template into its20-byte TLS block. */
+        uint32_t *header=xbe;assert(size>=0x1000 && header[0x104/4]==0x10000 && header[0x108/4]>=0x1000);
+        assert(!header[0x12c/4]);
+        for(unsigned at=0x700;at<0x764;at++)assert(!((uint8_t *)xbe)[at]);
+        header[0x12c/4]=0x10700;
+        uint32_t tls[]={0x10740,0x10750,0x10760,0,0,0};
+        memcpy((uint8_t *)xbe+0x700,tls,sizeof tls);
+        memset((uint8_t *)xbe+0x740,0,16);
+    }
+    assert(xbox_MemoryLayoutInit(xbe,size));free(xbe);
     xbox_path_init(directory,directory);_putenv_s("RECOMP_GUEST_LOCK","1");assert(guest_cpu_enabled());
     assert(xbox_kernel_init_devices()==0);
     XBOX_ANSI_STRING drive={6,6,"\\??\\D:"},device={14,14,"\\Device\\CdRom0"};
@@ -601,7 +625,7 @@ static void path_notification(const char *path) {
     assert(!strcmp(path,"R:\\Media\\asset.bin"));++path_notifications;
 }
 int main(int argc,char **argv) {
-    assert(argc==7);setup(argv[2],argv[6]);
+    assert(argc==7);setup(argv[2],argv[6],!strcmp(argv[1],"tls_owned_stack"));
 
 
     if(!strcmp(argv[1],"volume_dismount_optical") || !strcmp(argv[1],"volume_dismount_disk")) {
@@ -1519,16 +1543,66 @@ int main(int argc,char **argv) {
         assert(!bridge_resolve_handle(token) && !t_kernel_wait && !recomp_cont_active());
         guest_cpu_part();cleanup();return 0;
     }
+    if(!strcmp(argv[1],"tls_owned_stack")) {
+        guest_cpu_join();XboxGuestRegisters original;xbox_CaptureGuestRegisters(&original);
+        uint32_t main_tls=MEM32(XBOX_FS_BASE+4);assert(main_tls==0x770014u);
+        assert(MEM32(XBOX_FS_BASE+8)==XBOX_STACK_BASE && !g_is_spawned_thread);
+        uint32_t worker_top=xbox_AllocThreadStack(),peer_top=xbox_AllocThreadStack();
+        uint32_t worker_tib=xbox_AllocThreadTib();assert(worker_top && peer_top && worker_tib);
+        uint32_t worker_tls=MEM32(worker_tib+4);assert(worker_tls==worker_tib+0x60+20);
+        for(unsigned worker=0;worker<2;worker++) {
+            if(worker){g_fs_base=worker_tib;g_is_spawned_thread=1;g_thread_stack_top=worker_top;}
+            uint32_t bottom=worker?worker_top+16-512u*1024u:XBOX_STACK_BASE;
+            uint32_t top=worker?worker_top:XBOX_STACK_TOP;
+            uint32_t tls=worker?worker_tls:main_tls;
+            assert(MEM32(XBOX_FS_BASE+4)==tls);
+            uint32_t registration=top-0x200;
+            int valid=bridge_unwind_registration_valid(registration);
+            fprintf(stderr,"[TLS_STACK] worker=%u fs4=%08X fs8=%08X owned=%08X..%08X registration=%08X valid=%d\n",
+                    worker,MEM32(XBOX_FS_BASE+4),MEM32(XBOX_FS_BASE+8),bottom,top,registration,valid);
+            assert(valid);
+            assert(bridge_unwind_registration_valid(bottom));
+            assert(bridge_unwind_registration_valid(top-8));
+            assert(!bridge_unwind_registration_valid(bottom-4));
+            assert(!bridge_unwind_registration_valid(top-4));
+            assert(!bridge_unwind_registration_valid(top-7));
+            assert(!bridge_unwind_registration_valid(peer_top-0x100));
+            assert(!bridge_unwind_registration_valid(worker?0x820000u:worker_top-0x100));
+            if(worker) {
+                g_thread_stack_top=0;assert(!bridge_unwind_registration_valid(worker_top-0x100));
+                g_thread_stack_top=16;assert(!bridge_unwind_registration_valid(worker_top-0x100));
+                g_thread_stack_top=worker_top;
+            }
+            g_esp=bottom+0x1000;g_ebp=g_seh_ebp=bottom+0x1800;
+            owned_stack_registration=top-0x200;
+            MEM32(owned_stack_registration)=0xffffffffu;MEM32(owned_stack_registration+4)=0x1b500;
+            MEM32(XBOX_FS_BASE)=owned_stack_registration;
+            memset(XBOX_TO_NATIVE(0x60000),0,0x50);MEM32(0x60000)=0xc0000094u;
+            XboxGuestRegisters registers;xbox_CaptureGuestRegisters(&registers);
+            bridge_capture_context(0x61000,&registers,0x12345,g_esp);
+            assert(bridge_dispatch_exception(0x60000,0x61000));
+            assert(owned_stack_dispatch_calls==worker+1 && MEM32(XBOX_FS_BASE)==owned_stack_registration);
+            MEM32(0x60000)=0x11111111;MEM32(0x60004)=0;
+            MEM32(g_esp-4)=0x12345;MEM32(g_esp)=0xffffffffu;MEM32(g_esp+4)=0;
+            MEM32(g_esp+8)=0x60000;MEM32(g_esp+12)=0;
+            bridge_RtlUnwind();assert(owned_stack_unwind_calls==worker+1 && MEM32(XBOX_FS_BASE)==0xffffffffu);
+            assert(MEM32(XBOX_FS_BASE+4)==tls);
+        }
+        g_is_spawned_thread=0;g_thread_stack_top=0;assert(xbox_RestoreGuestRegisters(&original));
+        assert(MEM32(XBOX_FS_BASE+4)==main_tls);
+        xbox_FreeThreadStack(worker_top);xbox_FreeThreadStack(peer_top);xbox_HeapFree(worker_tib);
+        guest_cpu_part();cleanup();return 0;
+    }
     if(!strcmp(argv[1],"dpc_stack_contract")) {
-        guest_cpu_join();g_esp=0x80000;g_ebp=0x81000;g_seh_ebp=0x81000;
-        MEM32(XBOX_FS_BASE)=0x82000;MEM32(XBOX_FS_BASE+4)=0x90000;MEM32(XBOX_FS_BASE+8)=0x70000;
+        guest_cpu_join();g_esp=0x800000;g_ebp=0x810000;g_seh_ebp=0x810000;
+        MEM32(XBOX_FS_BASE)=0x820000;
         MEM32(XBOX_FS_BASE+0x58)=0;
         uint32_t standing=MEM32(XBOX_FS_BASE+0x5c);assert(standing);
         MEM32(0x2900c)=0x1b100;MEM32(0x29010)=0x1234;
         for(unsigned i=0;i<2;i++) {
             assert(kernel_run_dpc(0x29000,0x5678,0x9abc));
-            assert(g_esp==0x80000 && g_ebp==0x81000 && g_seh_ebp==0x81000);
-            assert(MEM32(XBOX_FS_BASE)==0x82000 && !MEM32(XBOX_FS_BASE+0x58) && MEM32(XBOX_FS_BASE+0x5c)==standing);
+            assert(g_esp==0x800000 && g_ebp==0x810000 && g_seh_ebp==0x810000);
+            assert(MEM32(XBOX_FS_BASE)==0x820000 && !MEM32(XBOX_FS_BASE+0x58) && MEM32(XBOX_FS_BASE+0x5c)==standing);
             assert(xbox_CurrentIrql()==0);bridge_KeIsExecutingDpc();assert(!g_eax);
         }
         assert(dpc_stack_calls==2 && dpc_unwind_calls==2);
@@ -1541,32 +1615,32 @@ int main(int argc,char **argv) {
         guest_cpu_part();cleanup();return 0;
     }
     if(!strncmp(argv[1],"unwind_",7)) {
-        guest_cpu_join();g_esp=0x80000;g_ebp=0x81000;g_eax=123;g_ecx=7;g_ebx=0xabcdef;g_eflags=0x202;
+        guest_cpu_join();g_esp=0x800000;g_ebp=0x810000;g_eax=123;g_ecx=7;g_ebx=0xabcdef;g_eflags=0x202;
         XboxGuestRegisters fp;xbox_CaptureGuestRegisters(&fp);double initial=2.5;
         memcpy(&fp.fp_stack[3],&initial,8);fp.fp_top=3;fp.fp_control_word=0x27f;
         fp.fp_status_word=1;fp.fp_cc=0x100;fp.fp_tag_word=0xff3f;fp.fp_opcode=0x123;
         fp.fp_instruction_pointer=0x223344;fp.fp_data_pointer=0x556677;fp.mxcsr=0x3f80;
         for(unsigned i=0;i<8;i++)memset(fp.xmm[i],0x90+i,16);assert(xbox_RestoreGuestRegisters(&fp));
-        MEM32(XBOX_FS_BASE)=0x82000;MEM32(XBOX_FS_BASE+4)=0x90000;MEM32(XBOX_FS_BASE+8)=0x70000;
-        MEM32(0x82000)=0x82020;MEM32(0x82004)=0x1b000;
-        MEM32(0x82020)=0x82040;MEM32(0x82024)=0x1b000;
-        MEM32(0x82040)=0xffffffffu;MEM32(0x82044)=0x1b000;
+        MEM32(XBOX_FS_BASE)=0x820000;
+        MEM32(0x820000)=0x820020;MEM32(0x820004)=0x1b000;
+        MEM32(0x820020)=0x820040;MEM32(0x820024)=0x1b000;
+        MEM32(0x820040)=0xffffffffu;MEM32(0x820044)=0x1b000;
         memset(XBOX_TO_NATIVE(0x60000),0,0x50);MEM32(0x60000)=0x11111111;
-        uint32_t target=0x82020;
+        uint32_t target=0x820020;
         if(!strcmp(argv[1],"unwind_nested"))unwind_mode=10;
         if(!strcmp(argv[1],"unwind_synthetic"))unwind_mode=1;
-        if(!strcmp(argv[1],"unwind_collision")){unwind_mode=2;target=0x82040;}
-        if(!strcmp(argv[1],"unwind_bad_target")){unwind_mode=3;target=0x81ff0;}
-        if(!strcmp(argv[1],"unwind_bad_stack")){unwind_mode=4;MEM32(XBOX_FS_BASE)=0x82002;}
+        if(!strcmp(argv[1],"unwind_collision")){unwind_mode=2;target=0x820040;}
+        if(!strcmp(argv[1],"unwind_bad_target")){unwind_mode=3;target=0x81fff0;}
+        if(!strcmp(argv[1],"unwind_bad_stack")){unwind_mode=4;MEM32(XBOX_FS_BASE)=0x820002;}
         if(!strcmp(argv[1],"unwind_bad_disposition"))unwind_mode=5;
-        if(!strcmp(argv[1],"unwind_missing_target")){unwind_mode=6;target=0x82010;}
-        if(!strcmp(argv[1],"unwind_exit")){unwind_mode=7;target=0;MEM32(0x82020)=0xffffffffu;}
-        if(!strcmp(argv[1],"unwind_all")){unwind_mode=8;target=0xffffffffu;MEM32(0x82020)=0xffffffffu;}
+        if(!strcmp(argv[1],"unwind_missing_target")){unwind_mode=6;target=0x820010;}
+        if(!strcmp(argv[1],"unwind_exit")){unwind_mode=7;target=0;MEM32(0x820020)=0xffffffffu;}
+        if(!strcmp(argv[1],"unwind_all")){unwind_mode=8;target=0xffffffffu;MEM32(0x820020)=0xffffffffu;}
         if(!strcmp(argv[1],"unwind_empty")){unwind_mode=9;target=0xffffffffu;MEM32(XBOX_FS_BASE)=0xffffffffu;}
         MEM32(g_esp)=target;MEM32(g_esp+4)=0xdeadbeef;MEM32(g_esp+8)=unwind_mode==1?0:0x60000;
         MEM32(g_esp+12)=0x456;fixture_import(312);
         assert(unwind_mode<3 || unwind_mode>=8);
-        assert(MEM32(XBOX_FS_BASE)==target && g_eax==0x456 && g_esp==0x80000);
+        assert(MEM32(XBOX_FS_BASE)==target && g_eax==0x456 && g_esp==0x800000);
         assert(unwind_calls==(unwind_mode==9?0:unwind_mode==8?2:1));
         if(unwind_mode!=9) {
             xbox_CaptureGuestRegisters(&fp);double changed;memcpy(&changed,&fp.fp_stack[5],8);
@@ -1579,33 +1653,32 @@ int main(int argc,char **argv) {
     if(!strcmp(argv[1],"cpu_exception") || !strcmp(argv[1],"raise_exception") ||
        !strcmp(argv[1],"nested_exception") || !strcmp(argv[1],"noncontinuable_exception") ||
        !strcmp(argv[1],"capture_context")) {
-        guest_cpu_join();g_esp=0x80000;g_ebp=0x81000;g_eax=123;g_ebx=0xabcdef;g_eflags=0x202;
+        guest_cpu_join();g_esp=0x800000;g_ebp=0x810000;g_eax=123;g_ebx=0xabcdef;g_eflags=0x202;
         XboxGuestRegisters fp;xbox_CaptureGuestRegisters(&fp);double initial=2.5;
         memcpy(&fp.fp_stack[3],&initial,8);fp.fp_top=3;fp.fp_control_word=0x27f;
         fp.fp_status_word=1;fp.fp_cc=0x100;fp.fp_tag_word=0xff3f;fp.fp_opcode=0x123;
         fp.fp_instruction_pointer=0x223344;fp.fp_data_pointer=0x556677;fp.mxcsr=0x3f80;
         for(unsigned i=0;i<8;i++)memset(fp.xmm[i],0x90+i,16);
         assert(xbox_RestoreGuestRegisters(&fp));
-        BRIDGE_MEM32(XBOX_FS_BASE)=0x82000;
-        BRIDGE_MEM32(XBOX_FS_BASE+4)=0x90000;BRIDGE_MEM32(XBOX_FS_BASE+8)=0x70000;
-        MEM32(0x82000)=0xffffffffu;MEM32(0x82004)=0x1a000;
+        BRIDGE_MEM32(XBOX_FS_BASE)=0x820000;
+        MEM32(0x820000)=0xffffffffu;MEM32(0x820004)=0x1a000;
         if(!strcmp(argv[1],"capture_context")) {
-            MEM32(0x81000)=0x83000;MEM32(0x81004)=0x123456;
+            MEM32(0x810000)=0x830000;MEM32(0x810004)=0x123456;
             memset(XBOX_TO_NATIVE(0x60000),0xaa,0x250);MEM32(g_esp)=0x60000;
             fixture_import(265);
             assert(MEM32(0x6021c)==123 && MEM32(0x60210)==0xabcdef);
-            assert(MEM32(0x60220)==0x83000 && MEM32(0x60224)==0x123456 && MEM32(0x60230)==0x81008);
+            assert(MEM32(0x60220)==0x830000 && MEM32(0x60224)==0x123456 && MEM32(0x60230)==0x810008);
             check_float_context(0x60000);assert(MEM32(0x60240)==0xaaaaaaaa);guest_cpu_part();return 0;
         }
-        seh_address=0x12345;seh_stack=0x80000;
+        seh_address=0x12345;seh_stack=0x800000;
         if(!strcmp(argv[1],"raise_exception")) {
-            seh_mode=1;seh_stack=0x80004;
+            seh_mode=1;seh_stack=0x800004;
             memset(XBOX_TO_NATIVE(0x60000),0,0x50);MEM32(0x60000)=0xc0000094u;
             MEM32(g_esp)=0x60000;fixture_import(302);
             assert(seh_calls==1 && g_eax==456 && g_ecx==7 && g_eflags==0x246);
         } else {
             if(!strcmp(argv[1],"nested_exception")) {
-                seh_mode=2;MEM32(0x82000)=0x82020;MEM32(0x82020)=0xffffffffu;MEM32(0x82024)=0x1a000;
+                seh_mode=2;MEM32(0x820000)=0x820020;MEM32(0x820020)=0xffffffffu;MEM32(0x820024)=0x1a000;
             }
             if(!strcmp(argv[1],"noncontinuable_exception")) {
                 seh_mode=3;memset(XBOX_TO_NATIVE(0x60000),0,0x50);
@@ -2717,6 +2790,13 @@ def test_original_rtl_unwind_context_chain_and_dispositions(native_objects,tmp_p
     result=subprocess.run([str(executable),mode,str(image),'-','-','-',str(tmp_path)],capture_output=True,text=True,errors='replace')
     assert result.returncode==(5 if code else 0),result.stdout+result.stderr
     if code:assert code in result.stderr,result.stderr
+
+
+def test_original_tls_owned_stack_dispatch_and_unwind(native_objects,tmp_path):
+    executable,image=native_objects
+    result=subprocess.run([str(executable),'tls_owned_stack',str(image),'-','-','-',str(tmp_path)],
+                          capture_output=True,text=True,errors='replace',timeout=30)
+    assert result.returncode==0,result.stdout+result.stderr
 
 
 def test_original_dpc_stack_and_unwind_extension(native_objects,tmp_path):
