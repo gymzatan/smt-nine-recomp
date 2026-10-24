@@ -158,20 +158,34 @@ static DWORD xbox_share_to_win32(ULONG Share)
 BOOL xbox_FileObjectPath(PXBOX_OBJECT_ATTRIBUTES ObjectAttributes,
                                WCHAR* win_path, DWORD buf_size)
 {
-    const char* xbox_path = get_xbox_path(ObjectAttributes);
-    if (!xbox_path)
+    const XBOX_ANSI_STRING *name=ObjectAttributes?ObjectAttributes->ObjectName:NULL;
+    if (!name || !name->Buffer)
         return FALSE;
-    if (ObjectAttributes->RootDirectory && xbox_path[0] != '\\' &&
-        !(xbox_path[0] && xbox_path[1] == ':')) {
+    if (ObjectAttributes->RootDirectory && (!name->Length || name->Buffer[0] != '\\') &&
+        !(name->Length>=2 && name->Buffer[1] == ':')) {
         /* XDeleteSaveGame opens each child relative to its save directory. */
         DWORD used = GetFinalPathNameByHandleW(ObjectAttributes->RootDirectory,
             win_path, buf_size, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-        if (!used || used >= buf_size || used + 1 >= buf_size) return FALSE;
+        if (!used || used >= buf_size) return FALSE;
+        /* Return to ordinary Win32 DOS syntax before appending guest names.
+         * The XDK save path contains repeated separators, which the extended
+         * \\?\ syntax deliberately does not normalize. */
+        if (!wcsncmp(win_path,L"\\\\?\\UNC\\",8)) {
+            memmove(win_path+2,win_path+8,(used-7)*sizeof *win_path);used-=6;
+        } else if (!wcsncmp(win_path,L"\\\\?\\",4)) {
+            memmove(win_path,win_path+4,(used-3)*sizeof *win_path);used-=4;
+        }
+        if (!name->Length) return TRUE;
+        if (used + 1 >= buf_size) return FALSE;
         if (win_path[used - 1] != L'\\') win_path[used++] = L'\\';
-        int count = MultiByteToWideChar(CP_ACP, 0, xbox_path, -1,
-            win_path + used, (int)(buf_size - used));
-        return count != 0;
+        int count = MultiByteToWideChar(CP_ACP, 0, name->Buffer, name->Length,
+            win_path + used, (int)(buf_size - used - 1));
+        if (!count) return FALSE;
+        win_path[used+count]=0;
+        return TRUE;
     }
+    const char *xbox_path=get_xbox_path(ObjectAttributes);
+    if(!xbox_path)return FALSE;
     return xbox_translate_path(xbox_path, win_path, buf_size);
 }
 
@@ -198,11 +212,14 @@ NTSTATUS __stdcall xbox_NtCreateFile(
     if(prepared<0)return prepared;
 
     if (volume || (CreateOptions & XBOX_FILE_DIRECTORY_FILE)) {
-        if (!volume && (CreateDisposition == XBOX_FILE_CREATE || CreateDisposition == XBOX_FILE_OPEN_IF))
-            CreateDirectoryW(win_path, NULL);
-        h = CreateFileW(win_path, xbox_access_to_win32(DesiredAccess),
+        BOOL open_directory = TRUE;
+        if (!volume && (CreateDisposition == XBOX_FILE_CREATE || CreateDisposition == XBOX_FILE_OPEN_IF)) {
+            if (!CreateDirectoryW(win_path, NULL))
+                open_directory = CreateDisposition == XBOX_FILE_OPEN_IF && GetLastError() == ERROR_ALREADY_EXISTS;
+        }
+        h = open_directory ? CreateFileW(win_path, xbox_access_to_win32(DesiredAccess),
             xbox_share_to_win32(ShareAccess), NULL, OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS, NULL);
+            FILE_FLAG_BACKUP_SEMANTICS, NULL) : INVALID_HANDLE_VALUE;
     } else {
         if (CreateOptions & XBOX_FILE_NO_INTERMEDIATE_BUFFERING)
             flags_and_attrs |= FILE_FLAG_NO_BUFFERING;

@@ -36,6 +36,8 @@ The selection countdown's textured frame and its plain branch are rebuilt by `11
 
 The original sprite renderer `145A39` switches to `1450CF` during the strip animation used to show and hide portraits. Its draw return `1452C5` submits 22 vertices rather than the settled four-vertex quad at `14617A`. Every animated vertex uses the same centered horizontal mapping as the settled portrait. Y, depth, RHW, colors and UVs retain the original animation values. This keeps the portrait's proportions consistent through entry, exit and speaker changes.
 
+For the settled textured quad, the full-screen exception requires both the original screen width and height. A standing portrait can reach or exceed the screen height without covering its width; it retains the centered horizontal mapping and the existing atlas endpoint correction. Whole-screen artwork keeps its original framing. Production-helper checks cover narrow 480- and 512-pixel-high quads alongside a 640×480 whole-screen quad at both display aspects; the reported Miranda scene has not been replayed.
+
 Displayed checks start a new game and record continuous frames of the mother and sister appearing, changing speakers and disappearing, followed by the red-haired communications portrait appearing and disappearing. The surrounding communications window and backdrop retain their existing handling. Targeted checks execute the actual helper with the original 22-vertex geometry at 4:3 and 16:9.
 
 ## Window entry effects

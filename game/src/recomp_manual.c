@@ -190,7 +190,9 @@ static void prepare_original_ui_quad(void)
     }
     /* These exact callers are the original font, panel and icon producers.
      * Full-screen fills cover the selected aspect; other UI keeps its shape. */
-    int fullscreen=ymax-ymin>=480;
+    /* 145A39 also draws standing portraits as full-height, narrow quads.
+     * Only its screen-wide artwork takes the full-screen exception. */
+    int fullscreen=ymax-ymin>=480 && (!texel_endpoints || xmax-xmin>=640);
     /* Keep 145A39's tiled full-screen backdrop exactly as requested.
      * Only its panels, portraits and icons need atlas edge correction. */
     if(texel_endpoints && !fullscreen){

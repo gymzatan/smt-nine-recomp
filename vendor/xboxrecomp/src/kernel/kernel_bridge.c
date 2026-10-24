@@ -12323,16 +12323,11 @@ int xbox_SymbolicLinkPath(const char *name,const char *rest,wchar_t *path,DWORD 
     if(target) {
         KE_SHADOW_SLOT *slot=ke_object_slot(target);
         if(slot && slot->object_type==XBOX_KERNEL_DATA_BASE+KDATA_FILE_OBJ_TYPE) {
-            DWORD length=GetFinalPathNameByHandleW(slot->host_handle,path,capacity,FILE_NAME_NORMALIZED|VOLUME_NAME_DOS);
-            if(length && length<capacity) {
-                if(!*rest)result=1;
-                else if(length+1<capacity) {
-                    if(path[length-1]!=L'\\')path[length++]=L'\\';
-                    if(MultiByteToWideChar(CP_ACP,0,rest,-1,path+length,(int)(capacity-length))) {
-                        for(WCHAR *at=path+length;*at;at++)if(*at==L'/')*at=L'\\';
-                        result=1;
-                    }
-                }
+            size_t length=strlen(rest);
+            if(length<=UINT16_MAX) {
+                XBOX_ANSI_STRING relative={(USHORT)length,(USHORT)length,(PCHAR)rest};
+                XBOX_OBJECT_ATTRIBUTES oa={slot->host_handle,&relative,0};
+                if(xbox_FileObjectPath(&oa,path,capacity))result=1;
             }
         } else if(slot && slot->object_type==XBOX_KERNEL_DATA_BASE+KDATA_IO_DEVICE_TYPE && slot->path_rule) {
             if(xbox_translate_device_path(slot->path_rule,rest,path,capacity))result=1;

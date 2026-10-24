@@ -81,6 +81,21 @@ int main(void) {
     assert(write_calls==1 && !write_open);
     assert(ios.Information==sizeof(payload)&&!memcmp(actual,payload,sizeof(payload)));
     xbox_FileHandleClosed(handle);CloseHandle(handle);
+    /* Original XCreateSaveGame first uses CreateDirectory(FILE_CREATE), then
+     * writes SaveMeta.xbx. A collision must reach its existing-name check. */
+    const char *container="\\Device\\Harddisk0\\partition1\\UDATA\\new-slot";
+    name.Buffer=(PCHAR)container;name.Length=(USHORT)strlen(container);name.MaximumLength=name.Length+1;
+    assert(NT_SUCCESS(xbox_NtCreateFile(&handle,0x00100001,&oa,&ios,NULL,0x80,3,XBOX_FILE_CREATE,0x4021)));
+    xbox_FileHandleClosed(handle);CloseHandle(handle);
+    assert(xbox_NtCreateFile(&handle,0x00100001,&oa,&ios,NULL,0x80,3,XBOX_FILE_CREATE,0x4021)==STATUS_OBJECT_NAME_COLLISION);
+    const char *metadata="\\Device\\Harddisk0\\partition1\\UDATA\\new-slot\\SaveMeta.xbx";
+    name.Buffer=(PCHAR)metadata;name.Length=(USHORT)strlen(metadata);name.MaximumLength=name.Length+1;
+    LARGE_INTEGER allocation={.QuadPart=1},metadata_offset={0};
+    assert(NT_SUCCESS(xbox_NtCreateFile(&handle,0xC0100000,&oa,&ios,&allocation,4,0,XBOX_FILE_OPEN_IF,0x22)));
+    const wchar_t description[]=L"\xFEFFName=PLAY DATA 16\r\n";
+    assert(NT_SUCCESS(xbox_NtWriteFile(handle,NULL,NULL,NULL,&ios,(PVOID)description,sizeof description,&metadata_offset)));
+    assert(ios.Information==sizeof description);
+    xbox_FileHandleClosed(handle);CloseHandle(handle);
     assert(xbox_translate_path("U:\\user.sav",target,MAX_PATH));
     swprintf_s(expected,MAX_PATH,L"%hs\\UserData\\user.sav",user);assert(!_wcsicmp(target,expected));
     xbox_path_set_language_media("English","external/MediaRoot");

@@ -990,6 +990,41 @@ int main(int argc,char **argv) {
         guest_cpu_part();cleanup();return 0;
     }
 
+    if(!strcmp(argv[1],"save_directory_alias")) {
+        guest_cpu_join();g_esp=0x80000;
+        assert(xbox_path_set_user_directory(argv[6]));
+        const char *directories[]={"\\Device\\Harddisk0\\Partition1\\UDATA",
+            "\\Device\\Harddisk0\\Partition1\\UDATA\\41540002",
+            "\\Device\\Harddisk0\\Partition1\\UDATA\\41540002\\5498112384B2"};
+        XBOX_IO_STATUS_BLOCK ios;HANDLE handle;
+        XBOX_ANSI_STRING name={0};XBOX_OBJECT_ATTRIBUTES oa={NULL,&name,0x40};
+        for(unsigned i=0;i<3;i++) {
+            name.Buffer=(PCHAR)directories[i];name.Length=(USHORT)strlen(name.Buffer);name.MaximumLength=name.Length+1;
+            assert(!xbox_NtCreateFile(&handle,0x100001,&oa,&ios,NULL,0x80,3,XBOX_FILE_OPEN_IF,0x4021));
+            assert(!xbox_NtClose(handle));
+        }
+        XBOX_ANSI_STRING drive={6,6,"\\??\\X:"},target={(USHORT)strlen(directories[1]),(USHORT)strlen(directories[1]),(PCHAR)directories[1]};
+        assert(!xbox_IoCreateSymbolicLink(&drive,&target));
+        const char *file="X:\\5498112384B2\\\\megaten9.sav";
+        name.Buffer=(PCHAR)file;name.Length=(USHORT)strlen(file);name.MaximumLength=name.Length+1;
+        NTSTATUS opened=xbox_NtCreateFile(&handle,0xC0100000,&oa,&ios,NULL,0x80,0,XBOX_FILE_OPEN_IF,0x60);
+        assert(!opened);
+        const char payload[]="original save alias";LARGE_INTEGER offset={0};
+        assert(!xbox_NtWriteFile(handle,NULL,NULL,NULL,&ios,(PVOID)payload,sizeof payload,&offset));
+        assert(ios.Information==sizeof payload && !xbox_NtClose(handle));
+        name.Buffer="X:\\5498112384B2";name.Length=(USHORT)strlen(name.Buffer);name.MaximumLength=name.Length+1;
+        HANDLE directory;assert(!xbox_NtOpenFile(&directory,0x100001,&oa,&ios,3,0x21));
+        name.Buffer="megaten9.sav";name.Length=(USHORT)strlen(name.Buffer);name.MaximumLength=name.Length+1;
+        oa.RootDirectory=directory;
+        assert(!xbox_NtOpenFile(&handle,0x80100000,&oa,&ios,0,0x60));
+        char actual[sizeof payload];
+        assert(!xbox_NtReadFile(handle,NULL,NULL,NULL,&ios,actual,sizeof actual,&offset));
+        assert(ios.Information==sizeof payload && !memcmp(actual,payload,sizeof payload));
+        assert(!xbox_NtClose(handle) && !xbox_NtClose(directory));
+        assert(!xbox_IoDeleteSymbolicLink(&drive));
+        guest_cpu_part();cleanup();return 0;
+    }
+
     if(!strcmp(argv[1],"symbolic_link_contract")) {
         guest_cpu_join();g_esp=0x80000;
         const char *text="\\Device\\Harddisk0\\Partition1\\checkpoint";
@@ -2439,6 +2474,13 @@ def test_original_object_aliases_counts_positions_and_recursive_owners(native_ob
     damaged=tmp_path/'damaged.state';data=objects.read_bytes()
     for contents in [data[:100],b'BROKEN'+data[6:],data[:-1]]:
         damaged.write_bytes(contents);run('reject',damaged)
+
+
+def test_save_directory_alias_accepts_original_repeated_separators(native_objects,tmp_path):
+    executable,xbe=native_objects
+    result=subprocess.run([str(executable),'save_directory_alias',str(xbe),'-','-','-',str(tmp_path)],
+                          capture_output=True,text=True,errors='replace',timeout=20)
+    assert result.returncode==0,result.stdout+result.stderr
 
 
 def test_duplicate_close_source_preserves_actual_native_identity_and_file_policy(native_objects,tmp_path):

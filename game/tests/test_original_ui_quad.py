@@ -133,6 +133,36 @@ static void check_portrait_strip(float left,float top,float height) {
     }
     if(aspect==4.0f/3.0f)assert(!memcmp(before,ram+0x4000,sizeof before));
 }
+static void check_settled_portrait(float width,float height,int fullscreen) {
+    memset(ram,0,sizeof ram);g_esi=0x2000;
+    MEM32(g_esp)=0x0014617A;MEM32(g_esp+4)=7;MEM32(g_esp+8)=4;
+    MEM32(g_esp+12)=0x4000;MEM32(g_esp+16)=28;
+    MEM32(g_esp+0x13c)=512;MEM32(g_esp+0x140)=512;
+    float left=(640-width)*0.5f,top=480-height;
+    for(unsigned i=0;i<4;i++) {
+        unsigned v=0x4000+i*28;
+        MEMF(v)=left+(i&1?width:0);MEMF(v+4)=top+(i&2?height:0);
+        MEM32(v+8)=0x3f000000+i;MEM32(v+12)=0x3f800000;MEM32(v+16)=0xff123400+i;
+        MEMF(v+20)=i&1?1:0;MEMF(v+24)=i&2?1:0;
+    }
+    unsigned char before[112];memcpy(before,ram+0x4000,sizeof before);
+    prepare_original_ui_quad();
+    float factor=(4.0f/3.0f)/aspect;
+    for(unsigned i=0;i<4;i++) {
+        unsigned v=0x4000+i*28;
+        float x;memcpy(&x,before+i*28,4);
+        assert(MEMF(v)==(fullscreen?x:320+(x-320)*factor));
+        assert(!memcmp(before+i*28+4,ram+v+4,16));
+        if(fullscreen)assert(!memcmp(before+i*28+20,ram+v+20,8));
+        else {
+            /* The existing atlas endpoint correction remains active once. */
+            float inset=0.5f/512,edge=511.0f/512;
+            assert(fabsf(MEMF(v+20)-(i&1?edge-inset:inset))<0.0000001f);
+            assert(fabsf(MEMF(v+24)-(i&2?edge-inset:inset))<0.0000001f);
+        }
+    }
+    if(!fullscreen)assert(fabsf((MEMF(0x401c)-MEMF(0x4000))*aspect-width*(4.0f/3.0f))<0.0001f);
+}
 static void check_preview(uint32_t caller,int active) {
     memset(ram,0,sizeof ram);MEM32(g_esp)=caller;MEM32(g_esp+4)=0x4000;
     uint32_t original[6]={208,88,144,288,0x3e800000,0x3f800000};
@@ -290,6 +320,8 @@ int main(int argc,char **argv) {
     check(12,285,224,40,0);check(12,0,100,480,0);
     check_rgb(0,1);check_rgb(0.5f,1);check_rgb(32,1);check_rgb(80,1);check_rgb(127.5f,1);check_rgb(80,0);
     check_portrait_strip(352,164,272);check_portrait_strip(171,217,216);check_portrait_strip(202,163,80);
+    check_settled_portrait(320,480,0);check_settled_portrait(512,512,0);
+    check_settled_portrait(320,479,0);check_settled_portrait(640,480,1);
     check_dialogue_connector();check_speech_anchor();
     check_item_icons();check_font_up();
     check_window_transition();check_sword_preview();check_status_preview();
