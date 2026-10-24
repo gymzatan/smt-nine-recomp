@@ -23,6 +23,61 @@ def emit(m,raw=''):
     lifter=Lifter();lifter.architectural_flags=True
     return '\n'.join(lifter.lift_instruction(insn))
 
+def test_trigonometric_c2_range_and_crt_remainder_completion():
+    source=PRELUDE+'RECOMP_TLS uint32_t g_eax,g_eflags;\n#define eax g_eax\n'+'\n'.join(FP_STACK_MACROS)+'\n'
+    for mnemonic in ('fsin','fcos','fsincos','fptan','fprem','fprem1'):
+        instruction=Instruction(0x23ac9b,2,mnemonic,'','')
+        source+='static void run_'+mnemonic+'(void) {\n'+'\n'.join(Lifter().lift_instruction(instruction))+'\n}\n'
+    lifter=Lifter();lifter.architectural_flags=True
+    status=Instruction(0x23ac9d,2,'fnstsw','ax','dfe0')
+    status.operands=[Operand(type='reg',reg='ax')]
+    for mnemonic,instruction in [('fnstsw',status),('sahf',Instruction(0x23ac9f,1,'sahf','','9e'))]:
+        source+='static void run_'+mnemonic+'(void) {\n'+'\n'.join(lifter.lift_instruction(instruction))+'\n}\n'
+    source+=r'''
+int main(void) {
+ void (*trig[])(void)={run_fsin,run_fcos,run_fsincos,run_fptan};
+ const double inputs[]={0.0,-0.0,0.7853981633974483,-0.7853981633974483,100.0};
+ const uint16_t previous[]={0,0x600,0x4500,0x4700};
+ for(unsigned op=0;op<4;op++) for(unsigned i=0;i<5;i++) for(unsigned c=0;c<4;c++) {
+  recomp_fp_reset();g_fp_top=6;g_fp_control_word=0x27f;
+  fp_top()=inputs[i];g_fp_cc=previous[c];trig[op]();
+  if(g_fp_cc&0x400u)return 1;
+  if(g_fp_top!=(op<2?6:5))return 2;
+  double sine=sin(inputs[i]),cosine=cos(inputs[i]);
+  if(op==0 && fp_top()!=sine)return 3;
+  if(op==1 && fp_top()!=cosine)return 4;
+  if(op==2 && (fp_top()!=cosine || fp_st1()!=sine))return 5;
+  if(op==3 && (fp_top()!=1.0 || fp_st1()!=tan(inputs[i])))return 6;
+ }
+ const double large[]={0x1p63,-0x1p63,0x1p100,-0x1p100};
+ for(unsigned op=0;op<4;op++) for(unsigned i=0;i<4;i++) {
+  unsigned char raw[10];recomp_fp_reset();g_fp_top=7;
+  recomp_fp80_store(raw,large[i]);raw[0]|=1u;
+  recomp_fp_push_raw(&g_fp_top,raw);g_fp_cc=0;
+  unsigned top=g_fp_top;double value=fp_top();uint16_t tag=g_fp_tag_word;
+  uint8_t dirty=g_fp_alias_dirty;
+  trig[op]();
+  if(!(g_fp_cc&0x400u)||g_fp_top!=top||fp_top()!=value)return 7;
+  if(g_fp_alias_dirty!=dirty||g_fp_tag_word!=tag||memcmp(g_fp_raw[top],raw,10))return 8;
+ }
+ /* Captured battle state at the CRT's FPREM1/FNSTSW/SAHF/JP back edge. */
+ void (*reduction[])(void)={run_fprem,run_fprem1};
+ for(unsigned op=0;op<2;op++) {
+  recomp_fp_reset();g_fp_top=6;g_fp_control_word=0x27f;
+  fp_top()=-0.7071067769704655;fp_st1()=1.4488038916154245e19;g_fp_cc=0x600;
+  unsigned iterations;
+  for(iterations=0;iterations<4;iterations++) {
+   reduction[op]();
+   run_fnstsw();run_sahf();
+   if(!(g_eflags&0x4u))break;
+  }
+  if(iterations!=0||g_fp_top!=6||fp_top()!=-0.7071067769704655)return 9;
+ }
+ return 0;
+}
+'''
+    run=_build_and_run(source);assert run.returncode==0,('TRIG_C2_EXIT',run.returncode,run.stdout,run.stderr)
+
 def test_original_crt_save_call_restore_and_image_layout():
     source=PRELUDE+'\n'.join(FP_STACK_MACROS)+r'''
 int main(void) {

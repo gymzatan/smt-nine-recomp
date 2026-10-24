@@ -336,6 +336,15 @@ static inline uint16_t recomp_fxam(double value) {
         (isnan(value) ? 0x0100u : isinf(value) ? 0x0500u :
          value == 0.0 ? 0x4000u : 0x0400u));
 }
+/* FSIN/FCOS/FPTAN/FSINCOS report range reduction through C2. A finite
+ * operand with absolute value at least 2^63 leaves the stack unchanged.
+ * Completed libm operations must not inherit C2 from an earlier FXAM. */
+static inline int recomp_fp_trig_in_range(double value) {
+    if(isfinite(value) && fabs(value)>=9223372036854775808.0) {
+        g_fp_cc|=0x0400u;return 0;
+    }
+    g_fp_cc&=(uint16_t)~0x0400u;return 1;
+}
 
 /* Result of an x87 compare, in the shape the status word wants:
  *   -1 less, 0 equal, 1 greater, 2 unordered (either operand is NaN).

@@ -173437,42 +173437,42 @@
       "file": "recomp_0056.c",
       "edits": [
         [
-          5399,
+          5442,
           "    uint32_t _block_00222305_eax = eax;\n    int _block_00222305_g_fp_top = g_fp_top;\n    #define g_fp_top _block_00222305_g_fp_top\n",
           "",
           "40u) != 0)) goto loc_00222324; /* jne: not equal / not zero */\n\nloc_00222305: ;\n",
           "    g_fp_instruction_pointer = 0x00222305u; g_fp_opcode = 0x145u; g_fp_code_sele"
         ],
         [
-          6450,
+          6493,
           "    g_fp_instruction_pointer = 0x0022230Fu; g_fp_opcode = 0x118u; g_fp_code_selector = 8; g_fp_data_pointer = _block_00222305_eax; g_fp_data_selector = 0x10;\n    MEMF(_block_00222305_eax) = (float)fp_top(); fp_pop(); /* fstp */\n",
           "    g_fp_instruction_pointer = 0x0022230Fu; g_fp_opcode = 0x118u; g_fp_code_selector = 8; g_fp_data_pointer = eax; g_fp_data_selector = 0x10;\n    MEMF(eax) = (float)fp_top(); fp_pop(); /* fstp */\n",
           "omp_fp_commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fmul dword ptr [esi] */\n",
           "    g_fp_instruction_pointer = 0x00222311u; g_fp_opcode = 0x1C0u; g_fp_code_sele"
         ],
         [
-          7128,
+          7171,
           "    g_fp_instruction_pointer = 0x00222316u; g_fp_opcode = 0x158u; g_fp_code_selector = 8; g_fp_data_pointer = _block_00222305_eax + 4; g_fp_data_selector = 0x10;\n    MEMF(_block_00222305_eax + 4) = (float)fp_top(); fp_pop(); /* fstp */\n",
           "    g_fp_instruction_pointer = 0x00222316u; g_fp_opcode = 0x158u; g_fp_code_selector = 8; g_fp_data_pointer = eax + 4; g_fp_data_selector = 0x10;\n    MEMF(eax + 4) = (float)fp_top(); fp_pop(); /* fstp */\n",
           "fp_commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fmul dword ptr [esi + 4] */\n",
           "    g_fp_instruction_pointer = 0x00222319u; g_fp_opcode = 0x4Eu; g_fp_code_selec"
         ],
         [
-          7651,
+          7694,
           "    g_fp_instruction_pointer = 0x0022231Cu; g_fp_opcode = 0x158u; g_fp_code_selector = 8; g_fp_data_pointer = _block_00222305_eax + 8; g_fp_data_selector = 0x10;\n    MEMF(_block_00222305_eax + 8) = (float)fp_top(); fp_pop(); /* fstp */\n    eax = _block_00222305_eax; g_fp_top = _block_00222305_g_fp_top;\n",
           "    g_fp_instruction_pointer = 0x0022231Cu; g_fp_opcode = 0x158u; g_fp_code_selector = 8; g_fp_data_pointer = eax + 8; g_fp_data_selector = 0x10;\n    MEMF(eax + 8) = (float)fp_top(); fp_pop(); /* fstp */\n",
           "fp_commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fmul dword ptr [esi + 8] */\n",
           "    goto loc_00222334;\n\nloc_00222321: ;\n    eax = MEM32(ebp + 8);\n\nloc_00222324:"
         ],
         [
-          8038,
+          8081,
           "    uint32_t _block_00222324_eax = eax;\n    uint32_t _block_00222324_ecx = ecx;\n",
           "",
           " goto loc_00222334;\n\nloc_00222321: ;\n    eax = MEM32(ebp + 8);\n\nloc_00222324: ;\n",
           "    g_fp_instruction_pointer = 0x00222324u; g_fp_opcode = 0x106u; g_fp_code_sele"
         ],
         [
-          8300,
+          8343,
           "    g_fp_instruction_pointer = 0x00222326u; g_fp_opcode = 0x118u; g_fp_code_selector = 8; g_fp_data_pointer = _block_00222324_eax; g_fp_data_selector = 0x10;\n    MEMF(_block_00222324_eax) = (float)fp_top(); fp_pop(); /* fstp */\n    _block_00222324_ecx = MEM32(esi + 4);\n    MEM32(_block_00222324_eax + 4) = _block_00222324_ecx;\n    _block_00222324_ecx = MEM32(esi + 8);\n    MEM32(_block_00222324_eax + 8) = _block_00222324_ecx;\n    eax = _block_00222324_eax; ecx = _block_00222324_ecx;\n",
           "    g_fp_instruction_pointer = 0x00222326u; g_fp_opcode = 0x118u; g_fp_code_selector = 8; g_fp_data_pointer = eax; g_fp_data_selector = 0x10;\n    MEMF(eax) = (float)fp_top(); fp_pop(); /* fstp */\n    ecx = MEM32(esi + 4);\n    MEM32(eax + 4) = ecx;\n    ecx = MEM32(esi + 8);\n    MEM32(eax + 8) = ecx;\n",
           "inter = esi; g_fp_data_selector = 0x10;\n    fp_push(MEMF(esi)); /* fld float */\n",
@@ -173486,35 +173486,35 @@
       "file": "recomp_0056.c",
       "edits": [
         [
-          8129,
+          8168,
           "    uint32_t _block_002223B5_ecx = ecx;\n    int _block_002223B5_g_fp_top = g_fp_top;\n    #define g_fp_top _block_002223B5_g_fp_top\n",
           "",
           "M32(ecx + 8);\n    MEM32(esi + 8) = eax;\n    goto loc_002223CF;\n\nloc_002223B5: ;\n",
           "    g_fp_instruction_pointer = 0x002223B5u; g_fp_opcode = 0x145u; g_fp_code_sele"
         ],
         [
-          8906,
+          8945,
           "    g_fp_instruction_pointer = 0x002223BDu; g_fp_opcode = 0x9u; g_fp_code_selector = 8; g_fp_data_pointer = _block_002223B5_ecx; g_fp_data_selector = 0x10;\n    fp_top() = RECOMP_FP_PC(fp_top() * MEMF(_block_002223B5_ecx)); recomp_fp_commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fmul dword ptr [_block_002223B5_ecx] */\n",
           "    g_fp_instruction_pointer = 0x002223BDu; g_fp_opcode = 0x9u; g_fp_code_selector = 8; g_fp_data_pointer = ecx; g_fp_data_selector = 0x10;\n    fp_top() = RECOMP_FP_PC(fp_top() * MEMF(ecx)); recomp_fp_commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fmul dword ptr [ecx] */\n",
           "r = 8;\n    recomp_fp_push_copy(&g_fp_top, (g_fp_top + 0) & 7u); /* fld st(0) */\n",
           "    g_fp_instruction_pointer = 0x002223BFu; g_fp_opcode = 0x11Eu; g_fp_code_sele"
         ],
         [
-          9587,
+          9626,
           "    g_fp_instruction_pointer = 0x002223C3u; g_fp_opcode = 0x49u; g_fp_code_selector = 8; g_fp_data_pointer = _block_002223B5_ecx + 4; g_fp_data_selector = 0x10;\n    fp_top() = RECOMP_FP_PC(fp_top() * MEMF(_block_002223B5_ecx + 4)); recomp_fp_commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fmul dword ptr [_block_002223B5_ecx + 4] */\n",
           "    g_fp_instruction_pointer = 0x002223C3u; g_fp_opcode = 0x49u; g_fp_code_selector = 8; g_fp_data_pointer = ecx + 4; g_fp_data_selector = 0x10;\n    fp_top() = RECOMP_FP_PC(fp_top() * MEMF(ecx + 4)); recomp_fp_commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fmul dword ptr [ecx + 4] */\n",
           "r = 8;\n    recomp_fp_push_copy(&g_fp_top, (g_fp_top + 0) & 7u); /* fld st(0) */\n",
           "    g_fp_instruction_pointer = 0x002223C6u; g_fp_opcode = 0x15Eu; g_fp_code_sele"
         ],
         [
-          10126,
+          10165,
           "    g_fp_instruction_pointer = 0x002223C9u; g_fp_opcode = 0x49u; g_fp_code_selector = 8; g_fp_data_pointer = _block_002223B5_ecx + 8; g_fp_data_selector = 0x10;\n    fp_top() = RECOMP_FP_PC(fp_top() * MEMF(_block_002223B5_ecx + 8)); recomp_fp_commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fmul dword ptr [_block_002223B5_ecx + 8] */\n",
           "    g_fp_instruction_pointer = 0x002223C9u; g_fp_opcode = 0x49u; g_fp_code_selector = 8; g_fp_data_pointer = ecx + 8; g_fp_data_selector = 0x10;\n    fp_top() = RECOMP_FP_PC(fp_top() * MEMF(ecx + 8)); recomp_fp_commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fmul dword ptr [ecx + 8] */\n",
           "data_selector = 0x10;\n    MEMF(esi + 4) = (float)fp_top(); fp_pop(); /* fstp */\n",
           "    g_fp_instruction_pointer = 0x002223CCu; g_fp_opcode = 0x15Eu; g_fp_code_sele"
         ],
         [
-          10665,
+          10704,
           "    ecx = _block_002223B5_ecx; g_fp_top = _block_002223B5_g_fp_top;\n",
           "",
           "data_selector = 0x10;\n    MEMF(esi + 8) = (float)fp_top(); fp_pop(); /* fstp */\n",

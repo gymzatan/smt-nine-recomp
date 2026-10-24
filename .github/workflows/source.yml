@@ -15,4 +15,6 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
       - run: python -m pip install -r requirements-dev.txt
       - run: python tools/audit_source.py
-      - run: python -m pytest tests game/tests/test_original_ui_quad.py vendor/xboxrecomp/tools/recomp/test_framebuffer_present.py -k "not handoff" -q
+      - run: |
+          $env:INCLUDE = (Join-Path $PWD 'vendor/xboxrecomp/src') + ';' + $env:INCLUDE
+          python -m pytest tests game/tests/test_original_ui_quad.py vendor/xboxrecomp/tools/recomp/test_framebuffer_present.py vendor/xboxrecomp/tools/recomp/test_lifter_fpu_environment.py -k "not handoff" -q
