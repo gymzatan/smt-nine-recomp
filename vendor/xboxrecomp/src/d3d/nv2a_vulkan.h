@@ -92,6 +92,7 @@ int nvk_read_upload(uint64_t generation,uint32_t offset,void *output,size_t byte
 NvkQuery *nvk_query_create(void);
 int nvk_query_result(NvkQuery *query,uint64_t *samples,int wait);
 void nvk_query_destroy(NvkQuery *query);
+/* 0 fails, 1 presents, 2 retains the request for the existing retry. */
 int nvk_window_present(void *window,NvkImage *image,unsigned width,
                         unsigned height,const int32_t bounds[4],int vsync);
 void nvk_window_close(void);

@@ -68,7 +68,8 @@ void xbox_FramebufferSetCheckpointHandler(int (*handler)(int load,unsigned slot)
 
 void xbox_FramebufferWindowSetControls(const wchar_t *screenshot_directory,unsigned interface_language);
 typedef struct FramebufferNativeRenderer {
-    void (*display)(void *window,unsigned width,unsigned height,const int32_t bounds[4]);
+    /* 1 accepts the display request; 0 retains it for the existing retry. */
+    int (*display)(void *window,unsigned width,unsigned height,const int32_t bounds[4]);
     int (*capture)(void);
     int (*restore)(const uint32_t *pixels,unsigned width,unsigned height);
     void (*close)(void);

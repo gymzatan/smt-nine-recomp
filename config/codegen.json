@@ -124529,7 +124529,15 @@
       "address": 1379598,
       "name": "sub_00150D0E",
       "file": "recomp_0042.c",
-      "edits": []
+      "edits": [
+        [
+          1566,
+          "    PUSH32(esp, 0);",
+          "    PUSH32(esp, 0xA0);",
+          "; /* jne: not equal / not zero */\n\nloc_00150D17: ;\n    eax = MEM32(esi + 0x68);\n",
+          "\n    PUSH32(esp, eax);\n    PUSH32(esp, 0x00150D22u);\n    recomp_cont_site(&_cont"
+        ]
+      ]
     },
     {
       "address": 1379628,
@@ -124547,7 +124555,57 @@
       "address": 1380025,
       "name": "sub_00150EB9",
       "file": "recomp_0042.c",
-      "edits": []
+      "edits": [
+        [
+          236,
+          "",
+          "\n    uint32_t _font_up_data = 0;\n",
+          "b; (void)_fas; (void)_fbs;\n    int _cf = (int)(g_eflags & 1u); /* carry flag */\n",
+          "\n    RecompContFrame _cont_frame;\n    const RecompContLocal _cont_locals[] = {\n "
+        ],
+        [
+          540,
+          "",
+          "        {\"_font_up_data\", &_font_up_data, sizeof _font_up_data},\n",
+          "_fas},\n        {\"_fbs\", &_fbs, sizeof _fbs},\n        {\"_cf\", &_cf, sizeof _cf},\n",
+          "    };\n    uint64_t _cont_resume = recomp_cont_enter(&_cont_frame, 0x00150EB9u, "
+        ],
+        [
+          547,
+          "    uint64_t _cont_resume = recomp_cont_enter(&_cont_frame, 0x00150EB9u, _cont_locals, 6);\n",
+          "    uint64_t _cont_resume = recomp_cont_enter(&_cont_frame, 0x00150EB9u, _cont_locals, 7);\n",
+          "        {\"_fbs\", &_fbs, sizeof _fbs},\n        {\"_cf\", &_cf, sizeof _cf},\n    };\n",
+          "    switch (_cont_resume) {\n    case 0: break;\n    case 0x100150ED3ULL: goto con"
+        ],
+        [
+          1846,
+          "",
+          "    _font_up_data = MEM32(ecx + 0x6C);\n",
+          "lags & 0x40u) != 0)) goto loc_00150EF1; /* je: equal / zero */\n\nloc_00150EC6: ;\n",
+          "    { uint32_t _v=(uint32_t)(eax), _c=(uint32_t)(4) & 31u; if(_c) {\n    _cf=(int"
+        ],
+        [
+          3008,
+          "",
+          "    PUSH32(esp, 0x1C);\n    PUSH32(esp, _font_up_data);\n",
+          "; /* call 0x002EE440 */\n    recomp_cont_site(&_cont_frame, 0);\n\nloc_00150ED8: ;\n",
+          "    PUSH32(esp, 4);\n    PUSH32(esp, esi);\n    PUSH32(esp, 6);\n    PUSH32(esp, 0x"
+        ],
+        [
+          3028,
+          "    PUSH32(esp, esi);\n",
+          "",
+          " */\n    recomp_cont_site(&_cont_frame, 0);\n\nloc_00150ED8: ;\n    PUSH32(esp, 4);\n",
+          "    PUSH32(esp, 6);\n    PUSH32(esp, 0x00150EE2u);\n    recomp_cont_site(&_cont_fr"
+        ],
+        [
+          3174,
+          "    RECOMP_ABI_CALL(0x002F03E0u, sub_002F03E0); /* call 0x002F03E0 */\n",
+          "    RECOMP_ABI_CALL(0x002F00D0u, sub_002F00D0); /* call 0x002F00D0 */\n",
+          "E2u);\n    recomp_cont_site(&_cont_frame, 0x100150EDDULL);\ncont_call_00150EDD: ;\n",
+          "    recomp_cont_site(&_cont_frame, 0);\n\nloc_00150EE2: ;\n    PUSH32(esp, esi);\n  "
+        ]
+      ]
     },
     {
       "address": 1380085,
@@ -124995,6 +125053,13 @@
           "",
           "a_selector = 0x10;\n    MEMF(ebp + 0x6C) = (float)fp_top(); fp_pop(); /* fstp */\n",
           "\nloc_001516EC: ;\n    g_fp_instruction_pointer = 0x001516ECu; g_fp_opcode = 0x143"
+        ],
+        [
+          103167,
+          "    PUSH32(esp, 0);",
+          "    PUSH32(esp, 0xA0);",
+          "ecomp_cont_site(&_cont_frame, 0);\n\nloc_00151838: ;\n    eax = MEM32(ebx + 0x68);\n",
+          "\n    PUSH32(esp, eax);\n    PUSH32(esp, 0x00151843u);\n    recomp_cont_site(&_cont"
         ],
         [
           104103,

@@ -70,6 +70,8 @@ static float s_display_aspect=4.0f/3.0f;
 static int s_fixed_aspect;
 static SRWLOCK s_host_lock=SRWLOCK_INIT;
 static const FramebufferNativeRenderer *s_native_renderer;
+/* Window-thread intent; frame ownership remains with the native renderer. */
+static int s_native_pending;
 void xbox_FramebufferWindowSetRenderer(const FramebufferNativeRenderer *renderer) { s_native_renderer=renderer; }
 static uint32_t *s_host_pixels;
 static unsigned s_host_width,s_host_height;
@@ -275,6 +277,11 @@ int xbox_FramebufferLoadCheckpoint(FILE *in) {
         if(s_native_renderer) {
             const uint32_t *front=s_host_pixels?s_host_pixels:(saved.index>=0?s_present[saved.index]:NULL);
             ok=s_native_renderer->restore(front,s_host_pixels?s_host_width:s_fb_width,s_host_pixels?s_host_height:s_fb_height);
+            if(ok) {
+                AcquireSRWLockShared(&s_host_lock);
+                if(s_frame_ready)SetEvent(s_frame_ready);
+                ReleaseSRWLockShared(&s_host_lock);
+            }
         }
         const char *dump=getenv("RECOMP_CHECKPOINT_DUMP");
         if(ok && dump)xbox_FramebufferDumpBmp(dump);
@@ -315,6 +322,11 @@ int xbox_FramebufferKeyDown(int vk)
 static LRESULT CALLBACK fb_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     switch (m) {
+    case WM_PAINT:
+    case WM_SIZE:
+    case WM_DISPLAYCHANGE:
+        if(s_native_renderer)s_native_pending=1;
+        break; /* Preserve default paint validation and window handling. */
     case WM_GETMINMAXINFO:
         if(s_fixed_aspect && !s_fullscreen){
             LRESULT result=DefWindowProcA(h,m,w,l);MINMAXINFO *limits=(MINMAXINFO *)l;
@@ -494,6 +506,7 @@ static DWORD WINAPI fb_thread(LPVOID unused)
     size_t host_capacity=0;
 
     (void)unused;
+    s_native_pending=1;
     xbox_CheckpointDeviceEnter(XBOX_CHECKPOINT_FRAMEBUFFER);
 
     {
@@ -555,7 +568,10 @@ static DWORD WINAPI fb_thread(LPVOID unused)
         RECT display=fb_display_bounds(hwnd),client;GetClientRect(hwnd,&client);
         if(s_native_renderer) {
             int32_t bounds[4]={display.left,display.top,display.right,display.bottom};
-            s_native_renderer->display(hwnd,client.right,client.bottom,bounds);
+            if(s_native_pending) {
+                s_native_pending=0;
+                if(!s_native_renderer->display(hwnd,client.right,client.bottom,bounds))s_native_pending=1;
+            }
             int show=s_paused || (s_checkpoint_notice[0] && GetTickCount64()<s_checkpoint_notice_until);
             if(show) {
                 SetWindowTextW(notice_window,GetTickCount64()<s_checkpoint_notice_until?s_checkpoint_notice:fb_text(0));
@@ -675,7 +691,9 @@ static DWORD WINAPI fb_thread(LPVOID unused)
         }
         /* Completed frames wake the existing window immediately. Retain the
          * polling interval for pinned buffers and periods without a flip. */
-        if(MsgWaitForMultipleObjects(1,&s_frame_ready,FALSE,16,QS_ALLINPUT)==WAIT_FAILED) {
+        DWORD frame_wait=MsgWaitForMultipleObjects(1,&s_frame_ready,FALSE,16,QS_ALLINPUT);
+        if(frame_wait==WAIT_OBJECT_0 && s_native_renderer)s_native_pending=1;
+        if(frame_wait==WAIT_FAILED) {
             fprintf(stderr,"[STOP] framebuffer frame wait failed: %lu\n",GetLastError());
             exit(5);
         }

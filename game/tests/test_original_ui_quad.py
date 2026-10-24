@@ -25,8 +25,9 @@ static unsigned char ram[0x600000];
 static uint32_t g_esp=0x1000,g_esi=0x2000,g_ebx,g_edi,g_ecx,g_ebp=0x1800;
 static float aspect;
 float smt9_game_aspect(void){return aspect;}
-int smt9_is_chinese(void){return 0;}
-unsigned d3d8_RenderScale(void){return 2;}
+static unsigned font_chinese,font_render_scale=2;
+int smt9_is_chinese(void){return font_chinese;}
+unsigned d3d8_RenderScale(void){return font_render_scale;}
 '''+helper+r'''
 static void check_dialogue_connector(void) {
     memset(ram,0,sizeof ram);g_edi=0x2000;MEM32(g_edi+4)=0x3000;MEM32(0x3004)=0x4000;
@@ -252,6 +253,37 @@ static void check_item_icons(void) {
         if(aspect==4.0f/3.0f)assert(!memcmp(before,ram+0x4000,sizeof before));
     }
 }
+
+static void check_font_up(void) {
+    for(unsigned language=0;language<2;language++)for(unsigned style=0;style<2;style++)for(unsigned scale=1;scale<=3;scale+=2) {
+        memset(ram,0,sizeof ram);g_ebx=0x2000;font_chinese=language;font_render_scale=scale;
+        MEM32(g_ebx+0x6c)=0x4000;MEM32(g_ebx+0x64)=style?2:0;
+        MEM32(g_esp)=0x00150ee2;MEM32(g_esp+4)=6;MEM32(g_esp+8)=4;MEM32(g_esp+12)=0x4000;MEM32(g_esp+16)=28;
+        for(unsigned i=0;i<4;i++) {
+            unsigned v=0x4000+i*28;
+            MEMF(v)=100+(i&1?16:0);MEMF(v+4)=200+(i&2?16:0);
+            MEM32(v+8)=0x3f000000+i;MEM32(v+12)=0x3f800000;MEM32(v+16)=0xff123400+i;
+            MEMF(v+20)=(float)(i&1?48:32)/512;MEMF(v+24)=(float)(i&2?80:64)/512;
+        }
+        unsigned char before[112];memcpy(before,ram+0x4000,sizeof before);
+        prepare_original_ui_quad();
+        float factor=(4.0f/3.0f)/aspect;
+        unsigned selected_scale=!style && language?scale:1;
+        float inset=0.5f/(512*selected_scale),trim=(style?1.0f:0.0f)/512+inset;
+        for(unsigned i=0;i<4;i++) {
+            unsigned v=0x4000+i*28;
+            float x;memcpy(&x,before+i*28,4);
+            assert(MEMF(v)==320+(x-320)*factor);
+            assert(!memcmp(before+i*28+4,ram+v+4,16));
+            float u=(float)(i&1?48:32)/512,w=(float)(i&2?80:64)/512;
+            float expected_u=32.0f/512+inset+(u-32.0f/512)*(16.0f/512-inset-trim)/(16.0f/512);
+            float expected_v=64.0f/512+inset+(w-64.0f/512)*(16.0f/512-inset-trim)/(16.0f/512);
+            assert(fabsf(MEMF(v+20)-expected_u)<0.0000001f && fabsf(MEMF(v+24)-expected_v)<0.0000001f);
+        }
+    }
+    font_chinese=0;font_render_scale=2;
+}
+
 int main(int argc,char **argv) {
     assert(argc==2);aspect=atoi(argv[1])==4?4.0f/3.0f:16.0f/9.0f;
     check(0,0,640,480,1);check(-0.5f,-0.5f,640,480,1);
@@ -259,7 +291,7 @@ int main(int argc,char **argv) {
     check_rgb(0,1);check_rgb(0.5f,1);check_rgb(32,1);check_rgb(80,1);check_rgb(127.5f,1);check_rgb(80,0);
     check_portrait_strip(352,164,272);check_portrait_strip(171,217,216);check_portrait_strip(202,163,80);
     check_dialogue_connector();check_speech_anchor();
-    check_item_icons();
+    check_item_icons();check_font_up();
     check_window_transition();check_sword_preview();check_status_preview();
     memset(ram,0,sizeof ram);g_ecx=0x2000;MEM32(g_ecx+0x50)=640;MEM32(g_ecx+0x54)=480;
     smt9_prepare_window_transition(g_ecx);assert(MEMF(g_ecx+0x3c)==0 && MEM32(g_ecx+0x50)==640);
@@ -315,9 +347,7 @@ def test_fusion_disc_anchor(tmp_path):
     recipe = json.loads((root / 'config/codegen.json').read_text())
     row = next(item for item in recipe['functions'] if item['address'] == 0x368F3)
     edit = next(item for item in row['edits'] if 'disc anchors' in item[2])
-    # The current recipe stores the complete inserted anchor consumer separately
-    # from the following call-frame context (edit[4]). Execute that exact insert.
-    production = edit[2]
+    production = edit[2][:edit[2].index('    g_ebp = ebp;')]
     source = r'''
 #include <stdint.h>
 #include <string.h>

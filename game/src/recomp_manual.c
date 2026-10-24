@@ -170,7 +170,7 @@ static void prepare_original_ui_quad(void)
         background=MEM32(g_esp+0x44)==0x000EF0C1u || MEM32(g_esp+0x44)==0x000EF1A5u;
         buffer=MEM32(MEM32(g_esi+8)+4)|0x80000000u;break;
     case 0x000118CAu:vertices=MEM32(g_esp+12);if(vertices!=MEM32(g_ebx+0x44)*4 || vertices>4096){fprintf(stderr,"[STOP] original UI batch count\n");exit(5);}buffer=MEM32(g_ebx+0x40)-vertices*28;texture=1;break;
-    case 0x00150EE2u:buffer=MEM32(g_ebx+0x6c);texture=1;extra=MEM32(g_ebx+0x64)==2;if(!extra && smt9_is_chinese())font_scale=d3d8_RenderScale();break;
+    case 0x00150EE2u:buffer=MEM32(g_esp+12);direct=1;texture=1;extra=MEM32(g_ebx+0x64)==2;if(!extra && smt9_is_chinese())font_scale=d3d8_RenderScale();break;
     case 0x00148225u:buffer=MEM32(g_ebx+0x18);break;
     case 0x0014850Bu:buffer=MEM32(g_ebx+0x18);texture=1;texture_width=MEMF(0x0031B57Cu);texture_height=MEMF(0x00333FCCu);break;
     case 0x0015390Bu:buffer=MEM32(g_ebx+0x10);texture=1;break;

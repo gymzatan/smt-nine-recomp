@@ -948,7 +948,7 @@ void nvk_query_destroy(NvkQuery *query) {
 
 int nvk_window_present(void *window,NvkImage *image,unsigned width,unsigned height,const int32_t bounds[4],int vsync) {
     NVK_BEGIN
-    if(!width || !height)return 1;
+    if(!width || !height)return 2;
     require(window && image && !image->volume && bounds,"Invalid Vulkan display image/window");
     if(context.window && context.window!=(HWND)window)throw Failure("Vulkan display window changed without closing");
     const VkPresentModeKHR mode=vsync?VK_PRESENT_MODE_FIFO_KHR:VK_PRESENT_MODE_IMMEDIATE_KHR;
@@ -971,6 +971,7 @@ int nvk_window_present(void *window,NvkImage *image,unsigned width,unsigned heig
         if(caps.maxImageCount)info.minImageCount=std::min(info.minImageCount,caps.maxImageCount);
         info.imageFormat=selected->format;info.imageColorSpace=selected->colorSpace;
         info.imageExtent=caps.currentExtent.width==UINT32_MAX?VkExtent2D{width,height}:caps.currentExtent;
+        if(!info.imageExtent.width || !info.imageExtent.height)return 2;
         info.imageArrayLayers=1;info.imageUsage=VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         info.preTransform=caps.currentTransform;info.compositeAlpha=VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         require((caps.supportedCompositeAlpha&info.compositeAlpha)!=0,"Vulkan surface has no opaque composition mode");
@@ -991,8 +992,8 @@ int nvk_window_present(void *window,NvkImage *image,unsigned width,unsigned heig
     Chunk &chunk=begin();unsigned index;uint64_t acquisition_started=timing_clock();
     VkResult acquired=vkAcquireNextImageKHR(context.device,context.swapchain,0,chunk.acquired,{},&index);
     timing_finish(acquisition_started,3);
-    if(acquired==VK_NOT_READY || acquired==VK_TIMEOUT)return 1;
-    if(acquired==VK_ERROR_OUT_OF_DATE_KHR){window_close();return 1;}
+    if(acquired==VK_NOT_READY || acquired==VK_TIMEOUT)return 2;
+    if(acquired==VK_ERROR_OUT_OF_DATE_KHR){window_close();return 2;}
     require(acquired==VK_SUCCESS || acquired==VK_SUBOPTIMAL_KHR,"Vulkan swapchain acquisition failed");
     transition(image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     VkImage target=context.swap_images[index];
@@ -1013,7 +1014,7 @@ int nvk_window_present(void *window,NvkImage *image,unsigned width,unsigned heig
     uint64_t presentation_started=timing_clock();
     VkResult result=vkQueuePresentKHR(context.queue,&present);context.presented[index]=true;
     timing_finish(presentation_started,2);
-    if(result==VK_ERROR_OUT_OF_DATE_KHR || result==VK_SUBOPTIMAL_KHR || acquired==VK_SUBOPTIMAL_KHR){window_close();return 1;}
+    if(result==VK_ERROR_OUT_OF_DATE_KHR || result==VK_SUBOPTIMAL_KHR || acquired==VK_SUBOPTIMAL_KHR){window_close();return 2;}
     CHECK(result);return 1;NVK_END(0)
 }
 void nvk_window_close(void) {try{window_close();}catch(const std::exception &e){error=e.what();}}

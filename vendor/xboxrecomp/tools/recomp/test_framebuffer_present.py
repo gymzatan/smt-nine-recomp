@@ -62,9 +62,74 @@ static void init_host(void) {
     xbox_FramebufferWindowPresentHost(padded,36*4,32,24);
     assert(s_host_width==32 && s_host_height==24 && !memcmp(s_host_pixels,first,sizeof first));
 }
+
+static HANDLE native_changed;
+static volatile LONG native_calls,native_successes,native_hold,native_captures,native_restores;
+static HWND native_window;
+static unsigned native_width,native_height;
+static int native_display(void *window,unsigned width,unsigned height,const int32_t bounds[4]) {
+    assert(window && width && height && bounds[2]>bounds[0] && bounds[3]>bounds[1]);
+    native_window=(HWND)window;native_width=width;native_height=height;
+    InterlockedIncrement(&native_calls);
+    int ready=!InterlockedCompareExchange(&native_hold,0,0);
+    if(ready)InterlockedIncrement(&native_successes);
+    SetEvent(native_changed);return ready;
+}
+static int native_capture(void) {InterlockedIncrement(&native_captures);return 1;}
+static int native_restore(const uint32_t *pixels,unsigned width,unsigned height) {
+    assert(width==32 && height==24 && pixels && !memcmp(pixels,first,sizeof first));
+    InterlockedIncrement(&native_restores);return 1;
+}
+static void native_close(void) {}
+static const FramebufferNativeRenderer native_renderer={native_display,native_capture,native_restore,native_close};
+static void native_wait_count(volatile LONG *counter,LONG minimum) {
+    ULONGLONG end=GetTickCount64()+5000;
+    while(InterlockedCompareExchange(counter,0,0)<minimum) {
+        assert(GetTickCount64()<end);WaitForSingleObject(native_changed,20);
+    }
+}
+static LONG native_idle(void) {
+    /* Allow initial window paint/size messages to settle before the idle assertion. */
+    Sleep(150);LONG calls=InterlockedCompareExchange(&native_calls,0,0);
+    Sleep(150);assert(InterlockedCompareExchange(&native_calls,0,0)==calls);return calls;
+}
+static void check_native_readiness(void) {
+    native_changed=CreateEventW(NULL,FALSE,FALSE,NULL);assert(native_changed);
+    xbox_FramebufferWindowConfigure(96,72,4.0f/3.0f,0);
+    xbox_FramebufferWindowSetRenderer(&native_renderer);
+    HANDLE window=CreateThread(NULL,0,fb_thread,NULL,0,NULL);assert(window);
+    native_wait_count(&native_successes,1);LONG calls=native_idle();
+    for(unsigned i=0;i<32;i++)assert(PostMessageW(native_window,WM_MOUSEMOVE,0,MAKELPARAM(i,i)));
+    Sleep(150);assert(native_calls==calls);
+    /* A new frame is still pending after callback0; only the original timer may retry it. */
+    InterlockedExchange(&native_hold,1);LONG success=native_successes;calls=native_calls;
+    SetEvent(s_frame_ready);native_wait_count(&native_calls,calls+2);
+    assert(native_successes==success);
+    InterlockedExchange(&native_hold,0);native_wait_count(&native_successes,success+1);
+    native_idle();
+    calls=native_calls;assert(InvalidateRect(native_window,NULL,FALSE));
+    native_wait_count(&native_calls,calls+1);native_idle();
+    RECT old;assert(GetWindowRect(native_window,&old));calls=native_calls;
+    assert(SetWindowPos(native_window,NULL,0,0,old.right-old.left+24,old.bottom-old.top+16,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE));
+    native_wait_count(&native_calls,calls+1);native_idle();
+    RECT client;assert(GetClientRect(native_window,&client));
+    assert(native_width==(unsigned)client.right && native_height==(unsigned)client.bottom);
+    calls=native_calls;assert(PostMessageW(native_window,WM_DISPLAYCHANGE,32,MAKELPARAM(640,480)));
+    native_wait_count(&native_calls,calls+1);native_idle();
+    FILE *saved=tmpfile();assert(saved && xbox_FramebufferSaveCheckpoint(saved));
+    assert(native_captures==1);calls=native_calls;
+    rewind(saved);assert(xbox_FramebufferLoadCheckpoint(saved));assert(native_restores==1);
+    native_wait_count(&native_calls,calls+1);native_idle();fclose(saved);
+    fprintf(stderr,"[FRAMEBUFFER] native completion idles;input stays idle;timer retries pending frame;paint/size/displaychange/checkpoint restore redisplay\n");
+    InterlockedExchange(&s_fb_running,0);SetEvent(s_frame_ready);
+    assert(WaitForSingleObject(window,5000)==WAIT_OBJECT_0);CloseHandle(window);CloseHandle(native_changed);
+}
+
 int main(int argc,char **argv) {
     assert(argc==2);init_host();
-    if(!strcmp(argv[1],"sizing")) {
+    if(!strcmp(argv[1],"native")) {
+        check_native_readiness();
+    }else if(!strcmp(argv[1],"sizing")) {
         HWND window=CreateWindowExW(0,L"STATIC",L"sizing test",WS_OVERLAPPEDWINDOW,100,100,656,519,NULL,NULL,GetModuleHandleW(NULL),NULL);
         assert(window && !IsWindowVisible(window));
         const unsigned sizes[][2]={{640,480},{1920,1080},{1000,700}};
@@ -148,7 +213,7 @@ int main(int argc,char **argv) {
     return work/'framebuffer.exe'
 
 
-@pytest.mark.parametrize('mode',['handoff','checkpoint','sizing'])
+@pytest.mark.parametrize('mode',['handoff','checkpoint','sizing','native'])
 def test_original_framebuffer_producer_and_file_contract(native_framebuffer,mode):
     result=subprocess.run([str(native_framebuffer),mode],env=os.environ.copy(),
         capture_output=True,text=True,errors='replace',timeout=15)

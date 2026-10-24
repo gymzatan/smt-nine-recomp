@@ -24,7 +24,9 @@ static unsigned native_vertex_bytes,native_stream_bytes,native_vertex_stride;
  * backend consumes it. Native upload immutability has a separate pixel test. */
 static unsigned char native_uniform_bytes[32][4096];
 static unsigned native_uniform_sizes[32];
+static unsigned polygon_native_draw_calls;
 static int native_draw_for_test(NvkDraw *draw) {
+    polygon_native_draw_calls++;
     uint64_t generation=0;uint32_t offset=0;
     uint64_t *original_generation=draw->upload_generation;uint32_t *original_offset=draw->upload_offset;
     if(!original_generation){draw->upload_generation=&generation;draw->upload_offset=&offset;}
@@ -1215,20 +1217,19 @@ static void verify_completed_output_work(void) {
     event_query_creates=0;
     query_context_getter_calls=0;
     query_status_calls=query_event_payload_calls=0;
-    protection_test_inspect=0;QueryPerformanceCounter(&start);
+    protection_test_inspect=0;protection_test_calls=0;QueryPerformanceCounter(&start);
     for(unsigned i=0;i<100;++i) {
         hw_defer_output(output,i+1);
-        protection_test_calls=0;hw_collect_queries(1);
-        calls+=protection_test_calls;
+        hw_collect_queries(1);
         assert(!s_hw_query_count && ldl_le_p(output)==i+1);
         for(unsigned v=0;v<views.view_count;++v) {
             MEMORY_BASIC_INFORMATION region;
             uint8_t *alias=(uint8_t *)views.cpu_views[v]+views.offset;
-            assert(VirtualQuery(alias,&region,sizeof region) && region.Protect==PAGE_READWRITE);
+            assert(VirtualQuery(alias,&region,sizeof region) && region.Protect==PAGE_READONLY);
             assert(ldl_le_p(alias)==i+1);
         }
     }
-    QueryPerformanceCounter(&end);
+    QueryPerformanceCounter(&end);calls=protection_test_calls;
     fprintf(stderr,"[OUTPUT WORK] completed100 protection_calls=%u views=%u seconds=%.7f\n",calls,views.view_count,
         (double)(end.QuadPart-start.QuadPart)/frequency.QuadPart);
     fprintf(stderr,"[QUERY PAYLOAD] status_calls=%u event_payload_calls=%u\n",query_status_calls,query_event_payload_calls);
@@ -1240,15 +1241,15 @@ static void verify_completed_output_work(void) {
         assert(query_context_getter_calls==query_status_calls+200);
         assert(query_status_calls>=100 && query_event_payload_calls==0);
     }
-    /* Completion must directly establish the same final protection once. */
-    assert(calls==100*views.view_count);
+    /* Sequential completions retain the original owned write guard. */
+    assert(calls==views.view_count);
     fprintf(stderr,"[EVENT RESOURCE] completed100 creates=%u\n",event_query_creates);
     assert(event_query_creates==0);
     /* Neither a second pending output nor a synchronous barrier may reuse
      * an event whose original queue entry has not retired. */
     protection_test_calls=0;
     hw_defer_output(output,101);hw_defer_output(output+4,102);
-    assert(protection_test_calls==views.view_count);
+    assert(protection_test_calls==0);
     protection_pages_for_test(memory,views.offset&~(size_t)4095,1,PAGE_READONLY);
     assert(s_hw_query_count==2 && s_hw_queries[0].pending && s_hw_queries[1].pending);
     if(d3d8_IsNativeVulkan()) assert(s_hw_queries[0].native_serial==s_hw_queries[1].native_serial);
@@ -1259,21 +1260,100 @@ static void verify_completed_output_work(void) {
     else assert(s_hw_completion!=first && s_hw_completion!=second);
     protection_test_calls=0;
     hw_collect_queries(1);assert(!s_hw_query_count && ldl_le_p(output)==101 && ldl_le_p(output+4)==102);
-    assert(protection_test_calls==views.view_count);
+    assert(protection_test_calls==0);
     /* Different and straddling output pages retain their own protection. */
     uint8_t *edge=output-4+4094;
     hw_defer_output(output,103);hw_defer_output(edge,104);
     protection_pages_for_test(memory,views.offset&~(size_t)4095,2,PAGE_READONLY);
     protection_test_calls=0;
+    protection_pages_for_test(memory,(views.offset&~(size_t)4095)+8192,1,PAGE_READWRITE);
     hw_protect(memory,(views.offset&~(size_t)4095)+8192,4096,PAGE_READWRITE,NULL);
     assert(protection_test_calls==views.view_count);
     protection_pages_for_test(memory,views.offset&~(size_t)4095,2,PAGE_READONLY);
     hw_collect_queries(1);
     assert(ldl_le_p(output)==103 && ldl_le_p(edge)==104);
+    protection_pages_for_test(memory,views.offset&~(size_t)4095,2,PAGE_READONLY);
+    protection_pages_for_test(memory,(views.offset&~(size_t)4095)+8192,1,PAGE_READWRITE);
+    int host_write_held=nv2a_pb_host_write_begin(output-4,3*4096);
+    nv2a_pb_host_write_end(host_write_held);
     protection_pages_for_test(memory,views.offset&~(size_t)4095,3,PAGE_READWRITE);
     assert(d3d8_IsNativeVulkan()?nvk_completed(nvk_fence())==1:s_hw_completion!=NULL);
     protection_test_inspect=1;
 }
+/* Completion pages retain write ownership until a real writer needs them. */
+static void verify_sequential_output_guard_work(void) {
+    seed();hw_flush_batch();hw_collect_queries(1);hw_complete_commands();
+    NV2AState *gpu=nv2a_get_state();
+    uint8_t *output=nv_dma_span(gpu,0x100,0x68004,8192);
+    assert(output);XboxSharedMemoryViews views;
+    assert(xbox_GetSharedMemoryViews(output,8192,&views));
+    HwMemory *memory=hw_memory(&views);
+    const unsigned iterations[2]={100,1024};
+    for(unsigned round=0;round<2;round++) {
+        uint8_t *word=output+round*4096;
+        size_t at=views.offset+round*4096;
+        uint64_t completions=s_gpu.hardware_gpu_completions;
+        protection_test_calls=0;
+        for(unsigned i=0;i<iterations[round];i++) {
+            hw_defer_output(word,0x12340000u+i);
+            assert(s_hw_query_count==1 && s_hw_queries[0].pending);
+            hw_collect_queries(1);
+            assert(!s_hw_query_count);
+            for(unsigned v=0;v<views.view_count;v++) {
+                uint8_t *alias=(uint8_t *)views.cpu_views[v]+at;
+                MEMORY_BASIC_INFORMATION region;
+                assert(VirtualQuery(alias,&region,sizeof region));
+                assert(region.Protect==PAGE_READONLY);
+                assert(ldl_le_p(alias)==0x12340000u+i);
+            }
+        }
+        assert(s_gpu.hardware_gpu_completions==completions+iterations[round]);
+        fprintf(stderr,"[OUTPUT GUARD SEQUENTIAL] n=%u protection_calls=%u views=%u\n",
+            iterations[round],protection_test_calls,views.view_count);
+        assert(protection_test_calls==views.view_count);
+    }
+    /* Real guest writes use the already registered original VEH. Each write
+     * releases this physical page's owned guard across every CPU alias. */
+    for(unsigned writer=0;writer<views.view_count;writer++) {
+        volatile uint32_t *alias=(volatile uint32_t *)((uint8_t *)views.cpu_views[writer]+views.offset);
+        *alias=0x33445500u+writer;
+        for(unsigned v=0;v<views.view_count;v++) {
+            uint8_t *a=(uint8_t *)views.cpu_views[v]+views.offset;
+            MEMORY_BASIC_INFORMATION region;
+            assert(VirtualQuery(a,&region,sizeof region) && region.Protect==PAGE_READWRITE);
+            assert(ldl_le_p(a)==0x33445500u+writer);
+        }
+        protection_test_calls=0;
+        hw_defer_output(output,0x55667700u+writer);hw_collect_queries(1);
+        assert(!s_hw_query_count && ldl_le_p(output)==0x55667700u+writer);
+        assert(protection_test_calls==views.view_count);
+    }
+    /* A CPU write sharing pending output must collect both entries before
+     * becoming writable; the later neighbouring result must not be lost. */
+    hw_defer_output(output,0x11223344);hw_defer_output(output+4,0x55667788);
+    assert(s_hw_query_count==2 && s_hw_queries[0].pending && s_hw_queries[1].pending);
+    *(volatile uint32_t *)output=0xabcdef01;
+    assert(!s_hw_query_count && ldl_le_p(output)==0xabcdef01 && ldl_le_p(output+4)==0x55667788);
+    /* Host-write lifecycle releases the same retained guard; no raw permission
+     * injection and no synthetic success from a substitute handler. */
+    hw_defer_output(output,0x22334455);hw_collect_queries(1);
+    int held=nv2a_pb_host_write_begin(output,4);
+    *(uint32_t *)output=0x66778899;
+    nv2a_pb_host_write_end(held);
+    assert(ldl_le_p(output)==0x66778899);
+    hw_defer_output(output,0x33445566);hw_collect_queries(1);
+    /* Public original lifetime teardown must restore all retained pages. */
+    nv2a_pb_release_memory_views();
+    for(unsigned v=0;v<views.view_count;v++) {
+        uint8_t *alias=(uint8_t *)views.cpu_views[v]+views.offset;
+        MEMORY_BASIC_INFORMATION region;
+        assert(VirtualQuery(alias,&region,sizeof region) && region.Protect==PAGE_READWRITE);
+        assert(ldl_le_p(alias)==0x33445566);
+    }
+    (void)memory;
+    fprintf(stderr,"[OUTPUT GUARD LIFETIME] alias writes, rearm, pending order, host-write and release passed\n");
+}
+
 static void verify_attribute_offset_work(void) {
     VertexAttr *attr=&s_gpu.attr[0];memset(attr,0,sizeof *attr);float out[4],reference[4];
     const float defaults[4]={0,0,0,1},payload[4]={-1.25f,0.5f,17,2};
@@ -2879,8 +2959,10 @@ static void raster_mode_for_test(unsigned front,unsigned back) {
 static void raster_draw_for_test(unsigned primitive,unsigned start,unsigned count) {
     method(NV097_SET_BEGIN_END,primitive);method(NV097_DRAW_ARRAYS,start|((count-1)<<24));method(NV097_SET_BEGIN_END,0);
 }
+static FILE *polygon_pixels_file;
 static void raster_pixels_for_test(uint32_t *pixels) {
     nv2a_pb_checkpoint_publish();memcpy(pixels,(void *)(xbox_GetMemoryOffset()+s_gpu.color_base),64*64*4);
+    if(polygon_pixels_file)assert(fwrite(pixels,64*64*4,1,polygon_pixels_file)==1);
 }
 static float raster_depth_for_test(unsigned mode) {
     if(!hw_enabled()){nv2a_pb_checkpoint_publish();return (float)(BRIDGE_MEM32(0x80060000u+(mode==0?16u:0u)*4)>>8);}
@@ -2905,6 +2987,11 @@ static void verify_polygon_raster_consumers(void) {
         method(NV097_SET_TRANSFORM_EXECUTION_MODE,route?0:2);
         struct RasterVertexForTest triangle[3]={{16,16,1,1,0xffff0000},{48,16,1,1,0xffff0000},{16,48,1,1,0xffff0000}};
         raster_vertices_for_test(triangle,3);
+        raster_mode_for_test(2,2);method(NV097_SET_LINE_WIDTH,8);method(NV097_CLEAR_SURFACE,0xf0);
+        unsigned line_mark=polygon_native_draw_calls;
+        raster_draw_for_test(5,0,3);raster_pixels_for_test(actual);
+        fprintf(stderr,"[POLYGON LINE SUBMISSIONS] route=%u physical=%u calls=%u\n",route,(unsigned)d3d8_RenderScale(),polygon_native_draw_calls-line_mark);
+        raster_mode_for_test(0,0);
         /* Polygon points use the same point-size and generated coverage as points. */
         for(unsigned size=1;size<=4;size++) {
             method(NV097_SET_POINT_SIZE,size*8);raster_mode_for_test(0,0);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(1,0,3);raster_pixels_for_test(reference);
@@ -2949,6 +3036,9 @@ static void verify_polygon_raster_consumers(void) {
         }
         /* Polygon clipping precedes mode selection: clipping creates real
          * boundary vertices/edges rather than merely trimming original lines. */
+        const unsigned clip_widths[]={8,24,128};
+        for(unsigned cw=0;cw<sizeof clip_widths/sizeof *clip_widths;cw++) {
+        method(NV097_SET_LINE_WIDTH,clip_widths[cw]);
         for(unsigned quad=0;quad<2;quad++)for(unsigned point=0;point<2;point++) {
             const struct RasterVertexForTest clipped[5]={{0,16,1,1,0xffff0000},{48,16,1,1,0xffff0000},{24,64,1,1,0xffff0000},{8,64,1,1,0xffff0000},{0,48,1,1,0xffff0000}};
             const struct RasterVertexForTest clipped_quad[4]={{0,16,1,1,0xffff0000},{48,16,1,1,0xffff0000},{48,64,1,1,0xffff0000},{0,64,1,1,0xffff0000}};
@@ -2959,14 +3049,21 @@ static void verify_polygon_raster_consumers(void) {
             if(quad)source[2].x=48;
             raster_vertices_for_test(source,quad?4:3);raster_mode_for_test(point?1:2,point?1:2);method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(quad?8:5,0,quad?4:3);raster_pixels_for_test(actual);assert(!memcmp(reference,actual,sizeof actual));
         }
+        }
+        method(NV097_SET_LINE_WIDTH,8);
         /* Reversing one overlapping primitive makes both faces visible.
          * Sequential uniform draws establish the required original blend order. */
         struct RasterVertexForTest overlap[6];for(unsigned i=0;i<3;i++){overlap[i]=triangle[i];overlap[i].color=0x80ff0000;overlap[3+i]=triangle[2-i];overlap[3+i].color=0x8000ff00;}
         raster_vertices_for_test(overlap,6);method(NV097_SET_BLEND_ENABLE,1);method(NV097_SET_BLEND_FUNC_SFACTOR,0x302);method(NV097_SET_BLEND_FUNC_DFACTOR,0x303);
+        const unsigned polygon_widths[]={8,16,24,128,136};
+        for(unsigned pw=0;pw<sizeof polygon_widths/sizeof *polygon_widths;pw++) {
+        method(NV097_SET_LINE_WIDTH,polygon_widths[pw]);
         for(unsigned front=0;front<3;front++)for(unsigned back=0;back<3;back++) {
             method(NV097_CLEAR_SURFACE,0xf0);raster_mode_for_test(front,front);raster_draw_for_test(5,0,3);raster_mode_for_test(back,back);raster_draw_for_test(5,3,3);raster_pixels_for_test(reference);
             method(NV097_CLEAR_SURFACE,0xf0);raster_mode_for_test(front,back);raster_draw_for_test(5,0,6);raster_pixels_for_test(actual);assert(!memcmp(reference,actual,sizeof actual));
         }
+        }
+        method(NV097_SET_LINE_WIDTH,8);
         method(NV097_SET_BLEND_ENABLE,0);raster_mode_for_test(0,0);
         /* Aliased width is nearest integer; the major axis selects contiguous
          * native unit lines. Compare actual wide output with those original lines. */
@@ -3620,7 +3717,10 @@ int main(int argc,char **argv) {
     } else if(!strcmp(argv[1],"polygon-stipple")) {
         verify_polygon_stipple_consumers();
     } else if(!strcmp(argv[1],"polygon-raster")) {
+        char pixels_path[4096];assert(snprintf(pixels_path,sizeof pixels_path,"%s.pixels",argv[3])>0);
+        polygon_pixels_file=fopen(pixels_path,"wb");assert(polygon_pixels_file);
         verify_polygon_raster_consumers();
+        assert(fclose(polygon_pixels_file)==0);polygon_pixels_file=NULL;
     } else if(!strcmp(argv[1],"dependent-textures")) {
         verify_dependent_texture_stages();
     } else if(!strcmp(argv[1],"texture-color-keys")) {
@@ -3671,6 +3771,8 @@ int main(int argc,char **argv) {
         verify_clear_address_work();
     } else if(!strcmp(argv[1],"output-work")) {
         verify_completed_output_work();
+    } else if(!strcmp(argv[1],"output-guard-sequential")) {
+        verify_sequential_output_guard_work();
     } else if(!strcmp(argv[1],"attribute-work")) {
         verify_attribute_offset_work();
     } else if(!strcmp(argv[1],"protection-work")) {
@@ -3859,6 +3961,17 @@ def test_completed_output_establishes_final_protection_once(native_gpu,tmp_path,
         capture_output=True,text=True,errors='replace',timeout=30)
     for line in result.stderr.splitlines():
         if line.startswith(('[OUTPUT WORK]','[QUERY PAYLOAD]','[EVENT RESOURCE]','[QUERY CONTEXT]')):print(line)
+    assert result.returncode==0,result.stdout+result.stderr
+
+
+@pytest.mark.parametrize('backend,scale',[('D3D11',1),('D3D11',2),('Vulkan',1),('Vulkan',2),('OpenGL',1),('OpenGL',2)])
+def test_sequential_output_guard_reuse_and_write_lifecycle(native_gpu,tmp_path,backend,scale):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'output-guard-sequential',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},
+        capture_output=True,text=True,errors='replace',timeout=30)
+    for line in result.stderr.splitlines():
+        if line.startswith(('[OUTPUT GUARD SEQUENTIAL]','[OUTPUT GUARD LIFETIME]')):print(line)
     assert result.returncode==0,result.stdout+result.stderr
 
 
@@ -4243,12 +4356,14 @@ def test_fixed_two_sided_material_lighting_consumes_original_back_state(native_g
     assert '[FIXED TWO SIDED LIGHTING]' in result.stderr
 
 @pytest.mark.parametrize('backend', ['D3D11','D3D12','Vulkan','OpenGL'])
-@pytest.mark.parametrize('scale', [1,2])
+@pytest.mark.parametrize('scale', [1,2,3,4])
 def test_polygon_modes_edges_and_width_use_original_raster_consumers(native_gpu,tmp_path,backend,scale):
     executable,xbe=native_gpu
     result=subprocess.run([str(executable),'polygon-raster',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],
         env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},
         capture_output=True,text=True,errors='replace',timeout=90)
+    for line in result.stderr.splitlines():
+        if line.startswith('[POLYGON LINE SUBMISSIONS]'):print(line)
     assert result.returncode==0,result.stdout+result.stderr
     assert '[POLYGON RASTER]' in result.stderr
 

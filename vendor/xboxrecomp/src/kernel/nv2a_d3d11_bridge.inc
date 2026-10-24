@@ -10,7 +10,7 @@ static ID3D11DepthStencilState *s_hw_clear_ds[4];
 typedef struct HwMemory {
     XboxSharedMemoryViews views;
     uint8_t *host_view;
-    DWORD *texture_guard_protections;
+    DWORD *write_guard_protections;
     struct HwMemory *next;
 } HwMemory;
 static HwMemory *s_hw_memories;
@@ -212,8 +212,8 @@ static HwMemory *hw_memory(const XboxSharedMemoryViews *views)
     HwMemory *m=(HwMemory *)calloc(1,sizeof *m);if(!m) hw_check(E_OUTOFMEMORY,"shared memory identity");
     m->views=*views;m->host_view=(uint8_t *)MapViewOfFile((HANDLE)views->section,FILE_MAP_ALL_ACCESS,0,0,views->view_size);
     if(!m->host_view) hw_check(HRESULT_FROM_WIN32(GetLastError()),"shared memory host view");
-    m->texture_guard_protections=calloc(((views->view_size+4095)/4096)*views->view_count,sizeof *m->texture_guard_protections);
-    if(!m->texture_guard_protections) hw_check(E_OUTOFMEMORY,"texture protection ownership");
+    m->write_guard_protections=calloc(((views->view_size+4095)/4096)*views->view_count,sizeof *m->write_guard_protections);
+    if(!m->write_guard_protections) hw_check(E_OUTOFMEMORY,"CPU write protection ownership");
     m->next=s_hw_memories;s_hw_memories=m;return m;
 }
 static void hw_texture_invalidate(HwTexture *texture)
@@ -264,7 +264,7 @@ static void hw_protect_views(HwMemory *memory,size_t offset,size_t bytes,DWORD p
     if(protection==PAGE_READWRITE) {
         hw_invalidate_texture_range(memory,offset,bytes);
         for(size_t page=offset/4096;page<(offset+bytes+4095)/4096;page++)
-            for(unsigned i=0;i<memory->views.view_count;i++) memory->texture_guard_protections[page*memory->views.view_count+i]=0;
+            for(unsigned i=0;i<memory->views.view_count;i++) memory->write_guard_protections[page*memory->views.view_count+i]=0;
     }
     for(unsigned i=0;i<memory->views.view_count;i++) {
         DWORD previous;
@@ -294,6 +294,7 @@ static int hw_pending_output(HwMemory *memory,size_t offset,size_t bytes)
     }
     return 0;
 }
+static void hw_guard_cpu_write_range(HwMemory *memory,size_t offset,size_t bytes);
 enum HwOutputProtection { HW_OUTPUT_REFRESH, HW_OUTPUT_APPEND, HW_OUTPUT_COMPLETE };
 static void hw_output_page_protection(HwQuery *query, enum HwOutputProtection transition)
 {
@@ -321,7 +322,22 @@ static void hw_output_page_protection(HwQuery *query, enum HwOutputProtection tr
             colour=1;if(d->dirty){protection=PAGE_NOACCESS;break;}if(!d->upload_needed)protection=PAGE_READONLY;
         }
         /* Other pending outputs still own this already read-only page. */
-        if(transition==HW_OUTPUT_COMPLETE && pending && !colour) continue;
+        if(!colour) {
+            /* Keep the existing owned write guard until an actual CPU write.
+             * The host view publishes completion without making aliases writable. */
+            if(transition==HW_OUTPUT_COMPLETE) {
+                hw_invalidate_texture_range(query->memory,page,4096);continue;
+            }
+            if(protection==PAGE_READONLY) {
+                DWORD *permissions=query->memory->write_guard_protections+
+                    (page/4096)*query->memory->views.view_count;
+                unsigned i=0;while(i<query->memory->views.view_count && permissions[i])++i;
+                if(i<query->memory->views.view_count)hw_guard_cpu_write_range(query->memory,page,4096);
+                continue;
+            }
+        }
+        if(transition==HW_OUTPUT_COMPLETE && protection==PAGE_READONLY)
+            hw_invalidate_texture_range(query->memory,page,4096);
         hw_protect_views(query->memory,page,4096,protection);
     }
 }
@@ -385,10 +401,10 @@ static void hw_mark_cpu_write(HwMemory *memory,size_t offset,size_t bytes,HwQuer
     for(HwDepth *d=s_hw_depths;d;d=d->next) if(d->memory==memory && hw_ranges_overlap(lo,hi-lo,d->memory_offset,hw_depth_bytes(d))) d->upload_needed=1;
     hw_protect(memory,offset,bytes,PAGE_READWRITE,completed);
 }
-/* Keep existing colour/query protections stronger than a texture read guard.
+/* Keep existing colour/query protections stronger than an owned write guard.
  * Per-view records retain only permissions changed here; content validity stays
  * in the original texture cache, and guest-owned read-only views stay intact. */
-static void hw_guard_texture_range(HwMemory *memory,size_t offset,size_t bytes)
+static void hw_guard_cpu_write_range(HwMemory *memory,size_t offset,size_t bytes)
 {
     size_t lo=offset&~(size_t)4095,hi=(offset+bytes+4095)&~(size_t)4095;
     for(unsigned i=0;i<memory->views.view_count;i++) {
@@ -407,21 +423,22 @@ static void hw_guard_texture_range(HwMemory *memory,size_t offset,size_t bytes)
                 if(!VirtualProtect(base+at,end-at,read_only|(page.Protect&~0xffu),&previous))
                     hw_check(HRESULT_FROM_WIN32(GetLastError()),"texture read protection");
                 for(size_t index=at/4096;index<end/4096;index++)
-                    memory->texture_guard_protections[index*memory->views.view_count+i]=page.Protect;
+                    memory->write_guard_protections[index*memory->views.view_count+i]=page.Protect;
             }
             at=end;
         }
     }
 }
-static void hw_release_texture_range(HwMemory *memory,size_t offset,size_t bytes)
+static void hw_release_cpu_write_range(HwMemory *memory,size_t offset,size_t bytes)
 {
     hw_invalidate_texture_range(memory,offset,bytes);
     size_t lo=offset&~(size_t)4095,hi=(offset+bytes+4095)&~(size_t)4095;
     for(size_t page=lo;page<hi;page+=4096) {
-        DWORD *permissions=memory->texture_guard_protections+(page/4096)*memory->views.view_count;
+        DWORD *permissions=memory->write_guard_protections+(page/4096)*memory->views.view_count;
         int owned=0;for(unsigned i=0;i<memory->views.view_count;i++) if(permissions[i]){owned=1;break;}
         if(!owned) continue;
-        DWORD protection=hw_pending_output(memory,page,4096)?PAGE_READONLY:0;
+        int output=hw_pending_output(memory,page,4096);
+        DWORD protection=output?PAGE_READONLY:0;
         for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==memory && hw_ranges_overlap(page,4096,c->memory_offset,hw_color_bytes(c))) {
             if(c->dirty) {protection=PAGE_NOACCESS;break;}
             if(!c->upload_needed) protection=PAGE_READONLY;
@@ -433,7 +450,7 @@ static void hw_release_texture_range(HwMemory *memory,size_t offset,size_t bytes
             DWORD previous;
             if(!VirtualProtect((uint8_t *)memory->views.cpu_views[i]+page,4096,protection?protection:permissions[i],&previous))
                 hw_check(HRESULT_FROM_WIN32(GetLastError()),"texture protection release");
-            permissions[i]=0;
+            if(!output)permissions[i]=0;
         }
     }
 }
@@ -442,7 +459,7 @@ static void hw_vertex_batch_discard(HwVertexBatch *entry)
 {
     entry->valid=0;
     for(unsigned i=0;i<entry->range_count;i++)
-        hw_release_texture_range(entry->ranges[i].memory,entry->ranges[i].offset,entry->ranges[i].bytes);
+        hw_release_cpu_write_range(entry->ranges[i].memory,entry->ranges[i].offset,entry->ranges[i].bytes);
     free(entry->data);memset(entry,0,sizeof *entry);
 }
 static void hw_free_vertex_batches(void)
@@ -492,7 +509,7 @@ static HwVertexBatch *hw_vertex_batch_begin(uint32_t inputs,unsigned attribute_c
                 ++s_hw_vertex_cache_hits;*hit=1;return entry;
             }
             for(unsigned i=0;i<entry->range_count;i++)
-                hw_guard_texture_range(entry->ranges[i].memory,entry->ranges[i].offset,entry->ranges[i].bytes);
+                hw_guard_cpu_write_range(entry->ranges[i].memory,entry->ranges[i].offset,entry->ranges[i].bytes);
             ++s_hw_vertex_cache_misses;return entry;
         }
     }
@@ -536,7 +553,7 @@ static HwVertexBatch *hw_vertex_batch_begin(uint32_t inputs,unsigned attribute_c
         if(range==selected->range_count) selected->ranges[selected->range_count++]=(HwVertexRange){memory,views.offset,bytes};
     }
     for(unsigned i=0;i<selected->range_count;i++)
-        hw_guard_texture_range(selected->ranges[i].memory,selected->ranges[i].offset,selected->ranges[i].bytes);
+        hw_guard_cpu_write_range(selected->ranges[i].memory,selected->ranges[i].offset,selected->ranges[i].bytes);
     selected->data=malloc((size_t)n*(attribute_count*16u+8u));
     if(!selected->data) hw_check(E_OUTOFMEMORY,"vertex conversion cache");
     memcpy(selected->attr,attributes,sizeof attributes);
@@ -556,14 +573,14 @@ static void hw_vertex_batch_end(HwVertexBatch *entry,unsigned attribute_count)
     memcpy(entry->data+entry->count*4,s_hw_program_vertex_rows,entry->count*4);
     memcpy(entry->data+entry->count*8,s_hw_program_upload.vertex,entry->bytes);
     for(unsigned i=0;i<entry->range_count;i++)
-        hw_guard_texture_range(entry->ranges[i].memory,entry->ranges[i].offset,entry->ranges[i].bytes);
+        hw_guard_cpu_write_range(entry->ranges[i].memory,entry->ranges[i].offset,entry->ranges[i].bytes);
     entry->valid=1;
 }
 
 static void hw_disarm_texture(HwTexture *texture)
 {
-    if(texture->memory) hw_release_texture_range(texture->memory,texture->memory_offset,texture->raw_size);
-    if(texture->palette_memory) hw_release_texture_range(texture->palette_memory,texture->palette_offset,sizeof texture->palette);
+    if(texture->memory) hw_release_cpu_write_range(texture->memory,texture->memory_offset,texture->raw_size);
+    if(texture->palette_memory) hw_release_cpu_write_range(texture->palette_memory,texture->palette_offset,sizeof texture->palette);
 }
 static void hw_free_textures(void)
 {
@@ -774,7 +791,7 @@ int nv2a_pb_host_write_begin(void *address,size_t bytes)
             /* Host reads may be short or fail: preserve every dirty owner on
              * pages made writable, without publishing unrelated surfaces. */
             hw_preserve_cpu_write(m,p-b,bytes,0);
-            hw_release_texture_range(m,p-b,bytes);
+            hw_release_cpu_write_range(m,p-b,bytes);
             for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==m && hw_ranges_overlap(lo,hi-lo,c->memory_offset,hw_color_bytes(c))) {
                 size_t color_lo=c->memory_offset&~(size_t)4095,color_hi=(c->memory_offset+hw_color_bytes(c)+4095)&~(size_t)4095;
                 size_t begin=lo>color_lo?lo:color_lo,end=hi<color_hi?hi:color_hi;
@@ -820,7 +837,7 @@ int nv2a_pb_handle_memory_fault(uintptr_t address,int is_write)
         for(unsigned i=0;i<m->views.view_count;i++) {
             uintptr_t b=(uintptr_t)m->views.cpu_views[i];
             if(address>=b && address-b<m->views.view_size &&
-               m->texture_guard_protections[((address-b)/4096)*m->views.view_count+i]) {
+               m->write_guard_protections[((address-b)/4096)*m->views.view_count+i]) {
                 memory=m;offset=address-b;texture_fault=1;break;
             }
         }
@@ -838,11 +855,11 @@ int nv2a_pb_handle_memory_fault(uintptr_t address,int is_write)
         hw_leave();return 0;
     }
     uint64_t started=gpu_timing_clock();
-    /* A texture-only guard was found after excluding all colour and output
-     * pages above. Invalidating its CPU bytes cannot require unrelated output. */
+    /* An owned write guard was found after excluding all colour and pending
+     * output pages. Its write cannot require an unrelated output completion. */
     if(owner || depth_owner) hw_publish_all();else if(!texture_fault) hw_collect_queries(1);
     if(is_write) {
-        if(texture_fault) hw_release_texture_range(memory,offset&~(size_t)4095,4096);
+        if(texture_fault) hw_release_cpu_write_range(memory,offset&~(size_t)4095,4096);
         else if(owner && offset>=owner->memory_offset && offset<owner->memory_offset+hw_color_bytes(owner)) hw_mark_cpu_write(owner->memory,owner->memory_offset,hw_color_bytes(owner),NULL);
         else hw_mark_cpu_write(memory,offset&~(size_t)4095,4096,NULL);
         ++s_gpu.hardware_cpu_write_faults;
@@ -865,7 +882,10 @@ void nv2a_pb_release_memory_views(void)
     s_hw_colors=NULL;
     for(HwDepth *d=s_hw_depths;d;d=d->next){d->dirty=0;d->upload_needed=1;hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_READWRITE,NULL);}
     hw_free_depths(s_hw_depths);s_hw_depths=NULL;
-    for(HwMemory *m=s_hw_memories;m;) { HwMemory *next=m->next;UnmapViewOfFile(m->host_view);free(m->texture_guard_protections);free(m);m=next; }
+    for(HwMemory *m=s_hw_memories;m;) { HwMemory *next=m->next;
+        hw_release_cpu_write_range(m,0,m->views.view_size);
+        UnmapViewOfFile(m->host_view);free(m->write_guard_protections);free(m);m=next;
+    }
     s_hw_memories=NULL;
     if(s_hw_clear_vs) { ID3D11VertexShader_Release(s_hw_clear_vs);s_hw_clear_vs=NULL; }
     if(s_hw_clear_cb) { ID3D11Buffer_Release(s_hw_clear_cb);s_hw_clear_cb=NULL; }
@@ -1009,13 +1029,14 @@ static void hw_finish_native_frame(uint32_t address,uint32_t pitch)
      * RAM publication remains demand driven by the existing memory guards. */
     hw_complete_commands_locked();hw_collect_queries(1);hw_leave();
 }
-static void hw_display_native(void *window,unsigned width,unsigned height,const int32_t bounds[4])
+static int hw_display_native(void *window,unsigned width,unsigned height,const int32_t bounds[4])
 {
-    if(!width || !height)return;
+    if(!width || !height)return 0;
     hw_context_enter();
     if(s_hw_vk_front) {
-        hw_vk_check(nvk_window_present(window,s_hw_vk_front,width,height,bounds,d3d8_DisplayVSync()),"native window present");
-        LeaveCriticalSection(&s_hw_lock);return;
+        int result=nvk_window_present(window,s_hw_vk_front,width,height,bounds,d3d8_DisplayVSync());
+        hw_vk_check(result,"native window present");
+        LeaveCriticalSection(&s_hw_lock);return result==1;
     }
     int ready=s_hw_front!=NULL;
     if(ready) {
@@ -1025,8 +1046,9 @@ static void hw_display_native(void *window,unsigned width,unsigned height,const 
     }
     /* DXGI Present also accesses the immediate context. Keep it serialized;
      * the nonblocking swap avoids waiting here for desktop pacing. */
-    if(ready)hw_check(d3d8_window_present(),"native window present");
-    LeaveCriticalSection(&s_hw_lock);
+    HRESULT result=S_FALSE;
+    if(ready) {result=d3d8_window_present();hw_check(result,"native window present");}
+    LeaveCriticalSection(&s_hw_lock);return result!=S_FALSE;
 }
 static int hw_capture_native(void)
 {
@@ -1467,7 +1489,7 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
         entry->hash_next=s_hw_texture_buckets[bucket];s_hw_texture_buckets[bucket]=entry;
     }
     if(palette && (!entry->palette_memory || entry->identity.palette!=source->palette)) {
-        if(entry->palette_memory) hw_release_texture_range(entry->palette_memory,entry->palette_offset,sizeof entry->palette);
+        if(entry->palette_memory) hw_release_cpu_write_range(entry->palette_memory,entry->palette_offset,sizeof entry->palette);
         XboxSharedMemoryViews views;
         if(!xbox_GetSharedMemoryViews(palette,sizeof entry->palette,&views)) hw_check(E_INVALIDARG,"palette shared memory identity");
         entry->palette_memory=hw_memory(&views);entry->palette_offset=views.offset;
@@ -1478,8 +1500,8 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
         hw_collect_queries(1);
     int changed=created;
     if(!entry->content_valid) {
-        hw_guard_texture_range(entry->memory,entry->memory_offset,bytes);
-        if(palette) hw_guard_texture_range(entry->palette_memory,entry->palette_offset,sizeof entry->palette);
+        hw_guard_cpu_write_range(entry->memory,entry->memory_offset,bytes);
+        if(palette) hw_guard_cpu_write_range(entry->palette_memory,entry->palette_offset,sizeof entry->palette);
         changed=created || memcmp(entry->raw,raw,bytes)!=0 || (palette && memcmp(entry->palette,palette,sizeof entry->palette)!=0);
     }
     if(changed) {
@@ -1546,8 +1568,8 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
         if(palette) memcpy(entry->palette,palette,1024);
     }
     if(!entry->content_valid) {
-        hw_guard_texture_range(entry->memory,entry->memory_offset,bytes);
-        if(palette) hw_guard_texture_range(entry->palette_memory,entry->palette_offset,sizeof entry->palette);
+        hw_guard_cpu_write_range(entry->memory,entry->memory_offset,bytes);
+        if(palette) hw_guard_cpu_write_range(entry->palette_memory,entry->palette_offset,sizeof entry->palette);
         hw_texture_validate(entry);
     }
     if(entry->native)s_hw_vk_textures[stage]=entry->native;
@@ -2189,7 +2211,7 @@ static void hw_flush_batch(void)
             for(unsigned mode=0;mode<3;mode++) {
                 if(mode!=geometry.polygon[0] && mode!=geometry.polygon[1])continue;
                 hw_polygon_offset(&native,mode,constant_w);
-                unsigned passes=mode==1 || (mode==2 && hw_line_copies(&geometry)>1)?9:1;
+                unsigned passes=mode==1 || (mode==2 && hw_line_copies(&geometry)>16)?9:1;
                 for(unsigned edge=0;edge<passes;edge++) {
                     geometry.raster[1]=passes==1?-1:(float)edge;
                     hw_issue_geometry_draw(ctx,&native_draw,&geometry,&native,hw_geometry_kind(mode),first,6);
