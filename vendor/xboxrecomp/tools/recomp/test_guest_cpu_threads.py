@@ -318,13 +318,18 @@ static void diagnostic_summary_probe(int enabled) {
     assert(g_eax==0 && !BRIDGE_MEM32(0x7000) && g_kernel_call_count==206);
     fprintf(stderr,"[DIAGNOSTIC_WATCH] original bridge/status/stack/total/watch retained\n");
 }
+static int fixture_file_logging;
 static void diagnostic_load_probe(int enabled,const char *xbe_path,const char *directory) {
     _putenv_s("RECOMP_GUEST_LOCK","");_putenv_s("RECOMP_GPU_TIMING","");
-    _putenv_s("RECOMP_KERNEL_LOG_BUDGET","0");_putenv_s("RECOMP_LOAD_TIMING",enabled?"1":"");
+    _putenv_s("RECOMP_KERNEL_LOG_BUDGET",fixture_file_logging==1?"16":"0");
+    _putenv_s("RECOMP_LOAD_TIMING",enabled?"1":"");
+    if(fixture_file_logging) _putenv_s("XBOX_LOG_LEVEL",fixture_file_logging==1?"4":"2");
+    int initial_logging=KERNEL_LOG_ON();
     FILE *file=fopen(xbe_path,"rb");assert(file);fseek(file,0,SEEK_END);
     long size=ftell(file);rewind(file);void *xbe=malloc(size);assert(xbe);
     assert(fread(xbe,size,1,file)==1 && fclose(file)==0);
     assert(xbox_MemoryLayoutInit(xbe,size));free(xbe);
+    if(fixture_file_logging) xbox_kernel_init();
     xbox_path_init(directory,directory);assert(xbox_kernel_init_devices()==0);
     XBOX_ANSI_STRING drive={6,6,"\\??\\D:"},device={14,14,"\\Device\\CdRom0"};
     assert(xbox_IoCreateSymbolicLink(&drive,&device)==0);
@@ -351,13 +356,21 @@ static void diagnostic_load_probe(int enabled,const char *xbe_path,const char *d
             enabled,open_clocks,read_clocks);
     assert(open_clocks==(enabled?2:0) && read_clocks==(enabled?2:0));
     assert(DeleteFileA(filename));
+    if(fixture_file_logging) {
+        fprintf(stderr,"[DIAGNOSTIC_FILE] enabled=%d initial_logging=%d\n",fixture_file_logging==1,initial_logging);
+        xbox_kernel_shutdown();
+    }
 }
 
 int main(int argc,char **argv) {
     if(argc>=2 && !strncmp(argv[1],"diagnostic_",11)) {
         if(!strncmp(argv[1],"diagnostic_summary_",19)) {
             fixture_memory_init();diagnostic_summary_probe(!strcmp(argv[1],"diagnostic_summary_on"));
-        } else {assert(argc==4);diagnostic_load_probe(!strcmp(argv[1],"diagnostic_load_on"),argv[2],argv[3]);}
+        } else {
+            assert(argc==4);
+            if(!strncmp(argv[1],"diagnostic_file_",16)) fixture_file_logging=!strcmp(argv[1],"diagnostic_file_on")?1:2;
+            diagnostic_load_probe(!strcmp(argv[1],"diagnostic_load_on"),argv[2],argv[3]);
+        }
         return 0;
     }
     fixture_memory_init(); _putenv_s("RECOMP_GUEST_LOCK","1"); _putenv_s("RECOMP_GPU_TIMING","1");
@@ -580,6 +593,7 @@ int main(int argc,char **argv) {
         result = subprocess.run([compiler,"/nologo","/O2","/Gy","/MD","/utf-8","/DWIN32_LEAN_AND_MEAN",
             "/DNOMINMAX","/I"+str(root/"src"),str(work/"memory.c"),
             str(work/"threads.c"),str(root/"src/kernel/kernel_hal.c"),str(root/"src/kernel/recomp_continuation.c"),
+            str(root/"src/kernel/kernel_path.c"),
             "/Fe:"+str(work/"threads.exe"),"/link","/OPT:REF",*[str(p) for p in libraries],
             "kernel32.lib","user32.lib","gdi32.lib","advapi32.lib","ole32.lib","shell32.lib",
             "d3d11.lib","d3d12.lib","dxgi.lib","dxguid.lib","d3dcompiler.lib","winmm.lib",
@@ -622,3 +636,19 @@ def test_original_file_load_diagnostic_timing(native_thread_probe,tmp_path,enabl
     assert "[DIAGNOSTIC_LOAD]" in result.stderr
     assert ("[OPEN TIME]" in result.stderr)==enabled
     assert ("[READ TIME]" in result.stderr)==enabled
+
+
+@pytest.mark.parametrize("enabled",[False,True],ids=["off","on"])
+def test_original_file_diagnostic_logging(native_thread_probe,tmp_path,enabled):
+    root=Path(__file__).resolve().parents[2]
+    xbe=root/"tools/conformance/test.xbe"
+    assert xbe.is_file(), "requires original conformance XBE"
+    result=subprocess.run([str(native_thread_probe),"diagnostic_file_"+("on" if enabled else "off"),str(xbe),str(tmp_path)],
+                          cwd=tmp_path,capture_output=True,text=True,errors="replace",timeout=20)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert "data=NINE status=0 bytes=4" in result.stderr
+    assert ("[FILE] ->" in result.stderr)==enabled
+    assert "[PATH] " not in result.stderr
+    assert f"initial_logging={int(enabled)}" in result.stderr
+    log=(tmp_path/"xbox_kernel.log").read_text(encoding="utf8",errors="replace")
+    assert ("input.bin" in log)==enabled

@@ -76,32 +76,41 @@ uint32_t xbox_LastFileError(void)
 /* ======================================================================== */
 typedef struct FileOpenPolicy { HANDLE handle;DWORD access,share,flags,options,device; } FileOpenPolicy;
 static FileOpenPolicy s_file_open_policy[16384];
+/* Entries at and beyond this bound are empty; all accesses hold the original SRW lock. */
+static unsigned s_file_policy_end;
 static SRWLOCK s_file_policy_lock=SRWLOCK_INIT;
 static int file_policy_store(HANDLE handle,DWORD access,DWORD share,DWORD flags,DWORD options,DWORD device) {
     int ok=0;AcquireSRWLockExclusive(&s_file_policy_lock);
     unsigned index=16384;
-    for (unsigned i=0;i<16384;i++) if (s_file_open_policy[i].handle==handle) { index=i;break; }
-    if (index==16384) for (unsigned i=0;i<16384;i++) if (!s_file_open_policy[i].handle) { index=i;break; }
+    for (unsigned i=0;i<s_file_policy_end;i++) if (s_file_open_policy[i].handle==handle) { index=i;break; }
+    if (index==16384) {
+        for (unsigned i=0;i<s_file_policy_end;i++) if (!s_file_open_policy[i].handle) { index=i;break; }
+        if (index==16384 && s_file_policy_end<16384) index=s_file_policy_end;
+    }
     if (index<16384) {
-        s_file_open_policy[index]=(FileOpenPolicy){handle,access,share,flags,options,device};ok=1;
+        s_file_open_policy[index]=(FileOpenPolicy){handle,access,share,flags,options,device};
+        if (index==s_file_policy_end) ++s_file_policy_end;
+        ok=1;
     }
     ReleaseSRWLockExclusive(&s_file_policy_lock);return ok;
 }
 static void file_policy_drop(HANDLE handle) {
     AcquireSRWLockExclusive(&s_file_policy_lock);
-    for (unsigned i=0;i<16384;i++) if (s_file_open_policy[i].handle==handle)
-        memset(&s_file_open_policy[i],0,sizeof s_file_open_policy[i]);
+    for (unsigned i=0;i<s_file_policy_end;i++) if (s_file_open_policy[i].handle==handle) {
+        memset(&s_file_open_policy[i],0,sizeof s_file_open_policy[i]);break;
+    }
+    while (s_file_policy_end && !s_file_open_policy[s_file_policy_end-1].handle) --s_file_policy_end;
     ReleaseSRWLockExclusive(&s_file_policy_lock);
 }
 void xbox_FileHandleClosed(HANDLE handle) { file_policy_drop(handle); }
 uint32_t xbox_FileHandleDevice(HANDLE handle) {
     uint32_t device=0;AcquireSRWLockShared(&s_file_policy_lock);
-    for(unsigned i=0;i<16384;i++)if(s_file_open_policy[i].handle==handle){device=s_file_open_policy[i].device;break;}
+    for(unsigned i=0;i<s_file_policy_end;i++)if(s_file_open_policy[i].handle==handle){device=s_file_open_policy[i].device;break;}
     ReleaseSRWLockShared(&s_file_policy_lock);return device;
 }
 void xbox_FileHandleDuplicated(HANDLE source,HANDLE target,int close_source) {
     FileOpenPolicy policy={0};AcquireSRWLockShared(&s_file_policy_lock);
-    for (unsigned i=0;i<16384;i++) if (s_file_open_policy[i].handle==source) { policy=s_file_open_policy[i];break; }
+    for (unsigned i=0;i<s_file_policy_end;i++) if (s_file_open_policy[i].handle==source) { policy=s_file_open_policy[i];break; }
     ReleaseSRWLockShared(&s_file_policy_lock);
     if (close_source) file_policy_drop(source);
     if (policy.handle) file_policy_store(target,policy.access,policy.share,policy.flags,policy.options,policy.device);
@@ -655,7 +664,7 @@ static BOOL s_dir_cs_init = FALSE;
 
 int xbox_CaptureFileOpenState(HANDLE handle,XboxFileOpenState *state) {
     FileOpenPolicy policy={0};AcquireSRWLockShared(&s_file_policy_lock);
-    for (unsigned i=0;i<16384;i++) if (s_file_open_policy[i].handle==handle) { policy=s_file_open_policy[i];break; }
+    for (unsigned i=0;i<s_file_policy_end;i++) if (s_file_open_policy[i].handle==handle) { policy=s_file_open_policy[i];break; }
     ReleaseSRWLockShared(&s_file_policy_lock);
     if (!policy.handle) return 0;
     if (s_dir_cs_init) {

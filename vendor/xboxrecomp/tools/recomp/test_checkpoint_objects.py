@@ -4,6 +4,7 @@ import shutil
 import struct
 import subprocess
 
+import re
 import pytest
 
 from tools.recomp.test_continuations import translate
@@ -30,6 +31,8 @@ def native_objects(tmp_path_factory):
 #include "kernel/kernel_bridge.c"
 #undef xbox_KeWaitForSingleObject
 #undef xbox_KeWaitForMultipleObjects
+/* Compile the actual file backend into this original fixture, not the archive copy. */
+#include "file_policy_counted.c"
 extern NTSTATUS __stdcall xbox_KeWaitForSingleObject(PVOID,ULONG,KPROCESSOR_MODE,BOOLEAN,PLARGE_INTEGER);
 extern NTSTATUS __stdcall xbox_KeWaitForMultipleObjects(ULONG,PVOID *,ULONG,ULONG,KPROCESSOR_MODE,BOOLEAN,PLARGE_INTEGER,PVOID);
 static HANDLE wait_consumed,wait_resume;
@@ -624,8 +627,62 @@ static unsigned path_notifications;
 static void path_notification(const char *path) {
     assert(!strcmp(path,"R:\\Media\\asset.bin"));++path_notifications;
 }
+
+static void verify_original_file_policy_bounds(void) {
+    HANDLE unknown=CreateEventA(NULL,FALSE,FALSE,NULL);assert(unknown);
+    XboxFileOpenState saved;file_policy_test_reads=0;
+    assert(!xbox_FileHandleDevice(unknown));
+    assert(!xbox_CaptureFileOpenState(unknown,&saved));
+    xbox_FileHandleClosed(unknown);
+    xbox_FileHandleDuplicated(unknown,unknown,0);
+    fprintf(stderr,"[FILE POLICY] empty unknown actual-handle-reads=%llu\n",file_policy_test_reads);
+    assert(file_policy_test_reads==0);assert(CloseHandle(unknown));
+    HANDLE handles[4];
+    for(unsigned i=0;i<3;i++) {
+        handles[i]=CreateEventA(NULL,FALSE,FALSE,NULL);assert(handles[i]);
+        assert(file_policy_store(handles[i],GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,0x100+i));
+    }
+    xbox_FileHandleClosed(handles[1]);assert(CloseHandle(handles[1]));
+    /* An existing identity must be updated before filling an earlier hole. */
+    assert(file_policy_store(handles[2],GENERIC_WRITE,1,FILE_ATTRIBUTE_NORMAL,0x22,0x202));
+    assert(!s_file_open_policy[1].handle && s_file_open_policy[2].handle==handles[2]);
+    handles[3]=CreateEventA(NULL,FALSE,FALSE,NULL);assert(handles[3]);
+    assert(file_policy_store(handles[3],GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,0x303));
+    assert(s_file_open_policy[1].handle==handles[3]);
+    /* Close-source copies all policy metadata and retires the source slot. */
+    HANDLE alias=NULL;assert(DuplicateHandle(GetCurrentProcess(),handles[0],GetCurrentProcess(),&alias,0,FALSE,DUPLICATE_SAME_ACCESS));
+    xbox_FileHandleDuplicated(handles[0],alias,1);assert(CloseHandle(handles[0]));
+    assert(!xbox_FileHandleDevice(handles[0]) && xbox_FileHandleDevice(alias)==0x100);
+    xbox_FileHandleClosed(alias);assert(CloseHandle(alias));
+    xbox_FileHandleClosed(handles[2]);assert(CloseHandle(handles[2]));
+    xbox_FileHandleClosed(handles[3]);assert(CloseHandle(handles[3]));
+    file_policy_test_reads=0;assert(!xbox_FileHandleDevice((HANDLE)(uintptr_t)0x12345));
+    assert(file_policy_test_reads==0); /* Observe tail retirement through the real query. */
+    HANDLE *full=calloc(16384,sizeof *full);assert(full);
+    for(unsigned i=0;i<16384;i++) {
+        full[i]=CreateEventA(NULL,FALSE,FALSE,NULL);assert(full[i]);
+        assert(file_policy_store(full[i],GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,i+1));
+        assert(s_file_open_policy[i].handle==full[i]);
+    }
+    HANDLE overflow=CreateEventA(NULL,FALSE,FALSE,NULL);assert(overflow);
+    assert(!file_policy_store(overflow,GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,0));
+    assert(file_policy_store(full[16383],GENERIC_WRITE,1,FILE_ATTRIBUTE_NORMAL,0x22,0xabcdef));
+    assert(xbox_FileHandleDevice(full[16383])==0xabcdef);
+    xbox_FileHandleClosed(full[8192]);assert(CloseHandle(full[8192]));
+    assert(file_policy_store(full[16383],GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,0xfedcba));
+    assert(!s_file_open_policy[8192].handle && s_file_open_policy[16383].handle==full[16383]);
+    assert(file_policy_store(overflow,GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,0x123456));
+    assert(s_file_open_policy[8192].handle==overflow);full[8192]=overflow;
+    /* Retire descending tails; no fabricated direct reset of the derived bound. */
+    for(unsigned i=16384;i;i--) {xbox_FileHandleClosed(full[i-1]);assert(CloseHandle(full[i-1]));}
+    free(full);file_policy_test_reads=0;
+    assert(!xbox_FileHandleDevice((HANDLE)(uintptr_t)0x12345));assert(file_policy_test_reads==0);
+    fprintf(stderr,"[FILE POLICY] holes/unique/close-source/tail/full16384/overflow passed\n");
+}
+
 int main(int argc,char **argv) {
     assert(argc==7);setup(argv[2],argv[6],!strcmp(argv[1],"tls_owned_stack"));
+    if(!strcmp(argv[1],"file_policy_bounds")) {verify_original_file_policy_bounds();cleanup();return 0;}
 
 
     if(!strcmp(argv[1],"volume_dismount_optical") || !strcmp(argv[1],"volume_dismount_disk")) {
@@ -2445,12 +2502,18 @@ int main(int argc,char **argv) {
     patch=pytest.MonkeyPatch()
     try:body=translate(patch,True,program)
     finally:patch.undo()
+    file_source=(root/'src/kernel/kernel_file.c').read_text(encoding='utf-8')
+    file_source=re.sub(r's_file_open_policy\[([^\]]+)\]\.handle',r'file_policy_test_handle(\1)',file_source)
+    marker='static FileOpenPolicy s_file_open_policy[16384];'
+    assert file_source.count(marker)==1
+    file_source=file_source.replace(marker,marker+'\nstatic unsigned long long file_policy_test_reads;\nstatic HANDLE file_policy_test_handle(unsigned i) {++file_policy_test_reads;return s_file_open_policy[i].handle;}')
+    (work/'file_policy_counted.c').write_text(file_source,encoding='utf-8')
     (work/'objects.c').write_text(prefix+body+suffix,encoding='utf-8')
     libraries=list((root.parents[1]/'build/native/xboxrecomp/src').glob('*/*.lib'));assert len(libraries)==8
     libraries.append(root.parents[1]/'build_dsp_jit/x86_64-pc-windows-msvc/release/dsp56300_emu_ffi.lib')
     result=subprocess.run([compiler,'/nologo','/O2','/Gy','/MD','/utf-8',
         '/DWIN32_LEAN_AND_MEAN','/DNOMINMAX','/D_CRT_SECURE_NO_WARNINGS',
-        '/I'+str(root/'src'),'/I'+str(root.parents[1]/'config'),str(work/'objects.c'),
+        '/I'+str(root/'src'),'/I'+str(root/'src/kernel'),'/I'+str(root.parents[1]/'config'),str(work/'objects.c'),
             str(root/'src/kernel/xbox_memory_layout.c'),str(root/'src/kernel/recomp_continuation.c'),
             str(root/'src/kernel/kernel_hal.c'),str(root/'src/kernel/kernel_sync.c'),
         '/Fe:'+str(work/'objects.exe'),'/link','/OPT:REF',*[str(p) for p in libraries],
@@ -2859,3 +2922,11 @@ def test_wait_closed_caller_handle_survives_hot_checkpoint(native_objects,tmp_pa
         str(tmp_path/'threads.state'),str(tmp_path/'objects.state'),str(tmp_path)],
         capture_output=True,text=True,errors='replace',timeout=30)
     assert result.returncode==0,result.stdout+result.stderr
+
+
+def test_original_file_policy_reuses_holes_and_retires_empty_tail(native_objects,tmp_path):
+    executable,xbe=native_objects
+    result=subprocess.run([str(executable),'file_policy_bounds',str(xbe),'-','-','-',str(tmp_path)],
+        capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[FILE POLICY] holes/unique/close-source/tail/full16384/overflow passed' in result.stderr

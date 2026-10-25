@@ -446,9 +446,9 @@ static long kernel_log_budget(void)
     return budget;
 }
 
-#define KERNEL_LOG_ON()      (g_kernel_call_count <= kernel_log_budget())
+#define KERNEL_LOG_ON()      (kernel_log_budget() > 0 && g_kernel_call_count <= kernel_log_budget())
 /* Some sites logged at a tighter cap than the rest; keep them proportional. */
-#define KERNEL_LOG_ON_HALF() (g_kernel_call_count <= kernel_log_budget() / 2)
+#define KERNEL_LOG_ON_HALF() (kernel_log_budget() > 0 && g_kernel_call_count <= kernel_log_budget() / 2)
 
 /* Read Xbox stack arg as uint32_t.
  * After kernel_thunk_dispatch pops the dummy return address (g_esp += 4),
@@ -4776,11 +4776,9 @@ static void bridge_NtCreateFile(void)
                 (unsigned long long)load_started, (unsigned long)GetCurrentThreadId(),
                 g_xbox_kernel_caller, (unsigned long long)(GetTickCount64()-load_started));
 
-    /* Paired with the [PATH] line the translation just printed: that says what
-     * was asked for, this says whether it opened. A failed open is not itself
-     * a bug -- a title probing the cache partition before the disc expects one
-     * -- so the status is what separates a probe from a real miss. */
-    {
+    /* Optional open-status diagnostics. Missing cache probes may be expected;
+     * preserve the actual status and Win32 error when tracing is requested. */
+    if (KERNEL_LOG_ON()) {
         extern uint32_t xbox_LastFileError(void);
         uint32_t _e = g_eax ? xbox_LastFileError() : 0u;
         if (g_eax)
@@ -4791,8 +4789,8 @@ static void bridge_NtCreateFile(void)
                   : _e ==  3u ? " ERROR_PATH_NOT_FOUND" : "");
         else
             fprintf(stderr, "  [FILE] -> 0x%08X\n", g_eax);
+        fflush(stderr);
     }
-    fflush(stderr);
 }
 
 /* ── NtOpenFile (ordinal 202, 6 args = 24 bytes) ──────── */

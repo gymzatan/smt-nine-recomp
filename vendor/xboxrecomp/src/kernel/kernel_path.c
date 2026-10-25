@@ -334,8 +334,7 @@ static BOOL xbox_translate_path_impl(const char* xbox_path, xbox_host_char* host
     return TRUE;
 
 translate:
-    fprintf(stderr, "  [PATH] %s\n", xbox_path);
-    fflush(stderr);
+    xbox_log(XBOX_LOG_TRACE, XBOX_LOG_PATH, "%s", xbox_path);
     {
         WCHAR remainder_wide[MAX_PATH];
         MultiByteToWideChar(CP_ACP, 0, remainder, -1, remainder_wide, MAX_PATH);

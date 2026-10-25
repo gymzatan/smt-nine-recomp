@@ -43,7 +43,8 @@ int smt9_is_japanese(void){return !wcscmp(s_display.language,L"Japanese");}
 int smt9_is_chinese(void){return !wcscmp(s_display.language,L"Chinese");}
 static NineLanguage s_language;
 unsigned smt9_native_font_pages(void){return s_language.font_pages;}
-float smt9_game_aspect(void) { return (float)s_display.aspect_width/(float)s_display.aspect_height; }
+extern float d3d8_GameAspect(void);
+float smt9_game_aspect(void) { return d3d8_GameAspect(); }
 unsigned smt9_game_refresh_hz(void) { return s_display.refresh_hz; }
 #ifdef SMT9_MACHINE_CHECKPOINT
 #include "video_player.h"
@@ -456,7 +457,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     extern void d3d8_DisplayConfigure(unsigned scale,float aspect);
     extern void d3d8_DisplayVSyncConfigure(int enabled);
     extern void xbox_FramebufferWindowConfigure(unsigned width,unsigned height,float aspect,int fixed_aspect);
-    d3d8_DisplayConfigure(s_display.render_scale,smt9_game_aspect());
+    d3d8_DisplayConfigure(s_display.render_scale,(float)s_display.aspect_width/(float)s_display.aspect_height);
     d3d8_DisplayVSyncConfigure(s_display.vsync);
     xbox_FramebufferWindowConfigure(s_display.window_width,s_display.window_height,smt9_game_aspect(),s_display.fixed_aspect);
     if(_putenv_s("RECOMP_GPU_BACKEND",backend)!=0)return 1;
