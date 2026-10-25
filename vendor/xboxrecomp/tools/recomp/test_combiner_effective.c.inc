@@ -134,7 +134,13 @@ static void preparation_draw_check(const char *label,unsigned primitive,unsigned
     method(NV097_SET_COLOR_CLEAR_VALUE,0xff010203);method(NV097_CLEAR_SURFACE,0xf0);
     method(NV097_CLEAR_REPORT_VALUE,0);method(NV097_SET_ZPASS_PIXEL_COUNT_ENABLE,1);
     prep_batch_calls=prep_pixel_calls=prep_geometry_calls=prep_draw_calls=prep_geometry_draws=prep_stage_unpack_calls=prep_gs_cb_calls=prep_vs_cb_calls=0;
+    prep_border_unpack_calls=0;
     prep_watch=1;raster_draw_for_test(primitive,0,count);nv2a_pb_checkpoint_publish();prep_watch=0;
+    unsigned border_expected=0;
+    if(d3d8_IsNativeVulkan())for(unsigned st=0;st<4;st++)border_expected+=s_hw_vk_textures[st]!=NULL;
+    if(prep_border_unpack_calls!=border_expected) {
+        fprintf(stderr,"[SAMPLER PREPARATION] %s border-unpack=%u expected=%u\n",label,prep_border_unpack_calls,border_expected);exit(5);
+    }
     assert(prep_batch_calls==1 && prep_draw_calls && prep_program==program && prep_fixed==fixed && prep_output==output);
     unsigned geometry=0,pixel=0;
     if(!d3d8_IsNativeVulkan()) {
@@ -197,4 +203,56 @@ static void verify_preparation_cost(void) {
     preparation_draw_check("polygon-points",5,3,1,0,0,0xdeadbeefu);
     method(NV097_SET_ZPASS_PIXEL_COUNT_ENABLE,0);
     fprintf(stderr,"[PREPARATION COST] routes/counts/final pixels/query passed\n");
+}
+
+static void sampler_preparation_mask(unsigned mask,unsigned variant,uint32_t *expected) {
+    unsigned program=0,selected=0;
+    const uint32_t colors[4]={0xff123456,0xff2468ac,0xff4080c0,0xffa05020};
+    for(unsigned st=0;st<4;st++) {
+        unsigned offset=st*64;
+        if(mask&(1u<<st)){program|=1u<<(st*5);selected=st;}
+        method(NV097_SET_TEXTURE_CONTROL0+offset,(mask&(1u<<st))?NV_PGRAPH_TEXCTL0_0_ENABLE:0);
+        method(NV097_SET_TEXTURE_OFFSET+offset,0x80000+st*0x1000);
+        method(NV097_SET_TEXTURE_FORMAT+offset,(0x12<<8)|(1<<16));
+        method(NV097_SET_TEXTURE_CONTROL1+offset,8<<16);method(NV097_SET_TEXTURE_IMAGE_RECT+offset,(2<<16)|2);
+        method(NV097_SET_TEXTURE_ADDRESS+offset,(variant?1:3)|((variant?1:3)<<8));
+        method(NV097_SET_TEXTURE_FILTER+offset,variant?0x02020000:0x01010000);
+        method(NV097_SET_TEXTURE_BORDER_COLOR+offset,0xff010203u+st+variant);
+        uint32_t *pixels=(uint32_t *)(xbox_GetMemoryOffset()+0x80080000u+st*0x1000);
+        for(unsigned j=0;j<4;j++)pixels[j]=colors[st];
+    }
+    method(NV097_SET_SHADER_STAGE_PROGRAM,program);
+    method(NV097_SET_COMBINER_COLOR_ICW,mask?0x08200000|(selected<<24):0x04200000);
+    method(NV097_SET_COMBINER_ALPHA_ICW,mask?0x18200000|(selected<<24):0x14200000);
+    *expected=mask?colors[selected]:0xffff0000;
+}
+static void verify_sampler_preparation(void) {
+    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+    method(NV097_SET_CONTEXT_DMA_A,0x100);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_DEPTH_MASK,0);
+    method(NV097_SET_COMBINER_SPECULAR_FOG_CW0,0);method(NV097_SET_COMBINER_SPECULAR_FOG_CW1,0);
+    const unsigned masks[]={0,1,8,5,15,0,8};uint32_t expected=0;
+    unsigned samples=0;
+    for(unsigned test=0;test<sizeof masks/sizeof masks[0];test++) {
+        unsigned mask=masks[test];sampler_preparation_mask(mask,test&1,&expected);
+        preparation_draw_check("sampler-mask",5,3,1,0,0,expected);
+        if(!test)samples=s_gpu.zpass_count;assert(samples && s_gpu.zpass_count==samples);
+        if(d3d8_IsNativeVulkan()) {
+            assert(native_texture_mask==mask);
+            for(unsigned st=0;st<4;st++)if(mask&(1u<<st)) {
+                float border[4];nv2a_rc_unpack(s_gpu.texs[st].border_color,border);
+                assert(!memcmp(border,native_texture_params[st].border,sizeof border));
+                assert(native_texture_params[st].filter==((test&1)?VK_FILTER_LINEAR:VK_FILTER_NEAREST));
+                assert(native_texture_params[st].u==((test&1)?VK_SAMPLER_ADDRESS_MODE_REPEAT:VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE));
+            }
+        }
+    }
+    FILE *saved=tmpfile();assert(saved && nv2a_gpu_save_checkpoint(saved));
+    uint32_t restored=expected;sampler_preparation_mask(0,0,&expected);
+    preparation_draw_check("sampler-disabled",5,3,1,0,0,expected);
+    rewind(saved);assert(nv2a_gpu_load_checkpoint(saved));fclose(saved);
+    preparation_draw_check("sampler-restored",5,3,1,0,0,restored);
+    assert(s_gpu.zpass_count==samples);
+    if(d3d8_IsNativeVulkan())assert(native_texture_mask==8);
+    method(NV097_SET_ZPASS_PIXEL_COUNT_ENABLE,0);
+    fprintf(stderr,"[SAMPLER PREPARATION] null/sparse/mixed/all/query/restore passed\n");
 }

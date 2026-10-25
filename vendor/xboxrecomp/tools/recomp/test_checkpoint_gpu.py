@@ -25,9 +25,12 @@ static unsigned native_vertex_bytes,native_stream_bytes,native_vertex_stride;
  * backend consumes it. Native upload immutability has a separate pixel test. */
 static unsigned char native_uniform_bytes[32][4096];
 static unsigned native_uniform_sizes[32];
-static unsigned polygon_native_draw_calls;
+static unsigned polygon_native_draw_calls,native_texture_mask;
+static NvkTexture native_texture_params[4];
 static int native_draw_for_test(NvkDraw *draw) {
-    polygon_native_draw_calls++;
+    polygon_native_draw_calls++;native_texture_mask=0;
+    memcpy(native_texture_params,draw->textures,sizeof native_texture_params);
+    for(unsigned st=0;st<4;st++)if(draw->textures[st].image)native_texture_mask|=1u<<st;
     uint64_t generation=0;uint32_t offset=0;
     uint64_t *original_generation=draw->upload_generation;uint32_t *original_offset=draw->upload_offset;
     if(!original_generation){draw->upload_generation=&generation;draw->upload_offset=&offset;}
@@ -135,6 +138,7 @@ static void progress_kick_for_test(NV2AState *gpu) {
 #define nv2a_fifo_kick progress_kick_for_test
 static unsigned prep_watch,prep_batch_calls,prep_pixel_calls,prep_geometry_calls,prep_draw_calls,prep_geometry_draws,prep_stage_unpack_calls,prep_in_geometry,prep_gs_cb_calls,prep_vs_cb_calls;
 static int prep_program,prep_fixed,prep_output;
+static unsigned prep_border_unpack_calls;
 static void prep_validate_bindings(ID3D11DeviceContext *ctx);
 #include "prep_src/kernel/nv2a_pb_exec.c"
 #undef nv2a_fifo_kick
@@ -3856,6 +3860,9 @@ int main(int argc,char **argv) {
     bridge=bridge_path.read_text(encoding='utf-8')
     bridge='static void prep_unpack_for_test(uint32_t color,float out[4]) {if(prep_watch)++prep_stage_unpack_calls;nv2a_rc_unpack(color,out); }\n'+bridge
     bridge=bridge.replace('nv2a_rc_unpack(states[','prep_unpack_for_test(states[')
+    bridge='static void prep_border_unpack_for_test(uint32_t color,float out[4]) {if(prep_watch)++prep_border_unpack_calls;nv2a_rc_unpack(color,out); }\n'+bridge
+    assert bridge.count('nv2a_rc_unpack(s_gpu.texs[i].border_color,draw->textures[i].border);')==1
+    bridge=bridge.replace('nv2a_rc_unpack(s_gpu.texs[i].border_color,draw->textures[i].border);','prep_border_unpack_for_test(s_gpu.texs[i].border_color,draw->textures[i].border);')
     entry='static void hw_bind_pixel_state(ID3D11DeviceContext *ctx,const HwPixelState *native)\n{'
     assert bridge.count(entry)==1
     bridge=bridge.replace(entry,entry+'\n    if(prep_watch)++prep_pixel_calls;')
@@ -3911,6 +3918,7 @@ unsigned combiner_test_shader_count(void) { unsigned count=0;for(unsigned i=0;i<
     source=source.replace('    if(!strcmp(argv[1],"standing-volume-w")) {','    if(!strcmp(argv[1],"combiner-effective")) { verify_combiner_effective_key(); }\n    else if(!strcmp(argv[1],"standing-volume-w")) {')
     source=source.replace('    if(!strcmp(argv[1],"combiner-effective")) {','    if(!strcmp(argv[1],"depth-sample-storage")) { verify_depth_sample_storage(); }\n    else if(!strcmp(argv[1],"combiner-effective")) {')
     source=source.replace('    if(!strcmp(argv[1],"depth-sample-storage")) {','    if(!strcmp(argv[1],"preparation-cost")) { verify_preparation_cost(); }\n    else if(!strcmp(argv[1],"depth-sample-storage")) {')
+    source=source.replace('    if(!strcmp(argv[1],"preparation-cost")) {','    if(!strcmp(argv[1],"sampler-preparation")) { verify_sampler_preparation(); }\n    else if(!strcmp(argv[1],"preparation-cost")) {')
     (work/'gpu.c').write_text(source,encoding='utf-8')
     (work/'resources_counted.c').write_text(r'''
 #include "d3d8_internal.h"
@@ -4761,3 +4769,12 @@ def test_original_batch_preparation_consumes_only_final_state(native_gpu,tmp_pat
     (tmp_path/'preparation.log').write_text(result.stdout+result.stderr,encoding='utf-8')
     assert result.returncode==0,result.stdout+result.stderr
     assert '[PREPARATION COST] routes/counts/final pixels/query passed' in result.stderr
+
+
+@pytest.mark.parametrize('backend,scale',[('Vulkan',1),('Vulkan',3),('D3D11',1)])
+def test_native_sampler_preparation_uses_only_bound_images(native_gpu,tmp_path,backend,scale):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'sampler-preparation',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},capture_output=True,text=True,errors='replace',timeout=90)
+    (tmp_path/'sampler_preparation.log').write_text(result.stdout+result.stderr,encoding='utf-8')
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[SAMPLER PREPARATION] null/sparse/mixed/all/query/restore passed' in result.stderr

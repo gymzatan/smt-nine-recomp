@@ -124691,7 +124691,15 @@
       "address": 1380402,
       "name": "sub_00151032",
       "file": "recomp_0042.c",
-      "edits": []
+      "edits": [
+        [
+          5763,
+          "",
+          "    /* The original initialized font directories are ordered by their key DWORD. */\n    if ((MEM32(ebp + 4)==0x001515F5u || MEM32(ebp + 4)==0x0015161Au ||\n         MEM32(ebp + 4)==0x0015164Au) && MEM32(ebp - 4)==0x00679CA8u &&\n        (int32_t)MEM32(ebp + 0xC)>0) {\n        uint32_t _font_directory=MEM32(0x00679CACu);\n        uint32_t _font_count=MEM32(ebp + 0xC),_font_table=MEM32(ebp + 8);\n        if ((MEM32(_font_directory)==_font_count && MEM32(_font_directory + 4)==_font_table) ||\n            (MEM32(_font_directory + 8)==_font_count && MEM32(_font_directory + 12)==_font_table)) {\n            eax=_font_count;\n            edi=_font_table + (_font_count << 4);\n            goto loc_0015107A;\n        }\n    }\n",
+          "ne: not equal / not zero */\n\nloc_0015106F: ;\n    eax = esi;\n    goto loc_0015108A;\n\nloc_00151073: ;\n",
+          "    _cf = 0; /* xor clears CF */\n    eax = 0; /* xor self */\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu"
+        ]
+      ]
     },
     {
       "address": 1380497,

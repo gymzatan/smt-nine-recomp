@@ -81,10 +81,14 @@ static unsigned s_file_policy_end;
 static SRWLOCK s_file_policy_lock=SRWLOCK_INIT;
 static int file_policy_store(HANDLE handle,DWORD access,DWORD share,DWORD flags,DWORD options,DWORD device) {
     int ok=0;AcquireSRWLockExclusive(&s_file_policy_lock);
-    unsigned index=16384;
-    for (unsigned i=0;i<s_file_policy_end;i++) if (s_file_open_policy[i].handle==handle) { index=i;break; }
+    unsigned index=16384,first_hole=16384;
+    for (unsigned i=0;i<s_file_policy_end;i++) {
+        HANDLE existing=s_file_open_policy[i].handle;
+        if (existing==handle) { index=i;break; }
+        if (!existing && first_hole==16384) first_hole=i;
+    }
     if (index==16384) {
-        for (unsigned i=0;i<s_file_policy_end;i++) if (!s_file_open_policy[i].handle) { index=i;break; }
+        index=first_hole;
         if (index==16384 && s_file_policy_end<16384) index=s_file_policy_end;
     }
     if (index<16384) {

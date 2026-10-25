@@ -1747,8 +1747,9 @@ static void hw_vk_draw_state(NvkDraw *draw,HwColor *color,HwDepth *depth)
         VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
         VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE};
     for(unsigned i=0;i<4;i++) {
-        const DWORD *tss=d3d8_GetTSS(i);
         draw->textures[i].image=s_hw_vk_textures[i];
+        if(!draw->textures[i].image)continue;
+        const DWORD *tss=d3d8_GetTSS(i);
         draw->textures[i].u=address[tss[D3DTSS_ADDRESSU]];draw->textures[i].v=address[tss[D3DTSS_ADDRESSV]];
         draw->textures[i].w=address[tss[D3DTSS_NV2AADDRESSW]];
         nv2a_rc_unpack(s_gpu.texs[i].border_color,draw->textures[i].border);

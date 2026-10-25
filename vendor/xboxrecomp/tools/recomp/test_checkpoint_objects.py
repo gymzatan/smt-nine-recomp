@@ -629,6 +629,7 @@ static void path_notification(const char *path) {
 }
 
 static void verify_original_file_policy_bounds(void) {
+    file_policy_test_observe=1;
     HANDLE unknown=CreateEventA(NULL,FALSE,FALSE,NULL);assert(unknown);
     XboxFileOpenState saved;file_policy_test_reads=0;
     assert(!xbox_FileHandleDevice(unknown));
@@ -640,14 +641,21 @@ static void verify_original_file_policy_bounds(void) {
     HANDLE handles[4];
     for(unsigned i=0;i<3;i++) {
         handles[i]=CreateEventA(NULL,FALSE,FALSE,NULL);assert(handles[i]);
+        file_policy_test_reads=0;
         assert(file_policy_store(handles[i],GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,0x100+i));
+        fprintf(stderr,"[FILE POLICY SINGLE PASS] append=%u reads=%llu\n",i,file_policy_test_reads);
+        assert(file_policy_test_reads==i);
     }
     xbox_FileHandleClosed(handles[1]);assert(CloseHandle(handles[1]));
     /* An existing identity must be updated before filling an earlier hole. */
+    file_policy_test_reads=0;
     assert(file_policy_store(handles[2],GENERIC_WRITE,1,FILE_ATTRIBUTE_NORMAL,0x22,0x202));
+    assert(file_policy_test_reads==3);
     assert(!s_file_open_policy[1].handle && s_file_open_policy[2].handle==handles[2]);
     handles[3]=CreateEventA(NULL,FALSE,FALSE,NULL);assert(handles[3]);
+    file_policy_test_reads=0;
     assert(file_policy_store(handles[3],GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,0x303));
+    assert(file_policy_test_reads==3);
     assert(s_file_open_policy[1].handle==handles[3]);
     /* Close-source copies all policy metadata and retires the source slot. */
     HANDLE alias=NULL;assert(DuplicateHandle(GetCurrentProcess(),handles[0],GetCurrentProcess(),&alias,0,FALSE,DUPLICATE_SAME_ACCESS));
@@ -661,23 +669,32 @@ static void verify_original_file_policy_bounds(void) {
     HANDLE *full=calloc(16384,sizeof *full);assert(full);
     for(unsigned i=0;i<16384;i++) {
         full[i]=CreateEventA(NULL,FALSE,FALSE,NULL);assert(full[i]);
+        file_policy_test_reads=0;
         assert(file_policy_store(full[i],GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,i+1));
+        assert(file_policy_test_reads==i);
         assert(s_file_open_policy[i].handle==full[i]);
     }
     HANDLE overflow=CreateEventA(NULL,FALSE,FALSE,NULL);assert(overflow);
+    file_policy_test_reads=0;
     assert(!file_policy_store(overflow,GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,0));
+    assert(file_policy_test_reads==16384);
     assert(file_policy_store(full[16383],GENERIC_WRITE,1,FILE_ATTRIBUTE_NORMAL,0x22,0xabcdef));
     assert(xbox_FileHandleDevice(full[16383])==0xabcdef);
     xbox_FileHandleClosed(full[8192]);assert(CloseHandle(full[8192]));
+    file_policy_test_reads=0;
     assert(file_policy_store(full[16383],GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,0xfedcba));
+    assert(file_policy_test_reads==16384);
     assert(!s_file_open_policy[8192].handle && s_file_open_policy[16383].handle==full[16383]);
+    file_policy_test_reads=0;
     assert(file_policy_store(overflow,GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,0x123456));
+    assert(file_policy_test_reads==16384);
     assert(s_file_open_policy[8192].handle==overflow);full[8192]=overflow;
     /* Retire descending tails; no fabricated direct reset of the derived bound. */
     for(unsigned i=16384;i;i--) {xbox_FileHandleClosed(full[i-1]);assert(CloseHandle(full[i-1]));}
     free(full);file_policy_test_reads=0;
     assert(!xbox_FileHandleDevice((HANDLE)(uintptr_t)0x12345));assert(file_policy_test_reads==0);
     fprintf(stderr,"[FILE POLICY] holes/unique/close-source/tail/full16384/overflow passed\n");
+    file_policy_test_observe=0;
 }
 
 int main(int argc,char **argv) {
@@ -2506,7 +2523,7 @@ int main(int argc,char **argv) {
     file_source=re.sub(r's_file_open_policy\[([^\]]+)\]\.handle',r'file_policy_test_handle(\1)',file_source)
     marker='static FileOpenPolicy s_file_open_policy[16384];'
     assert file_source.count(marker)==1
-    file_source=file_source.replace(marker,marker+'\nstatic unsigned long long file_policy_test_reads;\nstatic HANDLE file_policy_test_handle(unsigned i) {++file_policy_test_reads;return s_file_open_policy[i].handle;}')
+    file_source=file_source.replace(marker,marker+'\nstatic unsigned long long file_policy_test_reads;\nstatic int file_policy_test_observe;\nstatic HANDLE file_policy_test_handle(unsigned i) {if(file_policy_test_observe)++file_policy_test_reads;return s_file_open_policy[i].handle;}')
     (work/'file_policy_counted.c').write_text(file_source,encoding='utf-8')
     (work/'objects.c').write_text(prefix+body+suffix,encoding='utf-8')
     libraries=list((root.parents[1]/'build/native/xboxrecomp/src').glob('*/*.lib'));assert len(libraries)==8
