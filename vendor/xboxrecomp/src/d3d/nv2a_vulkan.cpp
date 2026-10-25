@@ -575,9 +575,10 @@ int nvk_image_clear(NvkImage *image,const float rgba[4]) {
     vkCmdClearColorImage(begin().commands,image->image,image->layout,&value,1,&range);return 1;
     NVK_END(0)
 }
-int nvk_depth_transfer(NvkImage *image,void *pixels,int writing) {
+int nvk_depth_transfer(NvkImage *image,void *pixels,int writing,unsigned read_step) {
     NVK_BEGIN
     require(image && pixels && !image->volume && image->format==VK_FORMAT_D32_SFLOAT_S8_UINT && image->layers==1,"Invalid Vulkan depth transfer");
+    require(read_step && image->width%read_step==0 && image->height%read_step==0 && (!writing || read_step==1),"Invalid Vulkan depth sampling step");
     size_t count=(size_t)image->width*image->height;
     Buffer upload{};
     Buffer &staging=writing?upload:readback_storage(count*5);
@@ -600,10 +601,12 @@ int nvk_depth_transfer(NvkImage *image,void *pixels,int writing) {
         wait_serial(submit());
         if(!writing) {
             host_memory(staging,true);
-            for(size_t i=0;i<count;i++) {
-                std::memcpy(static_cast<char *>(pixels)+i*8,static_cast<char *>(staging.mapped)+i*4,4);
-                std::memset(static_cast<char *>(pixels)+i*8+4,0,4);
-                static_cast<char *>(pixels)[i*8+4]=static_cast<char *>(staging.mapped)[count*4+i];
+            size_t k=0;
+            for(unsigned y=0;y<image->height;y+=read_step)for(unsigned x=0;x<image->width;x+=read_step,++k) {
+                size_t i=(size_t)y*image->width+x;
+                std::memcpy(static_cast<char *>(pixels)+k*8,static_cast<char *>(staging.mapped)+i*4,4);
+                std::memset(static_cast<char *>(pixels)+k*8+4,0,4);
+                static_cast<char *>(pixels)[k*8+4]=static_cast<char *>(staging.mapped)[count*4+i];
             }
         }
         if(writing)destroy(staging);return 1;

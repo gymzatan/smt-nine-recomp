@@ -30,7 +30,9 @@ NvkImage *nvk_image_create_volume(unsigned width,unsigned height,unsigned depth,
 void nvk_image_destroy(NvkImage *image);
 int nvk_image_upload(NvkImage *image,const void *pixels,size_t pitch);
 int nvk_image_read(NvkImage *image,void *pixels,size_t pitch);
-int nvk_depth_transfer(NvkImage *image,void *pixels,int upload);
+/* Reads return tightly packed float/stencil tuples at (x*read_step,y*read_step).
+ * Image dimensions must be divisible by read_step; uploads require step 1. */
+int nvk_depth_transfer(NvkImage *image,void *pixels,int upload,unsigned read_step);
 int nvk_image_clear(NvkImage *image,const float rgba[4]);
 int nvk_depth_clear(NvkImage *image,VkImageAspectFlags aspects,float depth,
                     unsigned stencil,const int32_t bounds[4]);

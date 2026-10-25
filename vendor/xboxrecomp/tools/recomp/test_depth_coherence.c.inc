@@ -66,7 +66,7 @@ static void verify_depth_ram_coherence(void) {
         uint8_t *alias=(uint8_t *)d->memory->views.cpu_views[d->memory->views.view_count-1]+d->memory_offset;
         if(format==1)*(volatile uint16_t *)alias=0x4321;else *(volatile uint32_t *)alias=0x76543219;
         MemoryBarrier();assert(d->upload_needed);d=hw_depth();assert(!d->upload_needed);
-        uint32_t *pixels=malloc((size_t)8*8*d3d8_RenderScale()*d3d8_RenderScale()*8);assert(pixels && hw_depth_transfer(d,pixels,0));
+        uint32_t *pixels=malloc((size_t)8*8*d3d8_RenderScale()*d3d8_RenderScale()*8);assert(pixels && hw_depth_transfer(d,pixels,0,1));
         float z;memcpy(&z,pixels,4);float maximum=format==1?65536.0f:16777216.0f;
         assert(fabsf(z-(float)(format==1?0x4321:0x765432)/maximum)<1e-7f);
         if(format==2)assert((pixels[1]&255)==0x19);free(pixels);
@@ -82,7 +82,7 @@ static void verify_depth_ram_coherence(void) {
             uint32_t first=depth_raw_for_test(d,0,0);
             method(NV097_SET_SURFACE_CLIP_VERTICAL,12u<<16);d=hw_depth();assert(d->height==12 && depth_raw_for_test(d,0,0)==first);
             method(NV097_SET_SURFACE_CLIP_VERTICAL,4u<<16);assert(hw_depth()==d && d->height==12);
-            pixels=malloc((size_t)8*12*d3d8_RenderScale()*d3d8_RenderScale()*8);assert(pixels && hw_depth_transfer(d,pixels,0));
+            pixels=malloc((size_t)8*12*d3d8_RenderScale()*d3d8_RenderScale()*8);assert(pixels && hw_depth_transfer(d,pixels,0,1));
             size_t k=(size_t)8*d3d8_RenderScale()*8*d3d8_RenderScale()*2;memcpy(&z,pixels+k,4);
             assert(fabsf(z-(float)(format==1?0x3c3c:0x3c3c3c)/maximum)<1e-7f);free(pixels);
         }

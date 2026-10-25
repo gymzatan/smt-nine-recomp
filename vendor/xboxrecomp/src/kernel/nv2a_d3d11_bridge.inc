@@ -1091,9 +1091,10 @@ const FramebufferNativeRenderer *nv2a_pb_native_renderer(void)
     return s_hw_native_present?&renderer:NULL;
 }
 /* Transfer the existing native depth image, never a second depth cache. */
-static int hw_depth_transfer(HwDepth *d,void *pixels,int upload)
+static int hw_depth_transfer(HwDepth *d,void *pixels,int upload,unsigned read_step)
 {
-    if(d->native)return nvk_depth_transfer(d->native,pixels,upload);
+    if(!read_step || (upload && read_step!=1) || (d->width*d3d8_RenderScale())%read_step || (d->height*d3d8_RenderScale())%read_step)hw_check(E_INVALIDARG,"depth sampling step");
+    if(d->native)return nvk_depth_transfer(d->native,pixels,upload,read_step);
     ID3D11Device *device=d3d8_GetD3D11Device();ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
     unsigned scale=d3d8_RenderScale(),width=d->width*scale,height=d->height*scale;
     D3D11_TEXTURE2D_DESC desc={0};desc.Width=width;desc.Height=height;desc.MipLevels=desc.ArraySize=1;
@@ -1112,7 +1113,11 @@ static int hw_depth_transfer(HwDepth *d,void *pixels,int upload)
     ID3D11Texture2D *staging=NULL;HRESULT hr=ID3D11Device_CreateTexture2D(device,&desc,NULL,&staging);if(FAILED(hr))return 0;
     ID3D11DeviceContext_CopyResource(ctx,(ID3D11Resource *)staging,(ID3D11Resource *)d->texture);
     D3D11_MAPPED_SUBRESOURCE map;hr=ID3D11DeviceContext_Map(ctx,(ID3D11Resource *)staging,0,D3D11_MAP_READ,0,&map);
-    if(SUCCEEDED(hr)){for(unsigned y=0;y<height;y++)memcpy((uint8_t *)pixels+(size_t)y*width*8,(uint8_t *)map.pData+(size_t)y*map.RowPitch,width*8);ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource *)staging,0);}
+    if(SUCCEEDED(hr)) {
+        if(read_step==1)for(unsigned y=0;y<height;y++)memcpy((uint8_t *)pixels+(size_t)y*width*8,(uint8_t *)map.pData+(size_t)y*map.RowPitch,width*8);
+        else {size_t k=0;for(unsigned y=0;y<height;y+=read_step)for(unsigned x=0;x<width;x+=read_step,++k)memcpy((uint8_t *)pixels+k*8,(uint8_t *)map.pData+(size_t)y*map.RowPitch+x*8,8);}
+        ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource *)staging,0);
+    }
     ID3D11Texture2D_Release(staging);return SUCCEEDED(hr);
 }
 static size_t hw_depth_offset(const HwDepth *d,unsigned x,unsigned y)
@@ -1132,18 +1137,18 @@ static void hw_upload_depth(HwDepth *d)
         float z=(float)(d->format==1?raw:raw>>8)/maximum;size_t k=((size_t)y*width+x)*2;
         memcpy(pixels+k,&z,4);pixels[k+1]=d->format==1?0:raw&255;
     }
-    hw_vk_check(hw_depth_transfer(d,pixels,1),"depth RAM upload");free(pixels);d->upload_needed=0;
+    hw_vk_check(hw_depth_transfer(d,pixels,1,1),"depth RAM upload");free(pixels);d->upload_needed=0;
     hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_READONLY,NULL);
 }
 static void hw_copy_depth_to_memory(HwDepth *d)
 {
     if(!d->dirty)return;
-    unsigned scale=d3d8_RenderScale(),width=d->width*scale,height=d->height*scale;
+    unsigned scale=d3d8_RenderScale(),width=d->width,height=d->height;
     uint32_t *pixels=malloc((size_t)width*height*8);if(!pixels)hw_check(E_OUTOFMEMORY,"depth readback storage");
-    hw_vk_check(hw_depth_transfer(d,pixels,0),"depth RAM readback");
+    hw_vk_check(hw_depth_transfer(d,pixels,0,scale),"depth RAM readback");
     uint8_t *mem=d->memory->host_view+d->memory_offset;float maximum=d->format==1?65536.0f:16777216.0f;
     for(unsigned y=0;y<d->height;y++)for(unsigned x=0;x<d->width;x++) {
-        size_t k=((size_t)y*scale*width+x*scale)*2,at=hw_depth_offset(d,x,y);float z;memcpy(&z,pixels+k,4);
+        size_t k=((size_t)y*width+x)*2,at=hw_depth_offset(d,x,y);float z;memcpy(&z,pixels+k,4);
         uint32_t raw=(uint32_t)fmin((double)maximum-1,floor(fmax(0,(double)z*maximum)+0.5));
         if(d->format==1)*(uint16_t *)(mem+at)=(uint16_t)raw;else *(uint32_t *)(mem+at)=(raw<<8)|(pixels[k+1]&255);
     }
@@ -1207,7 +1212,7 @@ static int hw_save_depths(FILE *out) {
         HwDepthCheckpoint header={d->address,d->width,d->height,d->format,scale,d->pitch,d->surface_format,d->format==1?65536u:16777216u,(uint64_t)d->width*d->height*scale*scale*8};
         if(d->native) {
             void *pixels=malloc((size_t)header.bytes);if(!pixels)return 0;
-            int ok=nvk_depth_transfer(d->native,pixels,0) && fwrite(&header,sizeof header,1,out)==1 && fwrite(pixels,(size_t)header.bytes,1,out)==1;
+            int ok=nvk_depth_transfer(d->native,pixels,0,1) && fwrite(&header,sizeof header,1,out)==1 && fwrite(pixels,(size_t)header.bytes,1,out)==1;
             free(pixels);if(!ok)return 0;continue;
         }
         D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(d->texture,&desc);
@@ -1248,7 +1253,7 @@ static int hw_prepare_depths(FILE *in,HwDepth **result,HwColor **colors) {
         d->memory=hw_memory(&views);d->memory_offset=views.offset;
         if(d3d8_IsNativeVulkan()) {
             d->native=nvk_image_create(d->width*header.scale,d->height*header.scale,1,VK_FORMAT_D32_SFLOAT_S8_UINT,0);
-            int ok=d->native && nvk_depth_transfer(d->native,bytes,1);free(bytes);
+            int ok=d->native && nvk_depth_transfer(d->native,bytes,1,1);free(bytes);
             if(!ok)goto failed;continue;
         }
         D3D11_TEXTURE2D_DESC desc={0};desc.Width=d->width*header.scale;desc.Height=d->height*header.scale;desc.MipLevels=desc.ArraySize=1;

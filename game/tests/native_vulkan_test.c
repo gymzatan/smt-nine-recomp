@@ -44,7 +44,7 @@ static void check_readback_storage(void) {
         ok(nvk_image_read(color,pixels,(w+1)*4));
         for(unsigned y=0;y<h;y++)for(unsigned x=0;x<=w;x++)
             assert(pixels[y*(w+1)+x]==(x<w?0xffff0000u:0xccccccccu));
-        memset(z,0xcc,n*8+32);ok(nvk_depth_transfer(depth,z,0));
+        memset(z,0xcc,n*8+32);ok(nvk_depth_transfer(depth,z,0,1));
         for(size_t i=0;i<n;i++) {
             float actual;memcpy(&actual,z+i*8,4);assert(actual==expected);
             assert(z[i*8+4]==stencil && z[i*8+5]==0 && z[i*8+6]==0 && z[i*8+7]==0);
@@ -52,8 +52,8 @@ static void check_readback_storage(void) {
         for(unsigned i=0;i<32;i++)assert(z[n*8+i]==0xcc);
         /* Preserve the original fresh upload path and verify subsequent reuse. */
         for(size_t i=0;i<n;i++){float value=0.75f;memcpy(z+i*8,&value,4);z[i*8+4]=93;}
-        ok(nvk_depth_transfer(depth,z,1));memset(z,0xcc,n*8);
-        ok(nvk_depth_transfer(depth,z,0));
+        ok(nvk_depth_transfer(depth,z,1,1));memset(z,0xcc,n*8);
+        ok(nvk_depth_transfer(depth,z,0,1));
         for(size_t i=0;i<n;i++){float value;memcpy(&value,z+i*8,4);assert(value==0.75f && z[i*8+4]==93);}
         ok(nvk_image_read(color,pixels,(w+1)*4));
         for(unsigned i=0;i<32;i++)assert(((unsigned char*)pixels)[(w+1)*h*4+i]==0xcc && z[n*8+i]==0xcc);
@@ -196,21 +196,21 @@ static void check_effective_pipeline_state(const NvkDraw *original) {
     draw.stencil_state.compareOp=VK_COMPARE_OP_ALWAYS;
     draw.stencil_state.passOp=VK_STENCIL_OP_REPLACE;draw.stencil_state.reference=9;
     draw.stencil_state.writeMask=0;
-    ok(nvk_draw(&draw));ok(nvk_depth_transfer(draw.depth,depth,0));assert(depth[10][10][4]==7);
+    ok(nvk_draw(&draw));ok(nvk_depth_transfer(draw.depth,depth,0,1));assert(depth[10][10][4]==7);
     draw.stencil_state.writeMask=255;
-    ok(nvk_draw(&draw));ok(nvk_depth_transfer(draw.depth,depth,0));assert(depth[10][10][4]==9);
+    ok(nvk_draw(&draw));ok(nvk_depth_transfer(draw.depth,depth,0,1));assert(depth[10][10][4]==9);
     /* Enabled depth compare/write must remain distinct. The original shader's
      * depth is in [0,1), independent of its raw-to-window encoding. */
     draw.stencil=0;draw.depth_test=1;draw.depth_write=0;draw.depth_compare=VK_COMPARE_OP_LESS;
     ok(nvk_depth_clear(draw.depth,VK_IMAGE_ASPECT_DEPTH_BIT,1,0,NULL));
     ok(nvk_image_clear(draw.color,black));ok(nvk_draw(&draw));
     ok(nvk_image_read(draw.color,pixels,sizeof pixels[0]));assert(pixels[10][10]==source);
-    ok(nvk_depth_transfer(draw.depth,depth,0));float z;memcpy(&z,depth[10][10],4);assert(z==1);
+    ok(nvk_depth_transfer(draw.depth,depth,0,1));float z;memcpy(&z,depth[10][10],4);assert(z==1);
     draw.depth_compare=VK_COMPARE_OP_GREATER;
     ok(nvk_image_clear(draw.color,black));ok(nvk_draw(&draw));
     ok(nvk_image_read(draw.color,pixels,sizeof pixels[0]));assert(pixels[10][10]==0xff000000);
     draw.depth_compare=VK_COMPARE_OP_LESS;draw.depth_write=1;
-    ok(nvk_draw(&draw));ok(nvk_depth_transfer(draw.depth,depth,0));memcpy(&z,depth[10][10],4);assert(z>=0 && z<1);
+    ok(nvk_draw(&draw));ok(nvk_depth_transfer(draw.depth,depth,0,1));memcpy(&z,depth[10][10],4);assert(z>=0 && z<1);
     draw.depth_test=draw.depth_write=0;
     /* Enabled blend factors and operations still select different pixels. */
     draw.blend=1;draw.source_blend=VK_BLEND_FACTOR_ZERO;draw.destination_blend=VK_BLEND_FACTOR_ONE;
@@ -296,14 +296,14 @@ static void check_original_draw(void) {
     assert(!memcmp(actual,repeated,sizeof actual));draw.query=query;
     /* Checkpoint transfer retains the original interleaved float/stencil payload. */
     unsigned char checkpoint[24][32][8],restored[24][32][8];
-    ok(nvk_depth_transfer(depth,checkpoint,0));
+    ok(nvk_depth_transfer(depth,checkpoint,0,1));
     for(unsigned y=0;y<24;y++)for(unsigned x=0;x<32;x++) {
         float z;memcpy(&z,checkpoint[y][x],4);
         assert(z==(x>=4 && x<28 && y>=4 && y<20?.5f:1.f));
         assert(checkpoint[y][x][4]==(x>=8 && x<24 && y>=8 && y<16?7:0));
     }
     ok(nvk_depth_clear(depth,VK_IMAGE_ASPECT_DEPTH_BIT|VK_IMAGE_ASPECT_STENCIL_BIT,.2f,9,NULL));
-    ok(nvk_depth_transfer(depth,checkpoint,1));ok(nvk_depth_transfer(depth,restored,0));
+    ok(nvk_depth_transfer(depth,checkpoint,1,1));ok(nvk_depth_transfer(depth,restored,0,1));
     assert(!memcmp(checkpoint,restored,sizeof checkpoint));
     /* Submitting commands must not discard live uploaded geometry. */
     for(unsigned i=0;i<5;i++){ok(nvk_image_clear(color,black));assert(nvk_submit());}
