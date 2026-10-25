@@ -4714,7 +4714,8 @@ static void bridge_RtlInitAnsiString(void)
 /* ── NtCreateFile (ordinal 190, 9 args = 36 bytes) ─────── */
 static void bridge_NtCreateFile(void)
 {
-    ULONGLONG load_started = GetTickCount64();
+    int load_timing = getenv("RECOMP_LOAD_TIMING") != NULL;
+    ULONGLONG load_started = load_timing ? GetTickCount64() : 0;
     uint32_t handle_va   = STACK_ARG(0);  /* PHANDLE */
     uint32_t access      = STACK_ARG(1);  /* ACCESS_MASK */
     uint32_t obj_attrs   = STACK_ARG(2);  /* POBJECT_ATTRIBUTES */
@@ -4770,7 +4771,7 @@ static void bridge_NtCreateFile(void)
             xbox_VideoPlayFile(host);
     }
 
-    if (getenv("RECOMP_LOAD_TIMING"))
+    if (load_timing)
         fprintf(stderr, "  [OPEN TIME] t_ms=%llu tid=%lu from=%08X elapsed_ms=%llu\n",
                 (unsigned long long)load_started, (unsigned long)GetCurrentThreadId(),
                 g_xbox_kernel_caller, (unsigned long long)(GetTickCount64()-load_started));
@@ -5073,7 +5074,8 @@ static int bridge_async_io_enabled(void)
 /* ── NtReadFile (ordinal 219, 8 args = 32 bytes) ──────── */
 static void bridge_NtReadFile(void)
 {
-    ULONGLONG load_started = GetTickCount64();
+    int load_timing = getenv("RECOMP_LOAD_TIMING") != NULL;
+    ULONGLONG load_started = load_timing ? GetTickCount64() : 0;
     HANDLE   handle    = bridge_resolve_handle(STACK_ARG(0));
     uint32_t iostatus  = STACK_ARG(4);
     uint32_t buffer_va = STACK_ARG(5);
@@ -5097,7 +5099,7 @@ static void bridge_NtReadFile(void)
     g_eax = (uint32_t)xbox_NtReadFile(handle, NULL, NULL, NULL, &ios,
                 XBOX_TO_NATIVE(buffer_va), length, poff);
 
-    if (getenv("RECOMP_LOAD_TIMING"))
+    if (load_timing)
         fprintf(stderr, "  [READ TIME] t_ms=%llu tid=%lu from=%08X handle=%08X buffer=%08X elapsed_ms=%llu\n",
                 (unsigned long long)load_started, (unsigned long)GetCurrentThreadId(),
                 g_xbox_kernel_caller, STACK_ARG(0), buffer_va,
@@ -13447,8 +13449,9 @@ static void kernel_thunk_dispatch_body(void)
         goto bridge_completed;
     }
 
+    const int log_enabled = kernel_log_budget() > 0;
     g_kernel_call_count++;
-    if (ordinal < XBOX_KERNEL_THUNK_TABLE_SIZE)
+    if (log_enabled && ordinal < XBOX_KERNEL_THUNK_TABLE_SIZE)
         g_ordinal_calls[ordinal]++;
 
     if (KERNEL_LOG_ON()) {
@@ -13463,7 +13466,7 @@ static void kernel_thunk_dispatch_body(void)
         fflush(stderr);
     }
 
-    {
+    if (log_enabled) {
         static DWORD last_summary_tick = 0;
         DWORD now = GetTickCount();
         if (last_summary_tick == 0) last_summary_tick = now;

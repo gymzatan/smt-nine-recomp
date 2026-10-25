@@ -124,8 +124,8 @@ static HRESULT bind_native_geometry(const float *constants,const NV2ANativeGeome
         g_vsh_geometry_valid=TRUE;
     }
     ID3D11DeviceContext_GSSetShader(ctx,g_vsh_geometry_shader[kind],NULL,0);
-    ID3D11DeviceContext_GSSetConstantBuffers(ctx,1,1,&g_vsh_cb);
-    ID3D11DeviceContext_GSSetConstantBuffers(ctx,2,1,&g_vsh_geometry_cb);
+    ID3D11Buffer *geometry_buffers[]={g_vsh_cb,g_vsh_geometry_cb};
+    ID3D11DeviceContext_GSSetConstantBuffers(ctx,1,2,geometry_buffers);
     return S_OK;
 }
 
@@ -280,6 +280,7 @@ HRESULT d3d8_vsh_bind_fixed(const float *constants,const NV2ANativeGeometry *geo
     memcpy(mapped.pData,fixed,sizeof *fixed);ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource *)g_vsh_fixed_cb,0);
     hr=bind_native_geometry(constants,geometry,kind);if(FAILED(hr)) return hr;
     ID3D11DeviceContext_VSSetShader(ctx,g_vsh_fixed_shader,NULL,0);ID3D11DeviceContext_IASetInputLayout(ctx,g_vsh_fixed_layout);
-    ID3D11DeviceContext_VSSetConstantBuffers(ctx,1,1,&g_vsh_cb);ID3D11DeviceContext_VSSetConstantBuffers(ctx,2,1,&g_vsh_geometry_cb);ID3D11DeviceContext_VSSetConstantBuffers(ctx,3,1,&g_vsh_fixed_cb);
+    ID3D11Buffer *fixed_buffers[]={g_vsh_cb,g_vsh_geometry_cb,g_vsh_fixed_cb};
+    ID3D11DeviceContext_VSSetConstantBuffers(ctx,1,3,fixed_buffers);
     return S_OK;
 }

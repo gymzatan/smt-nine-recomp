@@ -128,3 +128,73 @@ static void verify_combiner_effective_key(void) {
     combiner_effective_pixel(0xffffffff);
     fprintf(stderr,"[COMBINER EFFECTIVE] byte-identical unused HLSL/cache identity; active stage/final shader and red/black/white pixels; non-native final retained\n");
 }
+
+
+static void preparation_draw_check(const char *label,unsigned primitive,unsigned count,int program,int fixed,int output,uint32_t expected_pixel) {
+    method(NV097_SET_COLOR_CLEAR_VALUE,0xff010203);method(NV097_CLEAR_SURFACE,0xf0);
+    method(NV097_CLEAR_REPORT_VALUE,0);method(NV097_SET_ZPASS_PIXEL_COUNT_ENABLE,1);
+    prep_batch_calls=prep_pixel_calls=prep_geometry_calls=prep_draw_calls=prep_geometry_draws=prep_stage_unpack_calls=prep_gs_cb_calls=prep_vs_cb_calls=0;
+    prep_watch=1;raster_draw_for_test(primitive,0,count);nv2a_pb_checkpoint_publish();prep_watch=0;
+    assert(prep_batch_calls==1 && prep_draw_calls && prep_program==program && prep_fixed==fixed && prep_output==output);
+    unsigned geometry=0,pixel=0;
+    if(!d3d8_IsNativeVulkan()) {
+        geometry=prep_geometry_draws+(program && !output?prep_batch_calls:0);
+        pixel=program?prep_geometry_draws:prep_batch_calls;
+    }
+    if(prep_geometry_calls!=geometry || prep_pixel_calls!=pixel) {
+        fprintf(stderr,"[PREPARATION COST] %s actual GS/PS %u/%u expected %u/%u finaldraws=%u\n",label,prep_geometry_calls,prep_pixel_calls,geometry,pixel,prep_draw_calls);exit(5);
+    }
+    unsigned active=s_gpu.rc.control&255;if(active>8)active=8;if(!active)active=1;
+    if(prep_stage_unpack_calls!=active*2*prep_batch_calls) {
+        fprintf(stderr,"[PREPARATION COST] %s actual stage-unpack %u expected %u\n",label,prep_stage_unpack_calls,active*2*prep_batch_calls);exit(5);
+    }
+    if(!d3d8_IsNativeVulkan()) {
+        unsigned gs_expected=prep_geometry_calls,vs_expected=fixed?1:program&&!output?1:0;
+        if(prep_gs_cb_calls!=gs_expected || prep_vs_cb_calls!=vs_expected) {
+            fprintf(stderr,"[BATCHED BINDINGS] %s actual GS/VS API %u/%u expected %u/%u\n",label,prep_gs_cb_calls,prep_vs_cb_calls,gs_expected,vs_expected);exit(5);
+        }
+    } else assert(!prep_gs_cb_calls && !prep_vs_cb_calls);
+    if(expected_pixel!=0xdeadbeefu)assert(BRIDGE_MEM32(s_gpu.color_base+9*4)==(uint32_t)expected_pixel);
+    assert(!s_hw_query_count);
+    fprintf(stderr,"[PREPARATION COST] %s route=%d/%d/%d draws=%u GS/PS=%u/%u stage=%u GSCB/VSCB=%u/%u samples=%u\n",label,program,fixed,output,prep_draw_calls,prep_geometry_calls,prep_pixel_calls,prep_stage_unpack_calls,prep_gs_cb_calls,prep_vs_cb_calls,s_gpu.zpass_count);
+}
+static void verify_preparation_cost(void) {
+    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+    method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_DEPTH_MASK,0);method(NV097_SET_ALPHA_TEST_ENABLE,0);
+    method(NV097_SET_COMBINER_SPECULAR_FOG_CW0,0);method(NV097_SET_COMBINER_SPECULAR_FOG_CW1,0);
+    method(NV097_SET_FRONT_POLYGON_MODE,0x1b02);method(NV097_SET_BACK_POLYGON_MODE,0x1b02);
+    preparation_draw_check("program",5,3,1,0,0,(int)0xffff0000);
+    unsigned samples=s_gpu.zpass_count;assert(samples>0);
+    const uint32_t colors[8]={0xffff0000,0xff00ff00,0xff0000ff,0xff00ffff,0xffff00ff,0xffffff00,0xff808080,0xffffffff};
+    for(unsigned i=0;i<8;i++) {
+        method(NV097_SET_COMBINER_FACTOR0+i*4,colors[i]);method(NV097_SET_COMBINER_FACTOR1+i*4,~colors[i]);
+        method(NV097_SET_COMBINER_COLOR_ICW+i*4,0x01200000);method(NV097_SET_COMBINER_ALPHA_ICW+i*4,0x11200000);
+        method(NV097_SET_COMBINER_COLOR_OCW+i*4,0xc00);method(NV097_SET_COMBINER_ALPHA_OCW+i*4,0xc00);
+    }
+    const unsigned stages[]={0,1,2,8};
+    for(unsigned i=0;i<4;i++) {
+        unsigned n=stages[i];method(NV097_SET_COMBINER_CONTROL,0x1000|n);
+        preparation_draw_check("material",5,3,1,0,0,(int)(n?colors[n-1]:0xff000000));assert(s_gpu.zpass_count==samples);
+    }
+    method(NV097_SET_COMBINER_CONTROL,0x1001);method(NV097_SET_COMBINER_FACTOR0+7*4,0xff123456);
+    preparation_draw_check("inactive-material",5,3,1,0,0,(int)colors[0]);
+    method(NV097_SET_COMBINER_CONTROL,0x1008);preparation_draw_check("enabled-material",5,3,1,0,0,(int)0xff123456);
+    method(NV097_SET_SPECULAR_FOG_FACTOR,0xff2468ac);method(NV097_SET_COMBINER_SPECULAR_FOG_CW0,1);method(NV097_SET_COMBINER_SPECULAR_FOG_CW1,0x1100);
+    preparation_draw_check("final-material",5,3,1,0,0,(int)0xff2468ac);
+    method(NV097_SET_COMBINER_CONTROL,1);method(NV097_SET_COMBINER_COLOR_ICW,0x04200000);method(NV097_SET_COMBINER_ALPHA_ICW,0x14200000);
+    method(NV097_SET_COMBINER_SPECULAR_FOG_CW0,0);method(NV097_SET_COMBINER_SPECULAR_FOG_CW1,0);
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT,0x1432);skin_matrix_for_test(NV097_SET_COMPOSITE_MATRIX,0,0,1);
+    preparation_draw_check("fixed",5,3,1,1,0,0xdeadbeefu);
+    method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT,0x1442);
+    preparation_draw_check("non-program",5,3,0,0,0,(int)0xffff0000);
+    method(NV097_SET_FRONT_POLYGON_MODE,0x1b01);method(NV097_SET_BACK_POLYGON_MODE,0x1b01);method(NV097_SET_LINE_WIDTH,24);
+    preparation_draw_check("output-polygon",5,3,1,0,1,0xdeadbeefu);
+    method(NV097_SET_TRANSFORM_EXECUTION_MODE,2);
+    preparation_draw_check("program-polygon",5,3,1,0,0,0xdeadbeefu);
+    method(NV097_SET_FRONT_POLYGON_MODE,0x1b02);method(NV097_SET_BACK_POLYGON_MODE,0x1b02);method(NV097_SET_LINE_WIDTH,40*8);
+    preparation_draw_check("line-copy-groups",2,2,1,0,0,0xdeadbeefu);
+    method(NV097_SET_FRONT_POLYGON_MODE,0x1b00);method(NV097_SET_BACK_POLYGON_MODE,0x1b00);method(NV097_SET_POINT_SIZE,16);
+    preparation_draw_check("polygon-points",5,3,1,0,0,0xdeadbeefu);
+    method(NV097_SET_ZPASS_PIXEL_COUNT_ENABLE,0);
+    fprintf(stderr,"[PREPARATION COST] routes/counts/final pixels/query passed\n");
+}

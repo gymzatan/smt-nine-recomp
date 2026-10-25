@@ -117,7 +117,7 @@ impl JitEngine {
         let _ = flag_builder.set("opt_level", "none");
         let _ = flag_builder.set("enable_verifier", "false");
         let _ = flag_builder.set("unwind_info", "false");
-        let _ = flag_builder.set("regalloc_algorithm", "single_pass");
+        let _ = flag_builder.set("regalloc_algorithm", "backtracking");
         let isa_builder = cranelift_native::builder().unwrap();
         let isa = isa_builder
             .finish(settings::Flags::new(flag_builder))

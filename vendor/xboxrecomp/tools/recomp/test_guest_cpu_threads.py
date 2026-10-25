@@ -60,13 +60,18 @@ void fixture_pcr_tls_layout(void) {
 '''
     program = r'''
 #include <windows.h>
-static volatile LONG fixture_tick_reads;
+static volatile LONG fixture_tick_reads,fixture_summary_tick_reads;
+static DWORD WINAPI fixture_summary_tick_count(void) {
+    return (DWORD)InterlockedIncrement(&fixture_summary_tick_reads)*3001;
+}
 static ULONGLONG WINAPI fixture_tick_count(void) {
     InterlockedIncrement(&fixture_tick_reads);return GetTickCount64();
 }
+#define GetTickCount fixture_summary_tick_count
 #define GetTickCount64 fixture_tick_count
 #include "kernel/kernel_bridge.c"
 #undef GetTickCount64
+#undef GetTickCount
 #include "kernel/kernel_rtl.c"
 #include "apu/apu_state.h"
 #include "apu/apu.h"
@@ -281,7 +286,80 @@ static DWORD WINAPI native_critical_holder(void *param) {
     while(ReadAcquire(&g_cs_contention_reports)==native_wait_report){assert(GetTickCount64()<deadline);Sleep(0);}
     xbox_RtlLeaveCriticalSection(XBOX_TO_NATIVE(0x4000));assert(!t_guest_held);return 0;
 }
+
+/* Count only calls emitted by the included production bridge. The existing
+ * runtime libraries keep their real host clock and file implementations. */
+static void diagnostic_call(ULONG ordinal,bridge_func_t bridge,unsigned count,const uint32_t *args) {
+    uint32_t top=g_esp;
+    g_slot_ordinals[0]=ordinal;g_slot_bridges[0]=bridge;g_slot_arg_bytes[0]=count*4;
+    g_kernel_dispatch_slot=0;g_esp-=4+count*4;BRIDGE_MEM32(g_esp)=0x13579;
+    for(unsigned i=0;i<count;i++)BRIDGE_MEM32(g_esp+4+i*4)=args[i];
+    kernel_thunk_dispatch();
+    assert(g_esp==top && g_xbox_kernel_caller==0x13579 && t_dispatch_depth==0);
+}
+static void diagnostic_summary_probe(int enabled) {
+    _putenv_s("RECOMP_GUEST_LOCK","");_putenv_s("RECOMP_GPU_TIMING","");
+    _putenv_s("RECOMP_KERNEL_LOG_BUDGET",enabled?"1":"0");
+    uint32_t args[]={0x7000,0};fixture_summary_tick_reads=0;fixture_tick_reads=0;
+    for(unsigned i=0;i<205;i++) {
+        BRIDGE_MEM32(0x7000)=0xffffffff;
+        diagnostic_call(289,bridge_RtlInitAnsiString,2,args);
+        assert(g_eax==0 && BRIDGE_MEM32(0x7000)==0 && BRIDGE_MEM32(0x7004)==0);
+    }
+    fprintf(stderr,"[DIAGNOSTIC_SUMMARY] enabled=%d imports=%lld ordinal=%llu summary_clock=%ld clock64=%ld\n",
+            enabled,g_kernel_call_count,g_ordinal_calls[289],fixture_summary_tick_reads,fixture_tick_reads);
+    assert(g_kernel_call_count==205);
+    assert(enabled?(fixture_summary_tick_reads==205 && g_ordinal_calls[289]==205):
+                   (!fixture_summary_tick_reads && !g_ordinal_calls[289]));
+    assert(!fixture_tick_reads);
+    /* The same original watched write remains live with summary disabled. */
+    g_kernel_watch_va=0x7000;BRIDGE_MEM32(0x7000)=0xdeadbeef;
+    diagnostic_call(289,bridge_RtlInitAnsiString,2,args);
+    assert(g_eax==0 && !BRIDGE_MEM32(0x7000) && g_kernel_call_count==206);
+    fprintf(stderr,"[DIAGNOSTIC_WATCH] original bridge/status/stack/total/watch retained\n");
+}
+static void diagnostic_load_probe(int enabled,const char *xbe_path,const char *directory) {
+    _putenv_s("RECOMP_GUEST_LOCK","");_putenv_s("RECOMP_GPU_TIMING","");
+    _putenv_s("RECOMP_KERNEL_LOG_BUDGET","0");_putenv_s("RECOMP_LOAD_TIMING",enabled?"1":"");
+    FILE *file=fopen(xbe_path,"rb");assert(file);fseek(file,0,SEEK_END);
+    long size=ftell(file);rewind(file);void *xbe=malloc(size);assert(xbe);
+    assert(fread(xbe,size,1,file)==1 && fclose(file)==0);
+    assert(xbox_MemoryLayoutInit(xbe,size));free(xbe);
+    xbox_path_init(directory,directory);assert(xbox_kernel_init_devices()==0);
+    XBOX_ANSI_STRING drive={6,6,"\\??\\D:"},device={14,14,"\\Device\\CdRom0"};
+    assert(xbox_IoCreateSymbolicLink(&drive,&device)==0);
+    char filename[MAX_PATH];assert(snprintf(filename,sizeof filename,"%s/input.bin",directory)>0);
+    file=fopen(filename,"wb");assert(file);assert(fwrite("NINE",4,1,file)==1 && !fclose(file));
+    const char *name="D:\\input.bin";size_t length=strlen(name);
+    memcpy(XBOX_TO_NATIVE(0x25000),name,length);
+    BRIDGE_MEM16(0x25100)=(uint16_t)length;BRIDGE_MEM16(0x25102)=(uint16_t)length;
+    BRIDGE_MEM32(0x25104)=0x25000;BRIDGE_MEM32(0x25200)=0;
+    BRIDGE_MEM32(0x25204)=0x25100;BRIDGE_MEM32(0x25208)=0x40;
+    uint32_t open_args[]={0x25300,GENERIC_READ,0x25200,0x25400,0,0,3,1,0x20};
+    g_esp=0x80000;fixture_tick_reads=0;
+    diagnostic_call(190,bridge_NtCreateFile,9,open_args);
+    LONG open_clocks=fixture_tick_reads;
+    assert(g_eax==0 && BRIDGE_MEM32(0x25400)==0 && BRIDGE_MEM32(0x25300));
+    uint32_t token=BRIDGE_MEM32(0x25300);
+    uint32_t read_args[]={token,0,0,0,0x25400,0x25500,4,0};
+    fixture_tick_reads=0;diagnostic_call(219,bridge_NtReadFile,8,read_args);
+    LONG read_clocks=fixture_tick_reads;
+    assert(g_eax==0 && BRIDGE_MEM32(0x25400)==0 && BRIDGE_MEM32(0x25404)==4);
+    assert(!memcmp(XBOX_TO_NATIVE(0x25500),"NINE",4));
+    uint32_t close_args[]={token};diagnostic_call(187,bridge_NtClose,1,close_args);assert(g_eax==0);
+    fprintf(stderr,"[DIAGNOSTIC_LOAD] enabled=%d open_clock=%ld read_clock=%ld data=NINE status=0 bytes=4\n",
+            enabled,open_clocks,read_clocks);
+    assert(open_clocks==(enabled?2:0) && read_clocks==(enabled?2:0));
+    assert(DeleteFileA(filename));
+}
+
 int main(int argc,char **argv) {
+    if(argc>=2 && !strncmp(argv[1],"diagnostic_",11)) {
+        if(!strncmp(argv[1],"diagnostic_summary_",19)) {
+            fixture_memory_init();diagnostic_summary_probe(!strcmp(argv[1],"diagnostic_summary_on"));
+        } else {assert(argc==4);diagnostic_load_probe(!strcmp(argv[1],"diagnostic_load_on"),argv[2],argv[3]);}
+        return 0;
+    }
     fixture_memory_init(); _putenv_s("RECOMP_GUEST_LOCK","1"); _putenv_s("RECOMP_GPU_TIMING","1");
     entered=CreateEventA(0,1,0,0); started=CreateEventA(0,1,0,0);
     guest_cpu_join();
@@ -522,3 +600,25 @@ def test_production_register_context_survives_new_process(native_thread_probe,tm
     original=snapshot.read_bytes()
     subprocess.run([str(native_thread_probe),'context_load',str(snapshot)],check=True,timeout=12)
     assert snapshot.read_bytes()==original
+
+
+@pytest.mark.parametrize("enabled",[False,True],ids=["off","on"])
+def test_original_dispatch_diagnostic_budget(native_thread_probe,enabled):
+    result=subprocess.run([str(native_thread_probe),"diagnostic_summary_"+("on" if enabled else "off")],
+                          capture_output=True,text=True,errors="replace",timeout=12)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert "[DIAGNOSTIC_WATCH]" in result.stderr and "[KWATCH]" in result.stderr
+    assert ("[KERNEL] summary:" in result.stderr)==enabled
+
+
+@pytest.mark.parametrize("enabled",[False,True],ids=["off","on"])
+def test_original_file_load_diagnostic_timing(native_thread_probe,tmp_path,enabled):
+    root=Path(__file__).resolve().parents[2]
+    xbe=root/"tools/conformance/test.xbe"
+    assert xbe.is_file(), "requires original conformance XBE"
+    result=subprocess.run([str(native_thread_probe),"diagnostic_load_"+("on" if enabled else "off"),str(xbe),str(tmp_path)],
+                          capture_output=True,text=True,errors="replace",timeout=20)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert "[DIAGNOSTIC_LOAD]" in result.stderr
+    assert ("[OPEN TIME]" in result.stderr)==enabled
+    assert ("[READ TIME]" in result.stderr)==enabled

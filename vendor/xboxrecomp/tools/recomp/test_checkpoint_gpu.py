@@ -133,7 +133,10 @@ static void progress_kick_for_test(NV2AState *gpu) {
     ++progress_kick_calls;nv2a_fifo_kick(gpu);
 }
 #define nv2a_fifo_kick progress_kick_for_test
-#include "kernel/nv2a_pb_exec.c"
+static unsigned prep_watch,prep_batch_calls,prep_pixel_calls,prep_geometry_calls,prep_draw_calls,prep_geometry_draws,prep_stage_unpack_calls,prep_in_geometry,prep_gs_cb_calls,prep_vs_cb_calls;
+static int prep_program,prep_fixed,prep_output;
+static void prep_validate_bindings(ID3D11DeviceContext *ctx);
+#include "prep_src/kernel/nv2a_pb_exec.c"
 #undef nv2a_fifo_kick
 #undef memcmp
 #undef d3d8_upload_vertices
@@ -158,7 +161,43 @@ static HRESULT geometry_map_for_test(ID3D11DeviceContext *ctx,ID3D11Resource *re
     if(geometry_test_fail) {geometry_test_fail=0;return E_OUTOFMEMORY;}
     return ID3D11DeviceContext_Map(ctx,resource,subresource,type,flags,mapped);
 }
+
+static void prep_gs_buffers_for_test(ID3D11DeviceContext *,UINT,UINT,ID3D11Buffer *const *);
+static void prep_vs_buffers_for_test(ID3D11DeviceContext *,UINT,UINT,ID3D11Buffer *const *);
+#pragma push_macro("ID3D11DeviceContext_GSSetConstantBuffers")
+#pragma push_macro("ID3D11DeviceContext_VSSetConstantBuffers")
+#undef ID3D11DeviceContext_GSSetConstantBuffers
+#undef ID3D11DeviceContext_VSSetConstantBuffers
+#define ID3D11DeviceContext_GSSetConstantBuffers prep_gs_buffers_for_test
+#define ID3D11DeviceContext_VSSetConstantBuffers prep_vs_buffers_for_test
 #include "vsh_geometry_test.c"
+#pragma pop_macro("ID3D11DeviceContext_VSSetConstantBuffers")
+#pragma pop_macro("ID3D11DeviceContext_GSSetConstantBuffers")
+static void prep_gs_buffers_for_test(ID3D11DeviceContext *ctx,UINT start,UINT count,ID3D11Buffer *const *buffers) {
+    if(prep_watch)++prep_gs_cb_calls;
+    ID3D11DeviceContext_GSSetConstantBuffers(ctx,start,count,buffers);
+}
+static void prep_vs_buffers_for_test(ID3D11DeviceContext *ctx,UINT start,UINT count,ID3D11Buffer *const *buffers) {
+    if(prep_watch)++prep_vs_cb_calls;
+    ID3D11DeviceContext_VSSetConstantBuffers(ctx,start,count,buffers);
+}
+static void prep_validate_bindings(ID3D11DeviceContext *ctx) {
+    if(d3d8_IsNativeVulkan())return;
+    ID3D11Buffer *buffers[3]={0};
+    ID3D11DeviceContext_PSGetConstantBuffers(ctx,1,1,buffers);assert(buffers[0]==s_hw_ps_cb);ID3D11Buffer_Release(buffers[0]);
+    if(prep_program) {
+        ID3D11DeviceContext_GSGetConstantBuffers(ctx,1,2,buffers);
+        assert(buffers[0]==g_vsh_cb && buffers[1]==g_vsh_geometry_cb);
+        ID3D11Buffer_Release(buffers[0]);ID3D11Buffer_Release(buffers[1]);
+        ID3D11GeometryShader *shader=NULL;ID3D11DeviceContext_GSGetShader(ctx,&shader,NULL,NULL);assert(shader);ID3D11GeometryShader_Release(shader);
+    }
+    if(prep_fixed) {
+        ID3D11DeviceContext_VSGetConstantBuffers(ctx,1,3,buffers);
+        assert(buffers[0]==g_vsh_cb && buffers[1]==g_vsh_geometry_cb && buffers[2]==g_vsh_fixed_cb);
+        for(unsigned i=0;i<3;i++)ID3D11Buffer_Release(buffers[i]);
+    }
+}
+
 extern unsigned combiner_test_maps,combiner_test_fail;
 
 #include <assert.h>
@@ -931,14 +970,14 @@ static void verify_readback_publication(void) {
     assert(SUCCEEDED(color->host_surface->lpVtbl->UnlockRect(color->host_surface)));
     fprintf(stderr,"[READBACK] original C-M-C-M becomes C-C-M-M; both pixel outputs identical,queued snapshot and ordinary writable region preserved\n");
 }
-static void pixel_state_bytes(uint32_t bytes[32]) {
-    if(d3d8_IsNativeVulkan()) {assert(native_uniform_sizes[17]==128);memcpy(bytes,native_uniform_bytes[17],128);return;}
-    D3D11_BUFFER_DESC desc;ID3D11Buffer_GetDesc(s_hw_ps_cb,&desc);assert(desc.ByteWidth==128);
+static void pixel_state_bytes(uint32_t bytes[sizeof(HwPixelState)/4]) {
+    if(d3d8_IsNativeVulkan()) {assert(native_uniform_sizes[17]==sizeof(HwPixelState));memcpy(bytes,native_uniform_bytes[17],sizeof(HwPixelState));return;}
+    D3D11_BUFFER_DESC desc;ID3D11Buffer_GetDesc(s_hw_ps_cb,&desc);assert(desc.ByteWidth==sizeof(HwPixelState));
     desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;desc.MiscFlags=0;
     ID3D11Buffer *staging=NULL;assert(SUCCEEDED(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&desc,NULL,&staging)));
     ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();ID3D11DeviceContext_CopyResource(ctx,(ID3D11Resource *)staging,(ID3D11Resource *)s_hw_ps_cb);
     D3D11_MAPPED_SUBRESOURCE mapped;assert(SUCCEEDED(ID3D11DeviceContext_Map(ctx,(ID3D11Resource *)staging,0,D3D11_MAP_READ,0,&mapped)));
-    memcpy(bytes,mapped.pData,128);ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource *)staging,0);ID3D11Buffer_Release(staging);
+    memcpy(bytes,mapped.pData,sizeof(HwPixelState));ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource *)staging,0);ID3D11Buffer_Release(staging);
 }
 static void pixel_state_draw(void) {
     method(NV097_SET_BEGIN_END,5);method(NV097_DRAW_ARRAYS,2u<<24);method(NV097_SET_BEGIN_END,0);
@@ -993,7 +1032,7 @@ static void verify_combiner_uploads(void) {
 }
 static void verify_pixel_state_uploads(void) {
     pixel_state_maps=0;seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
-    uint32_t first[32],current[32],initial_value[32];pixel_state_bytes(first);memcpy(initial_value,first,sizeof first);unsigned initial=pixel_state_maps;assert(initial==(d3d8_IsNativeVulkan()?0:1));
+    uint32_t first[sizeof(HwPixelState)/4],current[sizeof(HwPixelState)/4],initial_value[sizeof(HwPixelState)/4];pixel_state_bytes(first);memcpy(initial_value,first,sizeof first);unsigned initial=pixel_state_maps;assert(initial==(d3d8_IsNativeVulkan()?0:1));
     for(unsigned i=0;i<64;++i)pixel_state_draw();
     pixel_state_bytes(current);assert(!memcmp(first,current,sizeof first));unsigned repeated=pixel_state_maps-initial;assert(repeated==0);
     FILE *checkpoint=tmpfile();assert(checkpoint && nv2a_gpu_save_checkpoint(checkpoint));
@@ -1007,7 +1046,7 @@ static void verify_pixel_state_uploads(void) {
         unsigned committed=pixel_state_maps;pixel_state_draw();pixel_state_bytes(first);assert(!memcmp(first,current,sizeof first));assert(pixel_state_maps==committed);
     }
     if(!d3d8_IsNativeVulkan()) {
-    D3D11_BUFFER_DESC desc={0};desc.ByteWidth=128;desc.Usage=D3D11_USAGE_DEFAULT;desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+    D3D11_BUFFER_DESC desc={0};desc.ByteWidth=sizeof(HwPixelState);desc.Usage=D3D11_USAGE_DEFAULT;desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
     ID3D11Buffer *other=NULL,*bound=NULL;assert(SUCCEEDED(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&desc,NULL,&other)));
     unsigned before_rebind=pixel_state_maps;
     ID3D11DeviceContext_PSSetConstantBuffers(d3d8_GetD3D11Context(),1,1,&other);pixel_state_draw();assert(pixel_state_maps==before_rebind);
@@ -1017,7 +1056,7 @@ static void verify_pixel_state_uploads(void) {
     rewind(checkpoint);assert(nv2a_gpu_load_checkpoint(checkpoint));fclose(checkpoint);
     unsigned before_restore_draw=pixel_state_maps;
     pixel_state_draw();pixel_state_bytes(current);assert(!memcmp(current,initial_value,sizeof current));assert(pixel_state_maps==before_restore_draw+(d3d8_IsNativeVulkan()?0:1));
-    fprintf(stderr,"[PIXEL STATE] initial_maps=%u equal64_maps=%u bytes128_equal;changed_clip,raw_depth_bits,rebind,hot_restore passed\n",initial,repeated);
+    fprintf(stderr,"[PIXEL STATE] initial_maps=%u equal64_maps=%u bytes%zu_equal;changed_clip,raw_depth_bits,rebind,hot_restore passed\n",initial,repeated,sizeof(HwPixelState));
 }
 static void verify_method_dispatch_work(void) {
     const uint32_t words[4]={0x3fa00000u,0xc0200000u,0x40700000u,0x40800000u};
@@ -3811,6 +3850,25 @@ int main(int argc,char **argv) {
     xbox_CheckpointEnd();nv2a_fifo_stop(gpu);xbox_MemoryLayoutShutdown();return 0;
 }
 '''
+    # Preserve the original relative includes while observing only actual preparation entries.
+    shutil.copytree(root/'src',work/'prep_src')
+    bridge_path=work/'prep_src/kernel/nv2a_d3d11_bridge.inc'
+    bridge=bridge_path.read_text(encoding='utf-8')
+    bridge='static void prep_unpack_for_test(uint32_t color,float out[4]) {if(prep_watch)++prep_stage_unpack_calls;nv2a_rc_unpack(color,out); }\n'+bridge
+    bridge=bridge.replace('nv2a_rc_unpack(states[','prep_unpack_for_test(states[')
+    entry='static void hw_bind_pixel_state(ID3D11DeviceContext *ctx,const HwPixelState *native)\n{'
+    assert bridge.count(entry)==1
+    bridge=bridge.replace(entry,entry+'\n    if(prep_watch)++prep_pixel_calls;')
+    entry='static void hw_issue_draw(ID3D11DeviceContext *ctx,NvkDraw *draw,unsigned first,unsigned count)\n{'
+    assert bridge.count(entry)==1
+    bridge=bridge.replace(entry,entry+'\n    if(prep_watch){++prep_draw_calls;prep_geometry_draws+=prep_in_geometry;prep_validate_bindings(ctx);}')
+    entry='    hw_enter();\n    uint64_t timing_start=gpu_timing_clock();'
+    assert bridge.count(entry)==1
+    bridge=bridge.replace(entry,entry+'\n    if(prep_watch){++prep_batch_calls;prep_program=s_hw_program_active;prep_fixed=s_hw_fixed_active;prep_output=s_hw_output_active;}')
+    entry='        hw_issue_draw(ctx,draw,first,count);'
+    assert bridge.count(entry)==1
+    bridge=bridge.replace(entry,'        prep_in_geometry=1;'+entry.strip()+'prep_in_geometry=0;')
+    bridge_path.write_text(bridge,encoding='utf-8')
     # Count calls in the actual compiled decoder without a production tracing hook.
     vsh_source=(root/'src/kernel/nv2a_vsh_interp.c').read_text(encoding='utf-8')
     entry='void nv2a_vsh_decode_instruction(const uint32_t ins[4], Nv2aVshInstruction *d)\n{'
@@ -3819,6 +3877,9 @@ int main(int argc,char **argv) {
     # Keep the original shader/buffer implementation; intercept only its real geometry Map for counting/failure injection.
     vsh=(root/'src/d3d/d3d8_vsh.c').read_text(encoding='utf-8')
     geometry=(root/'src/d3d/d3d8_nv2a_geometry.inc').read_text(encoding='utf-8')
+    geometry_entry='static HRESULT bind_native_geometry(const float *constants,const NV2ANativeGeometry *geometry,unsigned kind)\n{'
+    assert geometry.count(geometry_entry)==1
+    geometry=geometry.replace(geometry_entry,geometry_entry+'\n    if(prep_watch)++prep_geometry_calls;')
     entry='hr=ID3D11DeviceContext_Map(ctx,(ID3D11Resource *)g_vsh_geometry_cb'
     assert geometry.count(entry)==1
     (work/'d3d8_nv2a_geometry.inc').write_text(geometry.replace(entry,'hr=geometry_map_for_test(ctx,(ID3D11Resource *)g_vsh_geometry_cb'),encoding='utf-8')
@@ -3849,6 +3910,7 @@ unsigned combiner_test_shader_count(void) { unsigned count=0;for(unsigned i=0;i<
     source=source.replace('    if(!strncmp(argv[1],"fifo-worker",11)) {','    if(!strcmp(argv[1],"standing-volume-w")) { verify_standing_volume_w(); }\n    else if(!strncmp(argv[1],"volume-missing-palette-",23)) { verify_volume_missing_palette((unsigned)atoi(argv[1]+23)); }\n    else if(!strcmp(argv[1],"project3d-volume")) { verify_project3d_volume(); }\n    else if(!strcmp(argv[1],"volume-texture")) { verify_volume_texture(); }\n    else if(!strcmp(argv[1],"dot-str-texture")) { verify_dot_str_texture(); }\n    else if(!strcmp(argv[1],"constant-eye-texture")) { verify_constant_eye_texture(); }\n    else if(!strcmp(argv[1],"dot-hilo-texture")) { verify_dot_hilo_texture(); }\n    else if(!strcmp(argv[1],"dot-remap-texture")) { verify_dot_remap_texture(); }\n    else if(!strcmp(argv[1],"dot-diffuse-texture")) { verify_dot_diffuse_texture(); }\n    else if(!strcmp(argv[1],"dot-reflection-texture")) { verify_dot_reflection_texture(); }\n    else if(!strcmp(argv[1],"dot-cube-texture")) { verify_dot_cube_texture(); }\n    else if(!strcmp(argv[1],"dot-texture-stage")) { verify_dot_texture_stage(); }\n    else if(!strcmp(argv[1],"bump-luma-order")) { verify_bump_luma_order(); }\n    else if(!strcmp(argv[1],"pair-texture")) { verify_pair_texture(); }\n    else if(!strcmp(argv[1],"bump-texture")) { verify_bump_texture(); }\n    else if(!strcmp(argv[1],"tile-blit-guard")) { verify_tile_blit_guard(); }\n    else if(!strcmp(argv[1],"luma16-texture")) { verify_luma16_texture(); }\n    else if(!strcmp(argv[1],"integer-shadow-textures")) { verify_integer_shadow_textures(); }\n    else if(!strcmp(argv[1],"software-depth-ram")) { verify_software_depth_ram(); }\n    else if(!strcmp(argv[1],"depth-write-guards")) { verify_depth_write_guards(); }\n    else if(!strcmp(argv[1],"depth-ram-coherence")) { verify_depth_ram_coherence(); }\n    else if(!strncmp(argv[1],"fifo-worker",11)) {')
     source=source.replace('    if(!strcmp(argv[1],"standing-volume-w")) {','    if(!strcmp(argv[1],"combiner-effective")) { verify_combiner_effective_key(); }\n    else if(!strcmp(argv[1],"standing-volume-w")) {')
     source=source.replace('    if(!strcmp(argv[1],"combiner-effective")) {','    if(!strcmp(argv[1],"depth-sample-storage")) { verify_depth_sample_storage(); }\n    else if(!strcmp(argv[1],"combiner-effective")) {')
+    source=source.replace('    if(!strcmp(argv[1],"depth-sample-storage")) {','    if(!strcmp(argv[1],"preparation-cost")) { verify_preparation_cost(); }\n    else if(!strcmp(argv[1],"depth-sample-storage")) {')
     (work/'gpu.c').write_text(source,encoding='utf-8')
     (work/'resources_counted.c').write_text(r'''
 #include "d3d8_internal.h"
@@ -4690,3 +4752,12 @@ def test_combiner_effective_fields_reuse_original_shader_cache(native_gpu,tmp_pa
         env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},capture_output=True,text=True,errors='replace',timeout=90)
     assert result.returncode==0,result.stdout+result.stderr
     assert '[COMBINER EFFECTIVE] byte-identical' in result.stderr
+
+
+@pytest.mark.parametrize('backend,scale',[('D3D11',1),('D3D11',2),('Vulkan',1),('D3D12',1),('OpenGL',1)])
+def test_original_batch_preparation_consumes_only_final_state(native_gpu,tmp_path,backend,scale):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'preparation-cost',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':str(scale),'DXVK_LOG_PATH':str(tmp_path)},capture_output=True,text=True,errors='replace',timeout=90)
+    (tmp_path/'preparation.log').write_text(result.stdout+result.stderr,encoding='utf-8')
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[PREPARATION COST] routes/counts/final pixels/query passed' in result.stderr

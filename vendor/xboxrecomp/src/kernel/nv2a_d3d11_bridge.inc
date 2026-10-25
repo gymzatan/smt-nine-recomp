@@ -1917,7 +1917,7 @@ static void hw_flush_batch(void)
     combiner.final_flags=s_gpu.rc.final1&255; combiner.flags=(s_gpu.rc.control>>8)&1;
     combiner.clip_plane_mode=s_gpu.clip_plane_mode;
     NV2APSConstants constants={0};
-    for(unsigned stage=0;stage<8;stage++) {
+    for(unsigned stage=0;stage<(combiner_count?combiner_count:1);stage++) {
         nv2a_rc_unpack(states[D3DRS_PSCONSTANT0_0+stage],constants.c0[stage]);
         nv2a_rc_unpack(states[D3DRS_PSCONSTANT1_0+stage],constants.c1[stage]);
         combiner.stages[stage].rgb_output.ab_blue_alpha=(s_gpu.rc.color_ocw[stage]>>19)&1;
@@ -2143,9 +2143,8 @@ static void hw_flush_batch(void)
             for(unsigned i=0;i<8;i++)native_draw.attributes[i]=(VkVertexInputAttributeDescription){locations[i],0,VK_FORMAT_R32G32B32A32_SFLOAT,i*16};
         }
         hw_vk_draw_state(&native_draw,color,depth);
-    } else {
+    } else if(!s_hw_program_active) {
         hw_bind_pixel_state(ctx,&native);
-        if(s_hw_program_active)hw_check(d3d8_vsh_bind_geometry(nv2a_vsh_constant(0),&geometry,hw_geometry_kind(0)),"geometry state");
     }
     gpu_timing_finish(timing_start,&s_gpu.hardware_state_ticks);
     timing_start=gpu_timing_clock();
