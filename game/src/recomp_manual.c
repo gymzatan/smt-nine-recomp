@@ -198,7 +198,15 @@ static void prepare_original_ui_quad(void)
      * 145A39 saves that original manager at draw-stack +5C, even when
      * 1463D7 queues an inline sprite copy. Keep both background tiles wide;
      * the character list remains proportional, including shared atlases. */
-    if(texel_endpoints && MEM32(MEM32(g_esp+0x5C)+4)==0x003B2480u)fullscreen=1;
+    if(texel_endpoints){
+        uint32_t list=MEM32(MEM32(g_esp+0x5C)+4);
+        /* 215180 registers title list 530408. Its texture0/1 records with
+         * source height480 are the two backdrop tiles; the same list's
+         * Press Start and menu records keep their proportional UI mapping.
+         * These original source fields also survive a queued inline copy. */
+        if(list==0x003B2480u || (list==0x00530408u &&
+           MEM32(g_esi+4)<2 && MEM32(g_esi+0x20)==480))fullscreen=1;
+    }
     /* Keep 145A39's tiled full-screen backdrop exactly as requested.
      * Only its panels, portraits and icons need atlas edge correction. */
     if(texel_endpoints && !fullscreen){

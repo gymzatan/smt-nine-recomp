@@ -21,14 +21,13 @@ def quad_probe(tmp_path_factory):
 static unsigned char ram[0x600000];
 #define MEM32(a) (*(uint32_t *)(ram+((uint32_t)(a)&0x7fffffffu)))
 #define MEMF(a) (*(float *)(ram+((uint32_t)(a)&0x7fffffffu)))
-#define NINE_TITLE_UI_ORIGIN 0
 static uint32_t g_esp=0x1000,g_esi=0x2000,g_ebx,g_edi,g_ecx,g_ebp=0x1800;
 static float aspect;
 float smt9_game_aspect(void){return aspect;}
 static unsigned font_chinese,font_render_scale=2;
 int smt9_is_chinese(void){return font_chinese;}
 unsigned d3d8_RenderScale(void){return font_render_scale;}
-'''+helper+r'''
+'''+(Path(__file__).resolve().parents[1] / 'src/font_assets.h').read_text(encoding='utf-8')+helper+r'''
 static void check_dialogue_connector(void) {
     memset(ram,0,sizeof ram);g_edi=0x2000;MEM32(g_edi+4)=0x3000;MEM32(0x3004)=0x4000;
     const float xy[8][2]={{250.98828f,261.509f},{56,189.509f},{250.98828f,265.509f},{56,193.509f},{56,189.509f},{276,189.509f},{56,193.509f},{276,193.509f}};
@@ -205,6 +204,46 @@ static void check_original_backdrop_tiles(void) {
         assert(!memcmp(before,ram+0x4000,sizeof before));
     }
     g_esi=0x2000;
+}
+static void check_original_title_tiles(void) {
+    /* The first two original title records share a list with the menu UI.
+     * Exercise both the original table and the queue's inline sprite copy. */
+    for(unsigned copied=0;copied<2;copied++)for(unsigned tile=0;tile<2;tile++) {
+        memset(ram,0,sizeof ram);g_esi=copied?0x00552F54:0x00530408+tile*0x3c;
+        MEM32(g_esp+0x5c)=0x6000;MEM32(0x6004)=0x00530408;
+        MEM32(g_esi+4)=tile;MEM32(g_esi+0x14)=0;MEM32(g_esi+0x18)=0;
+        MEM32(g_esi+0x1c)=tile?128:512;MEM32(g_esi+0x20)=480;
+        MEM32(g_esp)=0x0014617A;MEM32(g_esp+4)=7;MEM32(g_esp+8)=4;
+        MEM32(g_esp+12)=0x4000;MEM32(g_esp+16)=28;
+        MEM32(g_esp+0x13c)=512;MEM32(g_esp+0x140)=512;
+        for(unsigned i=0;i<4;i++) {
+            unsigned v=0x4000+i*28;
+            MEMF(v)=(tile?512:0)+(i&1?(tile?128:512):0);MEMF(v+4)=i&2?480:0;
+            MEM32(v+8)=0x3f000000+i;MEM32(v+12)=0x3f800000;MEM32(v+16)=0xffabcdef;
+            MEMF(v+20)=i&1?(tile?127:511)/511.0f:0;MEMF(v+24)=i&2?479/511.0f:0;
+        }
+        unsigned char before[112];memcpy(before,ram+0x4000,sizeof before);
+        prepare_original_ui_quad();
+        assert(!memcmp(before,ram+0x4000,sizeof before));
+    }
+    /* Press Start remains proportional and uses the accepted title anchor. */
+    memset(ram,0,sizeof ram);g_esi=0x00530480;
+    MEM32(g_esp+0x5c)=0x6000;MEM32(0x6004)=0x00530408;
+    MEM32(g_esi+4)=1;MEM32(g_esi+0x14)=128;MEM32(g_esi+0x18)=64;
+    MEM32(g_esi+0x1c)=256;MEM32(g_esi+0x20)=24;
+    MEM32(g_esp)=0x0014617A;MEM32(g_esp+4)=7;MEM32(g_esp+8)=4;
+    MEM32(g_esp+12)=0x4000;MEM32(g_esp+16)=28;
+    MEM32(g_esp+0x13c)=512;MEM32(g_esp+0x140)=512;
+    for(unsigned i=0;i<4;i++) {
+        unsigned v=0x4000+i*28;MEMF(v)=65+(i&1?256:0);MEMF(v+4)=250+(i&2?24:0);
+        MEMF(v+20)=(128+(i&1?255:0))/511.0f;MEMF(v+24)=(64+(i&2?23:0))/511.0f;
+    }
+    prepare_original_ui_quad();
+    for(unsigned i=0;i<4;i++) {
+        float original=65+(i&1?256:0),factor=(4.0f/3.0f)/aspect;
+        assert(MEMF(0x4000+i*28)==NINE_TITLE_UI_ORIGIN+(original-NINE_TITLE_UI_ORIGIN)*factor);
+        assert(MEMF(0x4004+i*28)==250+(i&2?24:0));
+    }
 }
 static void check_original_endchar_portrait(void) {
     /* Original 3358EC: texture0, sourceX128,Y0,W360,H512. */
@@ -388,7 +427,7 @@ int main(int argc,char **argv) {
     check_portrait_strip(352,164,272);check_portrait_strip(171,217,216);check_portrait_strip(202,163,80);
     check_settled_portrait(320,480,0);check_settled_portrait(512,512,0);
     check_settled_portrait(320,479,0);check_settled_portrait(640,480,1);
-    check_settled_portrait(360,512,0);check_original_backdrop_tiles();
+    check_settled_portrait(360,512,0);check_original_backdrop_tiles();check_original_title_tiles();
     check_original_backdrop_strip();
     check_original_endchar_portrait();
     check_dialogue_connector();check_speech_anchor();
