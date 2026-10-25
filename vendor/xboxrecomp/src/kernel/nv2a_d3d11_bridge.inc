@@ -1909,8 +1909,10 @@ static void hw_flush_batch(void)
     states[D3DRS_PSFINALCOMBINERINPUTSABCD]=hw_reverse_inputs(s_gpu.rc.final0);
     states[D3DRS_PSFINALCOMBINERINPUTSEFG]=hw_reverse_inputs(s_gpu.rc.final1)>>0;
     NV2ACombinerState combiner={0};
+    unsigned combiner_count=s_gpu.rc.control&255;if(combiner_count>8)combiner_count=8;
+    combiner.num_stages=(int)combiner_count;
     d3d8_combiners_from_render_states(states,&combiner);
-    combiner.num_stages=s_gpu.rc.control&255; if(combiner.num_stages>8) combiner.num_stages=8;
+    combiner.num_stages=(int)combiner_count;
     combiner.native_coordinates=1; combiner.final_enabled=s_gpu.rc.final0 || s_gpu.rc.final1;
     combiner.final_flags=s_gpu.rc.final1&255; combiner.flags=(s_gpu.rc.control>>8)&1;
     combiner.clip_plane_mode=s_gpu.clip_plane_mode;

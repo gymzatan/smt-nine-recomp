@@ -242,7 +242,7 @@ void d3d8_combiners_from_render_states(const DWORD *rs,
     }
 
     /* Parse stage inputs */
-    for (i = 0; i < NV2A_MAX_COMBINER_STAGES; i++) {
+    for (i = 0; i < state->num_stages && i < NV2A_MAX_COMBINER_STAGES; i++) {
         parse_four_inputs(rs[D3DRS_PSRGBINPUTS0 + i],
                           state->stages[i].rgb_input);
         parse_four_inputs(rs[D3DRS_PSALPHAINPUTS0 + i],
@@ -250,7 +250,7 @@ void d3d8_combiners_from_render_states(const DWORD *rs,
     }
 
     /* Parse stage outputs */
-    for (i = 0; i < NV2A_MAX_COMBINER_STAGES; i++) {
+    for (i = 0; i < state->num_stages && i < NV2A_MAX_COMBINER_STAGES; i++) {
         parse_output(rs[D3DRS_PSRGBOUTPUTS0 + i],
                      &state->stages[i].rgb_output);
         parse_output(rs[D3DRS_PSALPHAOUTPUTS0 + i],

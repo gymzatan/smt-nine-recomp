@@ -15,7 +15,11 @@ def native_apu(tmp_path_factory):
 #include "apu/apu_core.c"
 #include "apu/apu_ac97.c"
 #include "apu/apu_xaudio2.c"
+static unsigned long attenuation_test_pow_calls;
+static float attenuation_test_pow(float x,float y) {++attenuation_test_pow_calls;return powf(x,y);}
+#define powf attenuation_test_pow
 #include "apu/apu_vp.c"
+#undef powf
 #include <assert.h>
 recomp_func_t recomp_lookup(uint32_t va) { (void)va;return NULL; }
 recomp_func_t recomp_lookup_manual(uint32_t va) { (void)va;return NULL; }
@@ -107,7 +111,28 @@ static void resampler_case(MCPXAPUState *d,const char *mode,const char *path) {
     }
     fclose(file);
 }
+static int attenuation_case(void) {
+    mcpx_apu_vp_init(NULL);
+    unsigned long initialized_calls=attenuation_test_pow_calls;
+    for(unsigned v=0;v<=UINT16_MAX;v++) {
+        uint16_t masked=(uint16_t)(v&0xfff);
+        float expected=masked==0xfff?0.0f:powf(10.0f,masked/(64.0f*-20.0f));
+        float actual=attenuate((uint16_t)v);
+        assert(!memcmp(&actual,&expected,sizeof actual));
+    }
+    LARGE_INTEGER frequency,begin,end;QueryPerformanceFrequency(&frequency);
+    float total=0;const unsigned iterations=8000000;
+    QueryPerformanceCounter(&begin);
+    for(unsigned i=0;i<iterations;i++)total+=attenuate((uint16_t)i);
+    QueryPerformanceCounter(&end);
+    unsigned long hot_calls=attenuation_test_pow_calls-initialized_calls;
+    printf("{\"values_checked\":65536,\"iterations\":%u,\"hot_pow_calls\":%lu,\"nanoseconds_per_call\":%.6f,\"checksum\":%.9g}\n",iterations,hot_calls,1e9*(end.QuadPart-begin.QuadPart)/frequency.QuadPart/iterations,total);
+    fflush(stdout);
+    if(hot_calls){fprintf(stderr,"[ATTENUATION] repeated hot-path powf calls: %lu\n",hot_calls);return 5;}
+    return 0;
+}
 int main(int argc,char **argv) {
+    if(argc==4 && !strcmp(argv[1],"attenuation"))return attenuation_case();
     assert(argc==4);FILE *file=fopen(argv[2],"rb");assert(file);fseek(file,0,SEEK_END);long bytes=ftell(file);rewind(file);
     void *xbe=malloc(bytes);assert(xbe && fread(xbe,bytes,1,file)==1);fclose(file);
     assert(xbox_MemoryLayoutInit(xbe,bytes));free(xbe);_putenv_s("RECOMP_GUEST_LOCK","1");assert(guest_cpu_enabled());
@@ -146,7 +171,7 @@ int main(int argc,char **argv) {
         '/DWIN32_LEAN_AND_MEAN','/DNOMINMAX','/D_CRT_SECURE_NO_WARNINGS','/D_USE_MATH_DEFINES','/I'+str(root/'src'),
         str(work/'apu.c'),'/Fe:'+str(work/'apu.exe'),'/link','/OPT:REF',*[str(p) for p in libraries],
         'kernel32.lib','user32.lib','gdi32.lib','advapi32.lib','ole32.lib','shell32.lib',
-        'd3d11.lib','dxgi.lib','dxguid.lib','d3dcompiler.lib','winmm.lib','xaudio2_8.lib',
+        'd3d11.lib','d3d12.lib','dxgi.lib','dxguid.lib','d3dcompiler.lib','winmm.lib','xaudio2_8.lib',
         'xinput.lib','bcrypt.lib','ntdll.lib','userenv.lib','ws2_32.lib'],
         cwd=work,capture_output=True,text=True,errors='replace')
     assert result.returncode==0,result.stdout+result.stderr
@@ -177,3 +202,13 @@ def test_original_voice_rate_and_fractional_filter_history_survive_fresh_process
     expected=Path(str(snapshot)+'.src-save.f32').read_bytes()
     assert Path(str(snapshot)+'.src-load.f32').read_bytes()==expected
     bad=tmp_path/'resampler-truncated.state';bad.write_bytes(snapshot.read_bytes()[:-1]);run('src-reject',bad)
+
+
+def test_original_voice_attenuation_values_reuse_initialized_results(native_apu,tmp_path):
+    import json
+    executable,xbe=native_apu
+    result=subprocess.run([str(executable),'attenuation',str(xbe),str(tmp_path/'unused')],capture_output=True,text=True,errors='replace',timeout=20)
+    assert result.returncode==0,result.stdout+result.stderr
+    (tmp_path/'attenuation_measurement.json').write_text(result.stdout,encoding='utf-8')
+    measured=json.loads(result.stdout)
+    assert measured['values_checked']==65536 and measured['hot_pow_calls']==0

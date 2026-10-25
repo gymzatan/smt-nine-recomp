@@ -1,3 +1,56 @@
+
+extern unsigned combiner_test_input_groups,combiner_test_output_groups;
+static void combiner_parse_work(unsigned expected) {
+    if(combiner_test_input_groups!=expected*2 || combiner_test_output_groups!=expected*2) {
+        fprintf(stderr,"[COMBINER PREP] actual input/output groups %u/%u expected %u/%u\n",combiner_test_input_groups,combiner_test_output_groups,expected*2,expected*2);exit(5);
+    }
+}
+static void verify_combiner_active_parser(void) {
+    DWORD rs[256]={0};
+    for(unsigned i=0;i<8;i++) {
+        rs[D3DRS_PSRGBINPUTS0+i]=0x01020304u+i*0x1020304u;
+        rs[D3DRS_PSALPHAINPUTS0+i]=0x04030201u+i*0x1010101u;
+        rs[D3DRS_PSRGBOUTPUTS0+i]=0xc00u+i*0x1000;
+        rs[D3DRS_PSALPHAOUTPUTS0+i]=0xc00u+i*0x2000;
+        rs[D3DRS_PSCONSTANT0_0+i]=0xff102030u+i;
+        rs[D3DRS_PSCONSTANT1_0+i]=0xff405060u+i;
+    }
+    rs[D3DRS_PSFINALCOMBINERINPUTSABCD]=0x01020304;rs[D3DRS_PSFINALCOMBINERINPUTSEFG]=0x04030201;
+    const unsigned counts[]={0,1,2,8};char a[32768],b[32768];
+    for(unsigned k=0;k<4;k++) {
+        unsigned count=counts[k],parsed=count?count:1;
+        NV2ACombinerState actual={0},full={0};actual.num_stages=count;full.num_stages=8;
+        combiner_test_input_groups=combiner_test_output_groups=0;
+        d3d8_combiners_from_render_states(rs,&actual);combiner_parse_work(parsed);
+        assert(actual.num_stages==(int)parsed);
+        d3d8_combiners_from_render_states(rs,&full);
+        assert(!memcmp(actual.stages,full.stages,parsed*sizeof actual.stages[0]));
+        assert(!memcmp(actual.final_input,full.final_input,sizeof actual.final_input));
+        assert(!memcmp(actual.c0,full.c0,sizeof actual.c0) && !memcmp(actual.c1,full.c1,sizeof actual.c1));
+        assert(actual.final_c0==actual.c0[parsed-1] && actual.final_c1==actual.c1[parsed-1]);
+        actual.num_stages=full.num_stages=count;actual.native_coordinates=full.native_coordinates=1;
+        full.final_c0=actual.final_c0;full.final_c1=actual.final_c1;
+        for(unsigned final=0;final<2;final++) {
+            actual.final_enabled=full.final_enabled=final;
+            int bytes=d3d8_combiners_generate_hlsl(&actual,a,sizeof a);
+            assert(bytes>0 && d3d8_combiners_generate_hlsl(&full,b,sizeof b)==bytes && !memcmp(a,b,(size_t)bytes+1));
+        }
+    }
+    const unsigned tokens[]={0,1,2,8,15};
+    for(unsigned k=0;k<5;k++) {
+        NV2ACombinerState actual={0};unsigned token=tokens[k],parsed=token<1?1:token>8?8:token;
+        combiner_test_input_groups=combiner_test_output_groups=0;
+        d3d8_combiners_parse_token(token,rs,&actual);combiner_parse_work(parsed);
+        assert(actual.num_stages==(int)parsed && actual.native_coordinates==0);
+        assert(actual.final_c0==actual.c0[parsed-1] && actual.final_c1==actual.c1[parsed-1]);
+        assert(actual.final_input[0].reg==NV2A_REG_V0);
+        assert(d3d8_combiners_generate_hlsl(&actual,a,sizeof a)>0);
+        /* Non-native final is still emitted with final_enabled zero. */
+        actual.final_input[3].mapping=NV2A_MAP_UNSIGNED_INVERT;
+        assert(d3d8_combiners_generate_hlsl(&actual,b,sizeof b)>0 && strcmp(a,b));
+    }
+    fprintf(stderr,"[COMBINER PREP] active0/1/2/8, token0/1/2/8/15, constants/final and same original HLSL passed\n");
+}
 extern unsigned combiner_test_shader_count(void);
 static void *combiner_effective_shader(const NV2ACombinerState *state) {
     void *shader=d3d8_IsNativeVulkan()?(void *)d3d8_combiners_vulkan_shader(state):(void *)d3d8_combiners_get_shader(state);
@@ -11,6 +64,7 @@ static void combiner_effective_pixel(uint32_t expected) {
 }
 static void verify_combiner_effective_key(void) {
     seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_DEPTH_MASK,0);
+    verify_combiner_active_parser();
     NV2ACombinerState state={0};state.num_stages=1;state.native_coordinates=1;
     for(unsigned i=0;i<4;i++)state.tex_mode[i]=NV2A_TEXMODE_NONE;
     state.stages[0].rgb_input[0].reg=state.stages[0].alpha_input[0].reg=NV2A_REG_V0;
@@ -62,6 +116,13 @@ static void verify_combiner_effective_key(void) {
     method(NV097_SET_COMBINER_COLOR_ICW+4,0);method(NV097_SET_COMBINER_ALPHA_ICW+4,0);
     method(NV097_SET_COMBINER_COLOR_OCW+4,0xc00);method(NV097_SET_COMBINER_ALPHA_OCW+4,0xc00);
     method(NV097_SET_COMBINER_CONTROL,2);combiner_effective_pixel(0);
+    for(unsigned i=2;i<8;i++) {
+        method(NV097_SET_COMBINER_COLOR_ICW+i*4,0);method(NV097_SET_COMBINER_ALPHA_ICW+i*4,0);
+        method(NV097_SET_COMBINER_COLOR_OCW+i*4,0xc00);method(NV097_SET_COMBINER_ALPHA_OCW+i*4,0xc00);
+    }
+    method(NV097_SET_COMBINER_CONTROL,8);combiner_effective_pixel(0);
+    method(NV097_SET_COMBINER_CONTROL,0);combiner_effective_pixel(0xff000000);
+
     method(NV097_SET_COMBINER_CONTROL,1);
     method(NV097_SET_COMBINER_SPECULAR_FOG_CW0,0x20);method(NV097_SET_COMBINER_SPECULAR_FOG_CW1,0x2000);
     combiner_effective_pixel(0xffffffff);

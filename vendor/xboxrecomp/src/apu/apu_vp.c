@@ -93,10 +93,11 @@ static float clampf(float v, float mn, float mx)
     return v;
 }
 
+static float voice_attenuation[4096];
+
 static float attenuate(uint16_t vol)
 {
-    vol &= 0xFFF;
-    return (vol == 0xFFF) ? 0.0f : powf(10.0f, vol / (64.0f * -20.0f));
+    return voice_attenuation[vol & 0xFFF];
 }
 
 /* ============================================================
@@ -1330,6 +1331,8 @@ void mcpx_apu_vp_frame(MCPXAPUState *d,
 
 void mcpx_apu_vp_init(MCPXAPUState *d)
 {
+    for (uint16_t vol=0;vol<ARRAY_SIZE(voice_attenuation);vol++)
+        voice_attenuation[vol]=(vol==0xFFF)?0.0f:powf(10.0f,vol/(64.0f*-20.0f));
     /* Startup diagnostic configuration is shared by every APU consumer. */
     g_dbg.trace_enabled=getenv("RECOMP_APU_TRACE")!=NULL;
     g_dbg.ssl_trace_enabled=getenv("RECOMP_APU_SSL_TRACE")!=NULL;

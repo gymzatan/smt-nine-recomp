@@ -322,8 +322,13 @@ void d3d8_combiners_parse_token(DWORD token, const DWORD *rs,
  * Called when games set PS render states directly rather than
  * using a pixel shader token.
  *
+ * General-stage descriptors are filled only for the active stage count;
+ * inactive descriptors are not consumed by the shader or normalized cache key.
+ * A zero count retains the render-state count inference. Final inputs and all
+ * constant colors are always populated independently of the active count.
+ *
  * @param rs     Pointer to the render state array
- * @param state  Output: filled combiner state structure
+ * @param state  Active stage count on input; filled active state on output
  */
 void d3d8_combiners_from_render_states(const DWORD *rs,
                                        NV2ACombinerState *state);
