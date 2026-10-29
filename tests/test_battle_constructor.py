@@ -19,10 +19,13 @@ def test_effect_constructor_uses_completed_callback_handles(tmp_path):
             edits.append((at,removed,inserted,base[max(0,at-80):at],base[end:end+80]))
     edits.sort()
     assert len(edits)==2
-    assert {inserted.splitlines()[-1] for _,_,inserted,_,_ in edits}=={
+    assert {line for _,_,inserted,_,_ in edits for line in inserted.splitlines()
+            if line.startswith('    _fa = ')}=={
         '    _fa = (uint32_t)(MEM32(esp + 0x94)) & 0xFFFFFFFFu; _fb = (uint32_t)(edi) & 0xFFFFFFFFu;',
         '    _fa = (uint32_t)(MEM32(esp + 0x98)) & 0xFFFFFFFFu; _fb = (uint32_t)(edi) & 0xFFFFFFFFu;',
     }
+    assert all(inserted.splitlines()[-1]=='    _cf = (int)(_fa < _fb);'
+               for _,_,inserted,_,_ in edits)
     fixed=generate.apply_project_edits(base,dict(row,edits=edits))
     compiler=shutil.which('cl');assert compiler
     fixture=r"""
