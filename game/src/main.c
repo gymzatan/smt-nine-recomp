@@ -542,13 +542,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     {
         extern void xbox_path_init(const char *game_dir, const char *save_dir);
         extern BOOL xbox_path_set_user_directory(const char *directory);
-        xbox_path_init(YOUR_GAME_DIR, SMT9_SAVE_DIR);
-        if(!xbox_path_set_user_directory(SMT9_USER_DIR))return 1;
         char media_root[MAX_PATH],cache_id[64];
         extern void xbox_path_set_language_media(const char *language,const char *media_root);
         if(s_language.external) {
             if(!WideCharToMultiByte(CP_UTF8,0,s_language.directory,-1,media_root,MAX_PATH,NULL,NULL) ||
                !WideCharToMultiByte(CP_UTF8,0,wcsrchr(s_language.directory,L'/')+1,-1,cache_id,64,NULL,NULL))return 1;
+        }
+        xbox_path_init(s_language.external?media_root:(smt9_is_japanese()?SMT9_JP_GAME_DIR:YOUR_GAME_DIR), SMT9_SAVE_DIR);
+        if(!xbox_path_set_user_directory(SMT9_USER_DIR))return 1;
+        if(s_language.external) {
             xbox_path_set_language_media(cache_id,media_root);
         }else xbox_path_set_language_media(smt9_is_japanese()?"Japanese":"",SMT9_JP_GAME_DIR);
     }
