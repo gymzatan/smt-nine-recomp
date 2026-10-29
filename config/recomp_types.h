@@ -102,6 +102,11 @@ void recomp_debug_service(uint32_t service, uint32_t arg_va);
  */
 extern ptrdiff_t g_xbox_mem_offset;
 
+struct MCPXAPUState;
+extern struct MCPXAPUState *g_apu_state;
+uint64_t apu_read_adapter(void *device, uint32_t offset, unsigned size);
+void apu_write_adapter(void *device, uint32_t offset, uint64_t value, unsigned size);
+
 /* Bounds of the title's executable sections, filled in by
  * xbox_MemoryLayoutInit from the XBE's own section table. Zero means "not
  * loaded yet", which RECOMP_ICALL_IS_CODE treats as allow.
@@ -164,8 +169,8 @@ extern uint32_t g_xbox_code_hi;
 #  define RECOMP_TLS _Thread_local
 #endif
 
-extern RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_esp;
-extern RECOMP_TLS uint32_t g_ebx, g_esi, g_edi;
+#include "kernel/recomp_gpr_state.h"
+extern RECOMP_TLS RecompGprState g_gpr;
 
 /* x87 stack. Per-thread for the same reason the integer registers are:
  * arguments are passed in st(0)/st(1) across call boundaries. */
@@ -257,8 +262,7 @@ extern RECOMP_TLS uint32_t g_ebp;
  * be found by name, and the dashboard rebooted rather than showing a UI.
  * memmove's overlapping case is the same instruction and the same bug.
  */
-extern RECOMP_TLS int g_df;
-extern RECOMP_TLS uint32_t g_eflags;
+
 int xbox_CpuInterruptFlag(void);
 void xbox_CpuLeaveInterrupt(int state);
 static inline uint32_t recomp_read_eflags(void) {
@@ -286,11 +290,11 @@ extern RECOMP_TLS uint16_t g_fp_control_word;
 extern RECOMP_TLS int g_fp_cmp;
 extern RECOMP_TLS uint16_t g_fp_cc;
 extern RECOMP_TLS uint16_t g_fp_status_word, g_fp_tag_word;
-extern RECOMP_TLS uint16_t g_fp_opcode, g_fp_code_selector, g_fp_data_selector;
-extern RECOMP_TLS uint32_t g_fp_instruction_pointer, g_fp_data_pointer, g_mxcsr;
+#include "kernel/recomp_fpu_state.h"
+extern RECOMP_TLS RecompFpMetadata g_fp_metadata;
+extern RECOMP_TLS uint32_t g_mxcsr;
 extern RECOMP_TLS uint8_t g_fp_raw[8][10];
 extern RECOMP_TLS uint8_t g_fp_alias_dirty;
-#include "kernel/recomp_fpu_state.h"
 static inline uint16_t recomp_fp_status(void) {
     return (uint16_t)((g_fp_status_word & ~0x7f00u) | g_fp_cc | ((g_fp_top & 7u)<<11));
 }
@@ -300,7 +304,7 @@ static inline void recomp_fp_reset(void) {
     g_fp_instruction_pointer=g_fp_data_pointer=0;
     g_fp_opcode=g_fp_code_selector=g_fp_data_selector=0;
 }
-static inline void recomp_fp_set_tag(unsigned slot, unsigned tag) {
+static __forceinline void recomp_fp_set_tag(unsigned slot, unsigned tag) {
     unsigned shift=(slot&7u)*2;
     g_fp_tag_word=(uint16_t)((g_fp_tag_word & ~(3u<<shift)) | (tag<<shift));
 }
@@ -488,12 +492,14 @@ void recomp_trace_esp(const char *name, const char *tag);
  * uintptr_t cast preserves the overflow bits, landing us 4GB+ past
  * our mapping and causing access violations.
  */
-#define XBOX_PTR(addr) ((uintptr_t)(uint32_t)(addr) + g_xbox_mem_offset)
+#define XBOX_PTR_AT(addr, memory_offset) ((uintptr_t)(uint32_t)(addr) + (memory_offset))
+#define XBOX_PTR(addr) XBOX_PTR_AT((addr), g_xbox_mem_offset)
 
 /** Read/write N bytes at a flat Xbox memory address. */
 #define MEM8(addr)   (*(volatile uint8_t  *)XBOX_PTR(addr))
 #define MEM16(addr)  (*(volatile uint16_t *)XBOX_PTR(addr))
-#define MEM32(addr)  (*(volatile uint32_t *)XBOX_PTR(addr))
+#define MEM32_AT(addr, memory_offset) (*(volatile uint32_t *)XBOX_PTR_AT((addr), (memory_offset)))
+#define MEM32(addr)  MEM32_AT((addr), g_xbox_mem_offset)
 
 uint32_t nv2a_guest_read32(uint32_t address);
 void nv2a_guest_write32(uint32_t address, uint32_t value);
@@ -562,7 +568,7 @@ static inline void recomp_fp_sync(unsigned mask) {
     uint64_t *mm[]={&g_mm0.q,&g_mm1.q,&g_mm2.q,&g_mm3.q,&g_mm4.q,&g_mm5.q,&g_mm6.q,&g_mm7.q};
     recomp_fp_sync_slots(&g_fp_alias_dirty,g_fp_stack,g_fp_raw,mm,mask);
 }
-static inline void recomp_fp_commit(unsigned slot) {
+static __forceinline void recomp_fp_commit(unsigned slot) {
     slot&=7u;g_fp_alias_dirty|=(uint8_t)(1u<<slot);
     recomp_fp_set_tag(slot,recomp_fp_tag(g_fp_stack[slot]));
 }
@@ -579,6 +585,14 @@ static inline void recomp_fp_copy(unsigned destination,unsigned source) {
 }
 static inline void recomp_fp_push_copy(int *top,unsigned source) {
     unsigned destination=(*top+7u)&7u;recomp_fp_copy(destination,source);*top=(int)destination;
+}
+/* Integer loads cannot produce a zero-exponent special or non-finite value. */
+static __forceinline void recomp_fp_push_integer(int *top,int64_t integer) {
+    double value=(double)integer;
+    *top=(*top+7u)&7u;
+    g_fp_stack[*top]=value;
+    g_fp_alias_dirty|=(uint8_t)(1u<<*top);
+    recomp_fp_set_tag((unsigned)*top,integer==0?1u:0u);
 }
 static inline void recomp_fp_push_raw(int *top,const void *source) {
     RecompMmx *mm[]={&g_mm0,&g_mm1,&g_mm2,&g_mm3,&g_mm4,&g_mm5,&g_mm6,&g_mm7};
@@ -602,8 +616,10 @@ static inline void recomp_mmx_enter(void) {
     g_fp_tag_word=0;g_fp_top=0;
 }
 static inline void recomp_mmx_commit(unsigned slot) {
-    RecompMmx *mm[]={&g_mm0,&g_mm1,&g_mm2,&g_mm3,&g_mm4,&g_mm5,&g_mm6,&g_mm7};
-    slot&=7u;memcpy(g_fp_raw[slot],&mm[slot]->q,8);recomp_fp_put16(g_fp_raw[slot]+8,0xffffu);
+    slot&=7u;
+    const RecompMmx *mm=slot==0?&g_mm0:slot==1?&g_mm1:slot==2?&g_mm2:slot==3?&g_mm3:
+        slot==4?&g_mm4:slot==5?&g_mm5:slot==6?&g_mm6:&g_mm7;
+    memcpy(g_fp_raw[slot],&mm->q,8);recomp_fp_put16(g_fp_raw[slot]+8,0xffffu);
     g_fp_stack[slot]=recomp_fp80_load(g_fp_raw[slot]);
     g_fp_alias_dirty&=(uint8_t)~(1u<<slot);
 }
@@ -683,17 +699,20 @@ static inline RecompXmm XMM_SCALAR_BITS(uint32_t bits) {
  * Addresses are guest VAs, so they go through MEM32 like every other
  * access. Done lane-wise, which is also unaligned-safe for movups. */
 
-static inline RecompXmm XMM_MEM(uint32_t addr) {
+static inline RecompXmm recomp_xmm_mem_at(uint32_t addr, ptrdiff_t memory_offset) {
     RecompXmm r;
-    r.u[0] = MEM32(addr);      r.u[1] = MEM32(addr + 4);
-    r.u[2] = MEM32(addr + 8);  r.u[3] = MEM32(addr + 12);
+    r.u[0] = MEM32_AT(addr, memory_offset);      r.u[1] = MEM32_AT(addr + 4, memory_offset);
+    r.u[2] = MEM32_AT(addr + 8, memory_offset);  r.u[3] = MEM32_AT(addr + 12, memory_offset);
     return r;
 }
 
-static inline void XMM_STORE(uint32_t addr, RecompXmm v) {
-    MEM32(addr)      = v.u[0]; MEM32(addr + 4)  = v.u[1];
-    MEM32(addr + 8)  = v.u[2]; MEM32(addr + 12) = v.u[3];
+static inline void recomp_xmm_store_at(uint32_t addr, RecompXmm v, ptrdiff_t memory_offset) {
+    MEM32_AT(addr, memory_offset)      = v.u[0]; MEM32_AT(addr + 4, memory_offset)  = v.u[1];
+    MEM32_AT(addr + 8, memory_offset)  = v.u[2]; MEM32_AT(addr + 12, memory_offset) = v.u[3];
 }
+
+#define XMM_MEM(addr) recomp_xmm_mem_at((addr), g_xbox_mem_offset)
+#define XMM_STORE(addr, ...) recomp_xmm_store_at((addr), (__VA_ARGS__), g_xbox_mem_offset)
 
 /* movlps/movhps move 8 bytes into or out of one half, leaving the
  * other half alone. */
@@ -1027,8 +1046,8 @@ static inline uint16_t ROR16(uint16_t val, int n) {
  * every such comparison went one fixed direction.
  */
 static inline int recomp_parity8(uint32_t x) {
-    x &= 0xFFu; x ^= x >> 4; x ^= x >> 2; x ^= x >> 1;
-    return (int)(~x & 1u);   /* 1 = even parity (PF set) */
+    x ^= x >> 4;
+    return (int)((0x9669u >> (x & 15u)) & 1u); /* 1 = even parity (PF set) */
 }
 #define RECOMP_PARITY8(x) recomp_parity8((uint32_t)(x))
 
@@ -1433,15 +1452,18 @@ static inline RecompXmm XMM_FROM_PI(RecompXmm dst, RecompMmx src)
     return dst;
 }
 
-static inline RecompMmx MMX_MEM(uint32_t addr) {
+static inline RecompMmx recomp_mmx_mem_at(uint32_t addr, ptrdiff_t memory_offset) {
     RecompMmx r;
-    memcpy(&r, (const void *)XBOX_PTR(addr), 8);
+    memcpy(&r, (const void *)XBOX_PTR_AT(addr, memory_offset), 8);
     return r;
 }
 
-static inline void MMX_STORE(uint32_t addr, RecompMmx v) {
-    memcpy((void *)XBOX_PTR(addr), &v, 8);
+static inline void recomp_mmx_store_at(uint32_t addr, RecompMmx v, ptrdiff_t memory_offset) {
+    memcpy((void *)XBOX_PTR_AT(addr, memory_offset), &v, 8);
 }
+
+#define MMX_MEM(addr) recomp_mmx_mem_at((addr), g_xbox_mem_offset)
+#define MMX_STORE(addr, ...) recomp_mmx_store_at((addr), (__VA_ARGS__), g_xbox_mem_offset)
 
 static inline RecompMmx MMX_FROM32(uint32_t v) {
     RecompMmx r; r.q = 0; r.ud[0] = v; return r;

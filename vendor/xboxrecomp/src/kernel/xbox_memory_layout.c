@@ -13,6 +13,7 @@
  */
 
 #include "xbox_memory_layout.h"
+#include "recomp_gpr_state.h"
 #include "recomp_fpu_state.h"
 #include "kernel.h"
 #include "guest_vmem.h"
@@ -985,8 +986,7 @@ RECOMP_TLS uint32_t g_fs_base = XBOX_TIB_MAIN;
  * at is. Zero total means the image had no TLS directory. */
 static uint32_t g_tls_template_va, g_tls_total, g_tls_thread_size = 64;
 
-RECOMP_TLS uint32_t g_eax = 0, g_ecx = 0, g_edx = 0, g_esp = 0;
-RECOMP_TLS uint32_t g_ebx = 0, g_esi = 0, g_edi = 0;
+RECOMP_TLS RecompGprState g_gpr = {0,0,0,0,0,0,0,0x202u,0};
 
 #ifdef RECOMP_ABI_CHECK
 /* Report a lifted function that returned without restoring ebx/esi/edi.
@@ -1063,15 +1063,14 @@ RECOMP_TLS uint16_t g_fp_control_word = 0x037Fu;
 RECOMP_TLS int g_fp_cmp = 0;
 RECOMP_TLS uint16_t g_fp_cc = 0x4000;
 RECOMP_TLS uint16_t g_fp_status_word, g_fp_tag_word = 0xffffu;
-RECOMP_TLS uint16_t g_fp_opcode, g_fp_code_selector, g_fp_data_selector;
-RECOMP_TLS uint32_t g_fp_instruction_pointer, g_fp_data_pointer;
+RECOMP_TLS RecompFpMetadata g_fp_metadata;
 RECOMP_TLS uint32_t g_mxcsr = 0x1f80u;
 RECOMP_TLS uint8_t g_fp_raw[8][10];
 RECOMP_TLS uint8_t g_fp_alias_dirty;
 
 /* Defined below, with the other guest registers. */
 extern RECOMP_TLS uint32_t g_ebp;
-extern RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_ebx, g_esi, g_edi;
+
 
 /* ---- non-local jumps ---------------------------------------------------
  *
@@ -1587,8 +1586,7 @@ RECOMP_TLS uint32_t g_ebp = 0;
  * `std; repne scasb`, and memmove goes backwards when its regions overlap the
  * wrong way. Thread-local, because `std` and the `cld` that undoes it can land
  * in different lifted bodies of the same guest routine. */
-RECOMP_TLS int g_df = 0;
-RECOMP_TLS uint32_t g_eflags = 0x202u;
+
 
 void xbox_CaptureGuestRegisters(XboxGuestRegisters *state)
 {

@@ -34,6 +34,27 @@ class FpuLifterTest(unittest.TestCase):
             ["MEMF(esp + 0x18) = (float)fp_top(); fp_pop(); /* fstp */"],
         )
 
+    def test_register_store_preserves_final_tag_publication(self):
+        lifter = Lifter()
+        lifter.architectural_flags = True
+        for mnemonic, opcode in (("fst", 0xd0), ("fstp", 0xd8)):
+            for index in range(8):
+                with self.subTest(mnemonic=mnemonic, index=index):
+                    instruction = Instruction(
+                        0x221235, 2, mnemonic, f"st({index})",
+                        bytes((0xdd, opcode + index)).hex())
+                    instruction.operands = [Operand(type="reg", reg=f"st({index})")]
+                    emitted = lifter.lift_instruction(instruction)
+                    self.assertIn("g_fp_instruction_pointer = 0x00221235u;", emitted[0])
+                    self.assertIn(f"g_fp_opcode = 0x{0x500 + opcode + index:X}u;", emitted[0])
+                    self.assertIn("g_fp_code_selector = 8;", emitted[0])
+                    if mnemonic == "fst" and index == 0:
+                        self.assertIn("recomp_fp_set_tag((g_fp_top + 0) & 7u, 0);", emitted[0])
+                    else:
+                        self.assertNotIn("recomp_fp_set_tag", emitted[0])
+                    self.assertEqual("recomp_fp_copy" in emitted[1], index != 0)
+                    self.assertEqual("fp_pop()" in emitted[1], mnemonic == "fstp")
+
     def test_qword_integer_conversion_uses_signed_64_bit_storage(self):
         operand = Operand(type="mem", mem_base="esp", mem_disp=0x10,
                           mem_size=8)
@@ -50,7 +71,7 @@ class FpuLifterTest(unittest.TestCase):
         )
         self.assertEqual(
             Lifter().lift_instruction(load),
-            ["fp_push((double)SMEM64(esp + 0x10)); /* fild */"],
+            ["recomp_fp_push_integer(&fp_stack_top, SMEM64(esp + 0x10)); /* fild */"],
         )
 
     def test_memory_arithmetic_updates_st0_without_popping(self):

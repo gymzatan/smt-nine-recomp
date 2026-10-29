@@ -1484,9 +1484,8 @@ class Lifter:
             memory=next((op for op in ops if op.type=="mem"),None)
             if memory is not None:
                 metadata+=f" g_fp_data_pointer = {_fmt_mem(memory)}; g_fp_data_selector = 0x10;"
-            if m in ("fst","fstp") and ops and ops[0].type=="reg":
-                index=self._st_index(ops[0].reg)
-                metadata+=f" recomp_fp_set_tag((g_fp_top + {index}) & 7u, 0);"
+            if m == "fst" and ops and ops[0].type=="reg" and self._st_index(ops[0].reg)==0:
+                metadata+=" recomp_fp_set_tag((g_fp_top + 0) & 7u, 0);"
             return [metadata]
         return []
 
@@ -3719,7 +3718,7 @@ class Lifter:
         if m == "fild":
             if len(ops) >= 1 and ops[0].type == "mem":
                 smem = _smem_accessor(ops[0].mem_size)
-                return [f"fp_push((double){smem}({_fmt_mem(ops[0])})); /* fild */"]
+                return [f"recomp_fp_push_integer(&fp_stack_top, {smem}({_fmt_mem(ops[0])})); /* fild */"]
             return [f"/* fild {insn.op_str} */"]
 
         if m in ("fist", "fistp"):

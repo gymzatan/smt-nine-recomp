@@ -175,8 +175,81 @@ static DWORD WINAPI retire_worker(void *p) {
     InterlockedExchange(&apu_retired,1);
     guest_cpu_part(); return 0;
 }
+static const char *fixture_identity_action;
+static void fixture_apc_identity(void) {
+    assert(t_guest_thread && t_guest_held);
+    uint32_t fs=g_fs_base,thread=ke_current_thread();
+    assert(fs && thread && BRIDGE_MEM8(thread+0x4b));
+    assert(!BRIDGE_MEM8(thread+0x49));
+    assert(BRIDGE_MEM32(thread+0x34)==thread+0x34);
+    assert(BRIDGE_MEM32(thread+0x3c)==thread+0x3c);
+    assert(xbox_CurrentIrql()==PASSIVE_LEVEL && xbox_CpuInterruptFlag());
+    uint8_t enabled=BRIDGE_MEM8(thread+0x4b);
+    int was_thread=t_guest_thread;
+    if(!strcmp(fixture_identity_action,"apc_identity")) {
+        uint8_t *memory=malloc(0x02000000);assert(memory);
+        unsigned cases=0;
+        for(unsigned owned=0;owned<2;owned++) {
+            for(unsigned test=0;test<9;test++) {
+                for(unsigned user=0;user<2;user++) {
+                    g_fs_base=fs;BRIDGE_MEM32(fs+0x28)=thread;
+                    BRIDGE_MEM8(thread+0x4b)=test==1?0:test==2?2:test==3?255:enabled;
+                    if(test==4)g_fs_base=0;
+                    if(test==5)BRIDGE_MEM32(fs+0x28)=0;
+                    if(test==6)assert(xbox_KfRaiseIrql(APC_LEVEL)==PASSIVE_LEVEL);
+                    if(test==7)xbox_CpuCli();
+                    if(!owned)assert(xbox_kernel_wait_release_cpu());
+                    if(test==8)t_guest_thread=0;
+                    int expected_enabled=test!=1 && test!=4 && test!=5 && test!=8;
+                    assert(xbox_ThreadApcsEnabled()==expected_enabled);
+                    XboxGuestRegisters before,after;
+                    xbox_CaptureGuestRegisters(&before);
+                    memcpy(memory,(void *)(uintptr_t)xbox_GetMemoryOffset(),0x02000000);
+                    assert(xbox_DeliverThreadApcs((BOOLEAN)user)==0);
+                    xbox_CaptureGuestRegisters(&after);
+                    assert(!memcmp(&before,&after,sizeof before));
+                    assert(!memcmp(memory,(void *)(uintptr_t)xbox_GetMemoryOffset(),0x02000000));
+                    assert(t_guest_held==(int)owned);
+                    cases++;
+                    t_guest_thread=was_thread;
+                    if(!owned)guest_cpu_join();
+                    g_fs_base=fs;BRIDGE_MEM32(fs+0x28)=thread;
+                    BRIDGE_MEM8(thread+0x4b)=enabled;
+                    if(test==6)xbox_KfLowerIrql(PASSIVE_LEVEL);
+                    if(test==7){xbox_CpuSti();xbox_CpuCompleteStiShadow();}
+                }
+            }
+        }
+        free(memory);
+        assert(cases==36);
+        printf("[APC_IDENTITY] cases=%u guest_bytes=%zu ram_bytes=%u\n",cases,sizeof(XboxGuestRegisters),0x02000000u);
+    } else {
+        static const char *names[]={"held_empty","held_user_empty","unheld_empty","yield_idle"};
+        LARGE_INTEGER frequency;assert(QueryPerformanceFrequency(&frequency));
+        const unsigned iterations=2000000;
+        for(unsigned mode_index=0;mode_index<4;mode_index++) {
+            if(mode_index==2)assert(xbox_kernel_wait_release_cpu());
+            LARGE_INTEGER started,ended;
+            volatile unsigned result=0;
+            assert(QueryPerformanceCounter(&started));
+            for(unsigned i=0;i<iterations;i++) {
+                if(mode_index==3)guest_cpu_yield();
+                else result+=(unsigned)xbox_DeliverThreadApcs(mode_index==1);
+            }
+            assert(QueryPerformanceCounter(&ended));
+            assert(result==0);
+            if(mode_index==2)guest_cpu_join();
+            printf("[APC_COST] mode=%s iterations=%u ticks=%lld frequency=%lld result=%u\n",names[mode_index],iterations,ended.QuadPart-started.QuadPart,frequency.QuadPart,result);
+        }
+    }
+    assert(g_fs_base==fs && ke_current_thread()==thread);
+    assert(t_guest_thread && t_guest_held);
+}
+
 static void probe_guest(void) {
-    if(mode==1) {
+    if(mode==6) {
+        fixture_apc_identity();
+    } else if(mode==1) {
         assert(*(uint8_t *)XBOX_TO_NATIVE(g_fs_base+0x24)==PASSIVE_LEVEL);
         SetEvent(entered);
     } else if(mode==3) {
@@ -376,7 +449,12 @@ int main(int argc,char **argv) {
     fixture_memory_init(); _putenv_s("RECOMP_GUEST_LOCK","1"); _putenv_s("RECOMP_GPU_TIMING","1");
     entered=CreateEventA(0,1,0,0); started=CreateEventA(0,1,0,0);
     guest_cpu_join();
-    if(strcmp(argv[1],"yield_idle")==0) {
+    if(!strcmp(argv[1],"apc_identity") || !strcmp(argv[1],"apc_cost")) {
+        mode=6;fixture_identity_action=argv[1];
+        HANDLE worker=bridge_spawn_thread(probe_guest,0,0,xbox_AllocThreadStack());assert(worker);
+        guest_cpu_part();
+        assert(WaitForSingleObject(worker,INFINITE)==WAIT_OBJECT_0);CloseHandle(worker);
+    } else if(strcmp(argv[1],"yield_idle")==0) {
         assert(!ReadAcquire(&g_guest_cpu_waiters) && !ReadAcquire(&g_dpc_cpu_waiters));
         uint64_t joins=t_guest_cpu_timing->join_count,yields=t_guest_cpu_timing->yield_count;
         t_guest_yield_tick=0;InterlockedExchange(&fixture_tick_reads,0);
@@ -594,6 +672,7 @@ int main(int argc,char **argv) {
             "/DNOMINMAX","/I"+str(root/"src"),str(work/"memory.c"),
             str(work/"threads.c"),str(root/"src/kernel/kernel_hal.c"),str(root/"src/kernel/recomp_continuation.c"),
             str(root/"src/kernel/kernel_path.c"),
+            str(root/"src/usb/ohci.c"),str(root/"src/kernel/recomp_trace.c"),
             "/Fe:"+str(work/"threads.exe"),"/link","/OPT:REF",*[str(p) for p in libraries],
             "kernel32.lib","user32.lib","gdi32.lib","advapi32.lib","ole32.lib","shell32.lib",
             "d3d11.lib","d3d12.lib","dxgi.lib","dxguid.lib","d3dcompiler.lib","winmm.lib",
@@ -652,3 +731,9 @@ def test_original_file_diagnostic_logging(native_thread_probe,tmp_path,enabled):
     assert f"initial_logging={int(enabled)}" in result.stderr
     log=(tmp_path/"xbox_kernel.log").read_text(encoding="utf8",errors="replace")
     assert ("input.bin" in log)==enabled
+
+
+def test_original_apc_early_guards_keep_guest_state(native_thread_probe):
+    result=subprocess.run([str(native_thread_probe),"apc_identity"],capture_output=True,text=True,errors="replace")
+    assert result.returncode==0,result.stdout+result.stderr
+    assert "[APC_IDENTITY] cases=36 guest_bytes=432 ram_bytes=33554432" in result.stdout

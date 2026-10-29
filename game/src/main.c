@@ -119,8 +119,8 @@ static int instant_checkpoint_control(int load,unsigned slot) {
  * host side then writes g_esp somewhere the generated code never reads, so the
  * guest starts with every register at zero and faults immediately, having
  * apparently ignored the setup that visibly ran. */
-extern RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_esp;
-extern RECOMP_TLS uint32_t g_ebx, g_esi, g_edi;
+#include "kernel/recomp_gpr_state.h"
+extern RECOMP_TLS RecompGprState g_gpr;
 extern RECOMP_TLS uint32_t g_seh_ebp;
 /* x87 and SSE state. Global for the same reason the volatile GPRs are: one
  * guest routine can lift to several C functions, so a value written in one

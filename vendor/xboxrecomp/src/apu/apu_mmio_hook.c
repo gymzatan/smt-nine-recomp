@@ -24,7 +24,7 @@ MCPXAPUState *g_apu_state = NULL;
 #include "../nv2a/nv2a_mmio_hook.h"
 #define APU_MMIO_BASE 0xFE800000u
 
-static uint64_t apu_read_adapter(void *device, uint32_t offset, unsigned size)
+uint64_t apu_read_adapter(void *device, uint32_t offset, unsigned size)
 {
     uint64_t value = mcpx_apu_mmio_read(device, offset, size);
     if (g_dbg.trace_enabled) {
@@ -36,7 +36,7 @@ static uint64_t apu_read_adapter(void *device, uint32_t offset, unsigned size)
     return value;
 }
 
-static void apu_write_adapter(void *device, uint32_t offset, uint64_t value, unsigned size)
+void apu_write_adapter(void *device, uint32_t offset, uint64_t value, unsigned size)
 {
     if (g_dbg.ssl_trace_enabled &&
         (offset == NV_PAPU_VPSGEADDR || offset == NV_PAPU_GPSADDR ||

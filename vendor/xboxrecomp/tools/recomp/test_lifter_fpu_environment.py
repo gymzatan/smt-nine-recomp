@@ -9,8 +9,8 @@ PRELUDE=f'#include "{HEADER.as_posix()}"\n'+r'''
 RECOMP_TLS double g_fp_stack[8];
 RECOMP_TLS int g_fp_top,g_fp_cmp;
 RECOMP_TLS uint16_t g_fp_control_word,g_fp_cc,g_fp_status_word,g_fp_tag_word;
-RECOMP_TLS uint16_t g_fp_opcode,g_fp_code_selector,g_fp_data_selector;
-RECOMP_TLS uint32_t g_fp_instruction_pointer,g_fp_data_pointer,g_mxcsr;
+RECOMP_TLS RecompFpMetadata g_fp_metadata;
+RECOMP_TLS uint32_t g_mxcsr;
 RECOMP_TLS uint8_t g_fp_raw[8][10];
 RECOMP_TLS uint8_t g_fp_alias_dirty;
 RECOMP_TLS RecompMmx g_mm0,g_mm1,g_mm2,g_mm3,g_mm4,g_mm5,g_mm6,g_mm7;
@@ -24,7 +24,7 @@ def emit(m,raw=''):
     return '\n'.join(lifter.lift_instruction(insn))
 
 def test_trigonometric_c2_range_and_crt_remainder_completion():
-    source=PRELUDE+'RECOMP_TLS uint32_t g_eax,g_eflags;\n#define eax g_eax\n'+'\n'.join(FP_STACK_MACROS)+'\n'
+    source=PRELUDE+'RECOMP_TLS RecompGprState g_gpr;\n#define eax g_eax\n'+'\n'.join(FP_STACK_MACROS)+'\n'
     for mnemonic in ('fsin','fcos','fsincos','fptan','fprem','fprem1'):
         instruction=Instruction(0x23ac9b,2,mnemonic,'','')
         source+='static void run_'+mnemonic+'(void) {\n'+'\n'.join(Lifter().lift_instruction(instruction))+'\n}\n'

@@ -62,7 +62,7 @@ static void check_readback_storage(void) {
     fprintf(stderr,"[READBACK STORAGE] alternating color/depth-stencil growth, reuse, upload and caller guards passed\n");
 }
 /* Upload owns its CPU source immediately; GPU copies share the original ring. */
-static void check_queued_image_upload(void) {
+static void check_queued_image_upload(int tight) {
     NvkImage *images[4]={resource(nvk_image_create(3,2,1,VK_FORMAT_B8G8R8A8_UNORM,0)),
         resource(nvk_image_create(2,2,6,VK_FORMAT_B8G8R8A8_UNORM,1)),
         resource(nvk_image_create_volume(3,2,3,VK_FORMAT_B8G8R8A8_UNORM)),
@@ -71,12 +71,12 @@ static void check_queued_image_upload(void) {
     ok(nvk_wait(nvk_fence()));
     uint64_t submitted=g_nvk_timings[4],waited=g_nvk_timings[5];
     for(unsigned pass=0;pass<2;pass++)for(unsigned image=0;image<4;image++) {
-        unsigned w=widths[image],h=rows[image];
-        uint32_t *source=resource(malloc((w+1)*h*4));
-        for(unsigned y=0;y<h;y++)for(unsigned x=0;x<=w;x++)
-            source[y*(w+1)+x]=0xff000000u|(pass<<20)|(image<<16)|(y<<8)|x;
-        ok(nvk_image_upload(images[image],source,(w+1)*4));
-        memset(source,0xee,(w+1)*h*4);free(source);
+        unsigned w=widths[image],h=rows[image],stride=tight?w:w+1;
+        uint32_t *source=resource(malloc(stride*h*4));
+        for(unsigned y=0;y<h;y++)for(unsigned x=0;x<stride;x++)
+            source[y*stride+x]=0xff000000u|(pass<<20)|(image<<16)|(y<<8)|x;
+        ok(nvk_image_upload(images[image],source,stride*4));
+        memset(source,0xee,stride*h*4);free(source);
     }
     if(g_nvk_timings[4]!=submitted || g_nvk_timings[5]!=waited) {
         fprintf(stderr,"[QUEUED IMAGE UPLOAD] unexpected submit/wait: %llu/%llu -> %llu/%llu\n",
@@ -106,7 +106,8 @@ static void check_queued_image_upload(void) {
     fprintf(stderr,"[QUEUED IMAGE UPLOAD] pitched/cube/volume/R32 repeated writes and temporary sources passed without per-image submit/wait\n");
 }
 static void check_images(void) {
-    check_queued_image_upload();
+    check_queued_image_upload(0);
+    check_queued_image_upload(1);
     check_readback_storage();
     NvkImage *image=resource(nvk_image_create(32,24,1,VK_FORMAT_B8G8R8A8_UNORM,0));
     uint32_t input[24][35],output[24][35];

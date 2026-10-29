@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <emmintrin.h>
 
 #include "common.h"
 
@@ -543,6 +544,7 @@ calc_output_stereo (SINC_FILTER *filter, int channels, increment_t increment, in
 		data_index += steps * 2;
 	}
 	left [0] = left [1] = 0.0 ;
+	__m128d left_pair = _mm_setzero_pd () ;
 	while (filter_index >= MAKE_INCREMENT_T (0))
 	{	fraction = fp_to_double (filter_index) ;
 		indx = fp_to_int (filter_index) ;
@@ -550,12 +552,14 @@ calc_output_stereo (SINC_FILTER *filter, int channels, increment_t increment, in
 		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
 		assert (data_index >= 0 && data_index + 1 < filter->b_len) ;
 		assert (data_index + 1 < filter->b_end) ;
-		for (int ch = 0; ch < 2; ch++)
-			left [ch] += icoeff * filter->buffer [data_index + ch] ;
+		__m128d input_pair = _mm_cvtps_pd (_mm_castsi128_ps (_mm_loadl_epi64 ((const __m128i *) (filter->buffer + data_index)))) ;
+		left_pair = _mm_add_pd (left_pair, _mm_mul_pd (_mm_set1_pd (icoeff), input_pair)) ;
 
 		filter_index -= increment ;
 		data_index = data_index + 2 ;
 		} ;
+
+	_mm_storeu_pd (left, left_pair) ;
 
 	/* Now apply the right half of the filter. */
 	filter_index = increment - start_filter_index ;
@@ -564,6 +568,7 @@ calc_output_stereo (SINC_FILTER *filter, int channels, increment_t increment, in
 	data_index = filter->b_current + channels * (1 + coeff_count) ;
 
 	right [0] = right [1] = 0.0 ;
+	__m128d right_pair = _mm_setzero_pd () ;
 	do
 	{	fraction = fp_to_double (filter_index) ;
 		indx = fp_to_int (filter_index) ;
@@ -571,13 +576,15 @@ calc_output_stereo (SINC_FILTER *filter, int channels, increment_t increment, in
 		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
 		assert (data_index >= 0 && data_index + 1 < filter->b_len) ;
 		assert (data_index + 1 < filter->b_end) ;
-		for (int ch = 0; ch < 2; ch++)
-			right [ch] += icoeff * filter->buffer [data_index + ch] ;
+		__m128d input_pair = _mm_cvtps_pd (_mm_castsi128_ps (_mm_loadl_epi64 ((const __m128i *) (filter->buffer + data_index)))) ;
+		right_pair = _mm_add_pd (right_pair, _mm_mul_pd (_mm_set1_pd (icoeff), input_pair)) ;
 
 		filter_index -= increment ;
 		data_index = data_index - 2 ;
 		}
 	while (filter_index > MAKE_INCREMENT_T (0)) ;
+
+	_mm_storeu_pd (right, right_pair) ;
 
 	for (int ch = 0; ch < 2; ch++)
 		output [ch] = (float) (scale * (left [ch] + right [ch])) ;

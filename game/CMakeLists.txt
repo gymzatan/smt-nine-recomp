@@ -50,6 +50,7 @@ set_target_properties(dsp56300_emu_ffi PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/../reference/dsp56300_release/dsp56300-0.1.3/crates/emu-ffi/include")
 add_subdirectory("${XBOXRECOMP_DIR}" "${CMAKE_BINARY_DIR}/xboxrecomp")
 target_sources(nv2a_register_test PRIVATE
+    "${XBOXRECOMP_DIR}/src/kernel/nv2a_pb_scan.c"
     "${XBOXRECOMP_DIR}/src/kernel/nv2a_pb_exec.c"
     "${XBOXRECOMP_DIR}/src/kernel/nv2a_vsh_interp.c"
     "${XBOXRECOMP_DIR}/src/kernel/nv2a_combiner.c")

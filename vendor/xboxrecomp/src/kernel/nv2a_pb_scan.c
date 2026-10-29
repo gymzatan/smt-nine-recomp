@@ -50,6 +50,8 @@ extern int nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param, 
 extern void nv2a_pb_exec_report(void);
 static int s_exec_enabled = -1;
 
+int nv2a_pb_scan_exec_enabled(void) { return s_exec_enabled > 0; }
+
 static void note(uint32_t subch, uint32_t method, uint32_t parameter)
 {
     for (int i = 0; i < s_seen_count; i++) {

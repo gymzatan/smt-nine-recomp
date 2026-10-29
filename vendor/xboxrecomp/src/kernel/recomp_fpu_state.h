@@ -3,6 +3,17 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
+typedef struct RecompFpMetadata {
+    uint32_t instruction_pointer;
+    uint16_t opcode, code_selector;
+    uint32_t data_pointer;
+    uint16_t data_selector;
+} RecompFpMetadata;
+#define g_fp_instruction_pointer (g_fp_metadata.instruction_pointer)
+#define g_fp_opcode (g_fp_metadata.opcode)
+#define g_fp_code_selector (g_fp_metadata.code_selector)
+#define g_fp_data_pointer (g_fp_metadata.data_pointer)
+#define g_fp_data_selector (g_fp_metadata.data_selector)
 /* Encode the existing double-backed x87 value as an architectural 80-bit
  * register. Byte copies permit the unaligned save buffers used by the CRT. */
 static inline void recomp_fp80_store(void *destination, double value) {
@@ -52,7 +63,7 @@ typedef struct RecompFpuState {
     uint32_t instruction_pointer,data_pointer,mxcsr;
     uint8_t xmm[8][16];
 } RecompFpuState;
-static inline unsigned recomp_fp_tag(double value) {
+static __forceinline unsigned recomp_fp_tag(double value) {
     uint64_t bits;memcpy(&bits,&value,8);
     if(!(bits&UINT64_C(0x7fffffffffffffff)))return 1;
     if((bits&UINT64_C(0x7ff0000000000000))==UINT64_C(0x7ff0000000000000))return 2;

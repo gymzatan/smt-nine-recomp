@@ -374,8 +374,14 @@ static void dump_texture_bmp(uint32_t seq);
 #define TEX_DUMP_SEQ_BASE 1000u
 #define TEX_DUMP_SEQ_MAX  40u
 
-static void note_texture_use(void)
+extern int nv2a_pb_scan_exec_enabled(void);
+static void note_texture_use(int report_enabled)
 {
+    static int dump_requested = -1;
+    if (dump_requested < 0)
+        dump_requested = getenv("RECOMP_TEX_DUMP") != NULL || getenv("RECOMP_TEX_DUMP_EVERY") != NULL;
+    if (!dump_requested && !report_enabled)
+        return;
     int i;
 
     if (!s_gpu.texs[0].valid)
@@ -1079,11 +1085,7 @@ static int sample_tex_value(const Texture *t, uint32_t face_offset,
         memcpy(raw, blk, bb);
         if (cache[slot].key != key || cache[slot].fmt != fmt
             || cache[slot].raw[0] != raw[0] || cache[slot].raw[1] != raw[1]) {
-            uint32_t i;
-            for (i = 0; i < 16; i++)
-                d3d8_dxt_decode_texel(mem + base, fmt, bx * 4 + (i & 3),
-                                      by * 4 + (i >> 2), t->width,
-                                      &cache[slot].px[i]);
+            d3d8_dxt_decode_block(blk, fmt, cache[slot].px);
             cache[slot].key = key;
             cache[slot].fmt = fmt;
             cache[slot].raw[0] = raw[0];
@@ -3105,6 +3107,7 @@ static void raster_indexed_line(uint32_t i0,uint32_t i1,uint32_t p)
 
 static void raster_batch_vertices(int fixed)
 {
+    const int report_enabled = nv2a_pb_scan_exec_enabled();
     uint32_t i, n = s_gpu.idx_count;
     /* Point batches do not select a provoking vertex. Other primitives use
      * this same device for the whole batch; the flag is still read per call. */
@@ -3191,7 +3194,7 @@ static void raster_batch_vertices(int fixed)
     gpu_timing_finish(transform_start, &s_gpu.vertex_ticks);
 #endif
     if(!fixed) { s_gpu.batches_program++;s_gpu.verts_program += n; }
-    if (s_gpu.blend_enable) {
+    if (report_enabled && s_gpu.blend_enable) {
         uint32_t pair = s_gpu.blend_sfactor << 16 | (s_gpu.blend_dfactor & 0xFFFF);
         int j;
         for (j = 0; j < s_gpu.blend_npairs && s_gpu.blend_pairs[j] != pair; j++)
@@ -3241,7 +3244,7 @@ static void raster_batch_vertices(int fixed)
                         s_xf[i].pos[3]);
         }
     }
-    for (i = 0; i < NV2A_VSH_INPUTS; i++) {
+    if (report_enabled) for (i = 0; i < NV2A_VSH_INPUTS; i++) {
         const VertexAttr *at = &s_gpu.attr[i];
         uint32_t f = at->type | (at->size << 4) | (i << 8), j;
         if (!at->size || !at->stride)
@@ -3252,7 +3255,7 @@ static void raster_batch_vertices(int fixed)
             s_gpu.xf_fmt[s_gpu.xf_nfmt++] = f;
     }
     if (s_gpu.texs[0].valid)
-        note_texture_use();
+        note_texture_use(report_enabled);
 
     switch (s_gpu.prim) {
     case NV_PRIM_POINTS:
@@ -3418,7 +3421,7 @@ static void raster_batch(void)
             s_gpu.batches_no_tex++;
         else {
             s_gpu.batches_textured++;
-            note_texture_use();
+            note_texture_use(nv2a_pb_scan_exec_enabled());
         }
     }
 

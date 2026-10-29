@@ -70,9 +70,12 @@ def test_actual_hal_masks_and_unmasks_without_changing_irql():
 #include "nv2a/nv2a_state.h"
 #include <assert.h>
 #include <stdlib.h>
-RECOMP_TLS uint32_t g_fs_base, g_esp;
+#include "kernel/recomp_gpr_state.h"
+RECOMP_TLS RecompGprState g_gpr;
+RECOMP_TLS uint32_t g_fs_base;
 ptrdiff_t g_xbox_mem_offset;
 void xbox_log(int level, const char *subsystem, const char *format, ...) { }
+void xbox_HalNotifyShutdown(void) { abort(); }
 NV2AState *nv2a_get_state(void) { abort(); } /* PCI is outside this IF fixture. */
 int xbox_CheckpointFrozen(void) { return 0; }
 static HANDLE ready, proceed;

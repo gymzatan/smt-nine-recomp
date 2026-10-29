@@ -131,6 +131,184 @@ static int attenuation_case(void) {
     if(hot_calls){fprintf(stderr,"[ATTENUATION] repeated hot-path powf calls: %lu\n",hot_calls);return 5;}
     return 0;
 }
+
+static void sge_voice_boundaries(MCPXAPUState *d) {
+    uint8_t *ram=d->ram_ptr;
+    for(unsigned adpcm=0;adpcm<2;adpcm++)for(unsigned channels=1;channels<=2;channels++)
+    for(unsigned unaligned=0;unaligned<2;unaligned++)for(unsigned width=0;width<(adpcm?1:4);width++) {
+        uint32_t *voice=seed_tone(d);
+        d->regs[NV_PAPU_VPSSLADDR]=0x4000;d->regs[NV_PAPU_FENADDR]=0x50000;
+        d->regs[NV_PAPU_ISTS]=0;d->set_irq=false;
+        memset(ram+0x50000,0,0x10000);memset(&d->vp.ssl[64],0,sizeof d->vp.ssl[64]);
+        unsigned cs=adpcm?NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_ADPCM:width==0?0:width==1?1:3;
+        voice_set_mask(d,64,NV_PAVS_VOICE_CFG_FMT,NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE,cs);
+        voice_set_mask(d,64,NV_PAVS_VOICE_CFG_FMT,NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE,width);
+        voice_set_mask(d,64,NV_PAVS_VOICE_CFG_FMT,NV_PAVS_VOICE_CFG_FMT_SAMPLES_PER_BLOCK,channels-1);
+        voice_set_mask(d,64,NV_PAVS_VOICE_CFG_FMT,NV_PAVS_VOICE_CFG_FMT_STEREO,channels==2);
+        voice_set_mask(d,64,NV_PAVS_VOICE_CFG_FMT,NV_PAVS_VOICE_CFG_FMT_DATA_TYPE,0);
+        voice_set_mask(d,64,NV_PAVS_VOICE_CFG_FMT,NV_PAVS_VOICE_CFG_FMT_PERSIST,1);
+        voice_set_mask(d,64,NV_PAVS_VOICE_CFG_FMT,NV_PAVS_VOICE_CFG_FMT_LOOP,1);
+        voice_set_mask(d,64,NV_PAVS_VOICE_CUR_PSL_START,NV_PAVS_VOICE_CUR_PSL_START_BA,4090);
+        voice_set_mask(d,64,NV_PAVS_VOICE_PAR_NEXT,NV_PAVS_VOICE_PAR_NEXT_EBO,adpcm?191:31);
+        for(unsigned i=0;i<0x3000;i++){ram[0x20000+i]=(uint8_t)(i*73+19);ram[0x28000+i]=(uint8_t)(i*31+47);}
+        float observed[3][32][2];memset(observed,0x5a,sizeof observed);
+        for(unsigned call=0;call<3;call++) {
+            ((uint32_t*)(ram+0x3000))[0]=(call==1?0x28000:0x20000)+(unaligned?1:0);
+            ((uint32_t*)(ram+0x3000))[2]=(call==1?0x29000:0x21000)+(unaligned?3:0);
+            voice_set_mask(d,64,NV_PAVS_VOICE_PAR_OFFSET,NV_PAVS_VOICE_PAR_OFFSET_CBO,0);
+            uint32_t start_voice[32];memcpy(start_voice,voice,sizeof start_voice);
+            assert(voice_get_samples(d,64,observed[call],32)==32);
+            uint32_t end_voice[32];memcpy(end_voice,voice,sizeof end_voice);
+            float individual[32][2];memset(individual,0x5a,sizeof individual);
+            memcpy(voice,start_voice,sizeof start_voice);
+            for(unsigned sample=0;sample<32;sample++) {
+                voice_set_mask(d,64,NV_PAVS_VOICE_PAR_OFFSET,NV_PAVS_VOICE_PAR_OFFSET_CBO,sample);
+                assert(voice_get_samples(d,64,&individual[sample],1)==1);
+            }
+            assert(!memcmp(observed[call],individual,sizeof individual));
+            assert(!memcmp(voice,end_voice,sizeof end_voice));
+        }
+        assert(memcmp(observed[0],observed[1],sizeof observed[0]));
+        assert(!memcmp(observed[0],observed[2],sizeof observed[0]));
+    }
+    puts("SGE voice boundaries: 20 cases passed");
+}
+
+/* Exercise the original methods through the original decoder and adapters. */
+struct MCPXAPUState;
+extern struct MCPXAPUState *g_apu_state;
+uint64_t apu_read_adapter(void *device,uint32_t offset,unsigned size);
+void apu_write_adapter(void *device,uint32_t offset,uint64_t value,unsigned size);
+
+typedef struct DirectApuOp { uint32_t offset,value; unsigned write; } DirectApuOp;
+static void direct_apu_ops(DirectApuOp op[16],unsigned voice,uint32_t pattern,
+                           uint32_t bin,uint32_t format) {
+    DirectApuOp authored[16]={
+        {0x20010,0,0},{0x202f8,voice,1},{0x202fc,1,1},
+        {0x20300,bin,1},{0x20304,format,1},
+        {0x20360,pattern,1},{0x20364,~pattern,1},{0x20368,pattern^0x5a5a5a5a,1},
+        {0x202fc,0,1},
+        {0x20010,0,0},{0x202f8,voice,1},{0x202fc,1,1},
+        {0x20360,~pattern,1},{0x20364,pattern^0xa5a5a5a5,1},{0x20368,pattern,1},
+        {0x202fc,0,1}
+    };
+    memcpy(op,authored,sizeof authored);
+}
+static uint32_t direct_apu_step(MCPXAPUState *d,const DirectApuOp *op,int direct) {
+    if(direct) {
+        if(op->write) {apu_write_adapter(d,op->offset,op->value,4);return op->value;}
+        return (uint32_t)apu_read_adapter(d,op->offset,4);
+    }
+    const unsigned char load[]={0x8b,0x10},store[]={0x89,0x10};
+    CONTEXT context={0};const unsigned char *code=op->write?store:load;
+    context.Rip=(DWORD64)code;context.Rax=0xfe800000u+op->offset;
+    context.Rdx=0xfedcba9800000000ull|op->value;context.EFlags=0xad7;
+    assert(apu_hook_handle_mmio(&context,0,0xfe800000u+op->offset,op->write));
+    assert(context.Rip==(DWORD64)code+2 && context.EFlags==0xad7);
+    if(op->write)assert(context.Rdx==(0xfedcba9800000000ull|op->value));
+    else assert(context.Rdx<=UINT32_MAX);
+    return (uint32_t)context.Rdx;
+}
+static void direct_apu_save(MCPXAPUState *d,FILE *file,uint32_t result) {
+    assert(mcpx_apu_save_checkpoint(d,file));
+    assert(fwrite(mcpx_apu_phys(d->regs[NV_PAPU_VPVADDR],256*128),256*128,1,file)==1);
+    XboxGuestRegisters guest;xbox_CaptureGuestRegisters(&guest);
+    assert(fwrite(&guest,sizeof guest,1,file)==1);
+    assert(fwrite(&result,sizeof result,1,file)==1);
+}
+static void direct_apu_equal_files(FILE *a,FILE *b) {
+    assert(fflush(a)==0 && fflush(b)==0);long bytes=ftell(a);assert(bytes>=0 && ftell(b)==bytes);
+    rewind(a);rewind(b);unsigned char left[16384],right[16384];
+    while(bytes) {size_t count=bytes>sizeof left?sizeof left:(size_t)bytes;
+        assert(fread(left,count,1,a)==1 && fread(right,count,1,b)==1);
+        assert(!memcmp(left,right,count));bytes-=(long)count;
+    }
+}
+static void direct_apu_restore(MCPXAPUState *d,FILE *saved,const uint8_t *ram,
+                               const XboxGuestRegisters *guest) {
+    memcpy(d->ram_ptr,ram,0x4000000);rewind(saved);
+    assert(mcpx_apu_load_checkpoint(d,saved));assert(xbox_RestoreGuestRegisters(guest));
+}
+static void direct_apu_sequence(MCPXAPUState *d,const DirectApuOp op[16],int direct,FILE *observed) {
+    for(unsigned i=0;i<16;i++) {
+        XboxGuestRegisters before,after;xbox_CaptureGuestRegisters(&before);
+        uint32_t value=direct_apu_step(d,&op[i],direct);
+        xbox_CaptureGuestRegisters(&after);assert(!memcmp(&before,&after,sizeof before));
+        if(observed)direct_apu_save(d,observed,value);
+    }
+}
+static void direct_apu_compare(MCPXAPUState *d) {
+    g_dbg.trace_enabled=false;
+    mcpx_apu_mmio_write(d,NV_PAPU_VPVADDR,0x2000000,4);
+    uint8_t *start=malloc(0x4000000),*reference=malloc(0x4000000);assert(start&&reference);
+    for(unsigned i=0;i<256*128;i++)d->ram_ptr[0x2000000+i]=(uint8_t)(i*73+19);
+    memcpy(start,d->ram_ptr,0x4000000);
+    XboxGuestRegisters guest;xbox_CaptureGuestRegisters(&guest);
+    guest.eax=0x12345678;guest.ecx=0x89abcdef;guest.edx=0x76543210;
+    guest.ebx=0x13579bdf;guest.esi=0x2468ace0;guest.edi=0xfedcba98;
+    guest.eflags=0x8d7;guest.fp_control_word=0x37f;guest.fp_status_word=0x45;
+    guest.mxcsr=0x3f80;for(unsigned i=0;i<sizeof guest.xmm;i++)((uint8_t *)guest.xmm)[i]=(uint8_t)(i*31+7);
+    assert(xbox_RestoreGuestRegisters(&guest));xbox_CaptureGuestRegisters(&guest);
+    FILE *saved=tmpfile();assert(saved&&mcpx_apu_save_checkpoint(d,saved));
+    const unsigned voices[]={0,31,32,63,64,127,128,255};
+    const uint32_t patterns[]={0,0xffffffff,0x80000000,0x5aa5c33c};
+    LARGE_INTEGER frozen,ending;xbox_RuntimePerformanceCounter(&frozen);
+    unsigned cases=0;
+    for(unsigned v=0;v<8;v++)for(unsigned p=0;p<4;p++) {
+        DirectApuOp op[16];direct_apu_ops(op,voices[v],patterns[p],patterns[p]^0x13579bdf,~patterns[p]);
+        FILE *a=tmpfile(),*b=tmpfile();assert(a&&b);
+        direct_apu_restore(d,saved,start,&guest);direct_apu_sequence(d,op,0,a);memcpy(reference,d->ram_ptr,0x4000000);
+        direct_apu_restore(d,saved,start,&guest);direct_apu_sequence(d,op,1,b);
+        direct_apu_equal_files(a,b);assert(!memcmp(reference,d->ram_ptr,0x4000000));
+        fclose(a);fclose(b);cases++;
+    }
+    fclose(saved);
+    /* Original valid tone and full voice consumer, after the same two blocks. */
+    uint32_t *voice=seed_tone(d);DirectApuOp tone[16];
+    direct_apu_ops(tone,64,0,voice[NV_PAVS_VOICE_CFG_VBIN/4],voice[NV_PAVS_VOICE_CFG_FMT/4]);
+    /* Zero attenuation in all original target volume fields. */
+    for(unsigned i=0;i<16;i++)if(tone[i].offset>=0x20360 && tone[i].offset<=0x20368)tone[i].value=0;
+    memcpy(start,d->ram_ptr,0x4000000);xbox_CaptureGuestRegisters(&guest);
+    saved=tmpfile();assert(saved&&mcpx_apu_save_checkpoint(d,saved));
+    FILE *a=tmpfile(),*b=tmpfile();assert(a&&b);
+    unsigned pcm_nonzero[2]={0};
+    for(int direct=0;direct<2;direct++) {
+        FILE *out=direct?b:a;direct_apu_restore(d,saved,start,&guest);direct_apu_sequence(d,tone,direct,out);
+        for(unsigned frame=0;frame<32;frame++) {
+            float bins[NUM_MIXBINS][NUM_SAMPLES_PER_FRAME]={0},monitor[NUM_SAMPLES_PER_FRAME][2]={0};
+            voice_process(d,bins,monitor,64,0);
+            for(unsigned bin=0;bin<NUM_MIXBINS;bin++)for(unsigned sample=0;sample<NUM_SAMPLES_PER_FRAME;sample++) {
+                assert(isfinite(bins[bin][sample]));if(bins[bin][sample]!=0)pcm_nonzero[direct]++;
+            }
+            for(unsigned sample=0;sample<NUM_SAMPLES_PER_FRAME;sample++)for(unsigned ch=0;ch<2;ch++) {
+                assert(isfinite(monitor[sample][ch]));if(monitor[sample][ch]!=0)pcm_nonzero[direct]++;
+            }
+            assert(fwrite(bins,sizeof bins,1,out)==1&&fwrite(monitor,sizeof monitor,1,out)==1);
+        }
+        direct_apu_save(d,out,0);if(!direct)memcpy(reference,d->ram_ptr,0x4000000);
+    }
+    assert(pcm_nonzero[0] && pcm_nonzero[0]==pcm_nonzero[1]);
+    direct_apu_equal_files(a,b);assert(!memcmp(reference,d->ram_ptr,0x4000000));fclose(a);fclose(b);
+    xbox_RuntimePerformanceCounter(&ending);assert(frozen.QuadPart==ending.QuadPart);
+    /* One fixed ABBA trial of the original complete sixteen-method block. */
+    double seconds[4];const int order[]={0,1,1,0};LARGE_INTEGER frequency,t0,t1;QueryPerformanceFrequency(&frequency);
+    for(unsigned pass=0;pass<4;pass++) {
+        direct_apu_restore(d,saved,start,&guest);
+        for(unsigned warm=0;warm<64;warm++)for(unsigned i=0;i<16;i++)direct_apu_step(d,&tone[i],order[pass]);
+        QueryPerformanceCounter(&t0);
+        for(unsigned loop=0;loop<65536;loop++)for(unsigned i=0;i<16;i++)direct_apu_step(d,&tone[i],order[pass]);
+        QueryPerformanceCounter(&t1);seconds[pass]=(double)(t1.QuadPart-t0.QuadPart)/frequency.QuadPart;
+    }
+    fclose(saved);free(start);free(reference);
+    printf("DIRECT_APU_RESULT {\"cases\":%u,\"operations_per_route\":%u,\"whole_ram_bytes_per_case\":67108864,\"guest_state_bytes\":%zu,\"pcm_frames_per_route\":32,\"pcm_nonzero_values_per_route\":%u,\"clock_exclusions\":0,\"abba_method_seconds\":[%.9f,%.9f,%.9f,%.9f]}\n",cases,cases*16,sizeof guest,pcm_nonzero[0],seconds[0],seconds[1],seconds[2],seconds[3]);
+}
+static void direct_apu_trace(MCPXAPUState *d,int direct) {
+    mcpx_apu_mmio_write(d,NV_PAPU_VPVADDR,0x2000000,4);g_dbg.trace_enabled=true;
+    DirectApuOp op[16];direct_apu_ops(op,64,0x5aa5c33c,0x12345678,0x87654321);
+    for(unsigned cycle=0;cycle<320;cycle++)for(unsigned i=0;i<16;i++)direct_apu_step(d,&op[i],direct);
+    g_dbg.trace_enabled=false;puts("DIRECT_APU_TRACE complete");
+}
+
 int main(int argc,char **argv) {
     if(argc==4 && !strcmp(argv[1],"attenuation"))return attenuation_case();
     assert(argc==4);FILE *file=fopen(argv[2],"rb");assert(file);fseek(file,0,SEEK_END);long bytes=ftell(file);rewind(file);
@@ -138,6 +316,10 @@ int main(int argc,char **argv) {
     assert(xbox_MemoryLayoutInit(xbe,bytes));free(xbe);_putenv_s("RECOMP_GUEST_LOCK","1");assert(guest_cpu_enabled());
     MCPXAPUState *d=mcpx_apu_init_standalone((void *)xbox_GetMemoryOffset(),physical);assert(d);
     extern MCPXAPUState *g_apu_state;g_apu_state=d;mcpx_ac97_init();assert(xbox_CheckpointBootstrapBegin());
+    if(!strcmp(argv[1],"sge-boundaries")){sge_voice_boundaries(d);fflush(NULL);ExitProcess(0);}
+    if(!strcmp(argv[1],"direct-apu-compare")){direct_apu_compare(d);fflush(NULL);ExitProcess(0);}
+    if(!strcmp(argv[1],"direct-apu-trace-decoder")){direct_apu_trace(d,0);fflush(NULL);ExitProcess(0);}
+    if(!strcmp(argv[1],"direct-apu-trace-direct")){direct_apu_trace(d,1);fflush(NULL);ExitProcess(0);}
     if(!strncmp(argv[1],"src-",4)){resampler_case(d,argv[1],argv[3]);fflush(NULL);ExitProcess(0);}
     if(!strcmp(argv[1],"save")) {
         seed(d);file=fopen(argv[3],"wb");assert(file && mcpx_apu_save_checkpoint(d,file));fclose(file);verify(d);
@@ -212,3 +394,34 @@ def test_original_voice_attenuation_values_reuse_initialized_results(native_apu,
     (tmp_path/'attenuation_measurement.json').write_text(result.stdout,encoding='utf-8')
     measured=json.loads(result.stdout)
     assert measured['values_checked']==65536 and measured['hot_pow_calls']==0
+
+
+
+def test_original_voice_sge_pages_unaligned_base_and_next_call_visibility(native_apu,tmp_path):
+    executable,xbe=native_apu
+    result=subprocess.run([str(executable),'sge-boundaries',str(xbe),str(tmp_path/'unused')],
+                          capture_output=True,text=True,errors='replace',timeout=30)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert 'SGE voice boundaries: 20 cases passed' in result.stdout
+
+
+def test_original_static_apu_methods_match_decoder_state_voice_and_trace(native_apu,tmp_path):
+    import json
+    executable,xbe=native_apu
+    completed={}
+    for label,mode in [('semantic','direct-apu-compare'),('trace-decoder','direct-apu-trace-decoder'),('trace-direct','direct-apu-trace-direct')]:
+        result=subprocess.run([str(executable),mode,str(xbe),str(tmp_path/'unused')],capture_output=True,text=True,errors='replace')
+        (tmp_path/(label+'.stdout')).write_text(result.stdout,encoding='utf-8')
+        (tmp_path/(label+'.stderr')).write_text(result.stderr,encoding='utf-8')
+        assert result.returncode==0,result.stdout+result.stderr
+        completed[label]=result
+    line=next(line for line in completed['semantic'].stdout.splitlines() if line.startswith('DIRECT_APU_RESULT '))
+    measured=json.loads(line.split(' ',1)[1])
+    assert measured['cases']==32 and measured['operations_per_route']==512
+    assert measured['whole_ram_bytes_per_case']==0x4000000 and measured['clock_exclusions']==0
+    assert measured['pcm_frames_per_route']==32 and measured['pcm_nonzero_values_per_route']>0
+    (tmp_path/'direct_method_measurement.json').write_text(json.dumps(measured,indent=2),encoding='utf-8')
+    traces=[[line for line in completed[label].stderr.splitlines() if '[APUMMIO]' in line] for label in ['trace-decoder','trace-direct']]
+    assert traces[0]==traces[1]
+    assert sum(' read ' in line for line in traces[0])==400
+    assert sum(' write ' in line for line in traces[0])==400

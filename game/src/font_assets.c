@@ -15,13 +15,16 @@ typedef const void *(*TextureAssetLookup)(const void *,size_t,unsigned,unsigned,
 extern void d3d8_SetTextureAssetLookup(TextureAssetLookup lookup);
 static const void *lookup(const void *raw,size_t bytes,unsigned width,unsigned height,unsigned *host_width,unsigned *host_height)
 {
-    if(title_base && width==512 && height==512 && bytes==1048576 &&
-       !memcmp(raw,title_base,64) && !memcmp(raw,title_base,bytes)) {
+    if(title_base && width==512 && height==512 && bytes==1048576) {
+        if(!raw)return title_pixels;
+        if(!memcmp(raw,title_base,64) && !memcmp(raw,title_base,bytes)) {
         *host_width=512;*host_height=512;
         if(!title_used){fprintf(stderr,"[TITLE GPU] original background with proportional logo layers\n");title_used=1;}
         return title_pixels;
+        }
     }
     if(width!=512 || height!=512 || bytes!=131072)return NULL;
+    if(!raw)return page_count?pages[0].pixels:NULL;
     for(unsigned i=0;i<page_count;i++)if(!memcmp(raw,pages[i].base,64) && !memcmp(raw,pages[i].base,bytes)) {
         *host_width=pages[i].width;*host_height=pages[i].height;
         if(!pages[i].used){fprintf(stderr,"[FONT GPU] page=%u logical=512x512 host=%ux%u\n",i,*host_width,*host_height);pages[i].used=1;}

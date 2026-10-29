@@ -14,10 +14,18 @@ def native_gpu(tmp_path_factory):
     compiler=shutil.which('cl');assert compiler, 'requires existing MSVC environment'
     source=r'''
 #include "kernel/kernel_bridge.c"
+#include "nv2a/nv2a_mmio_hook.h"
 #include <assert.h>
 #include <malloc.h>
 #include "d3d8_internal.h"
 #include "nv2a_vulkan.h"
+static unsigned layout_query_calls,layout_output_draws;
+static int layout_watch,layout_output;
+static unsigned layout_inputs_for_test(const NvkShader *shader,unsigned *locations,unsigned *attributes,unsigned capacity) {
+    if(layout_watch)++layout_query_calls;
+    return nvk_shader_inputs(shader,locations,attributes,capacity);
+}
+#define nvk_shader_inputs layout_inputs_for_test
 static uint64_t native_vertex_generation;
 static uint32_t native_vertex_offset;
 static unsigned native_vertex_bytes,native_stream_bytes,native_vertex_stride;
@@ -29,6 +37,12 @@ static unsigned polygon_native_draw_calls,native_texture_mask;
 static NvkTexture native_texture_params[4];
 static int native_draw_for_test(NvkDraw *draw) {
     polygon_native_draw_calls++;native_texture_mask=0;
+    if(layout_watch && layout_output) {
+        const unsigned locations[]={2,0,1,7,3,4,5,6};assert(draw->attribute_count==8);
+        for(unsigned i=0;i<8;i++){assert(draw->attributes[i].location==locations[i]);assert(draw->attributes[i].binding==0);assert(draw->attributes[i].format==VK_FORMAT_R32G32B32A32_SFLOAT);assert(draw->attributes[i].offset==i*16);}
+        ++layout_output_draws;
+    }
+
     memcpy(native_texture_params,draw->textures,sizeof native_texture_params);
     for(unsigned st=0;st<4;st++)if(draw->textures[st].image)native_texture_mask|=1u<<st;
     uint64_t generation=0;uint32_t offset=0;
@@ -136,9 +150,13 @@ static void progress_kick_for_test(NV2AState *gpu) {
     ++progress_kick_calls;nv2a_fifo_kick(gpu);
 }
 #define nv2a_fifo_kick progress_kick_for_test
-static unsigned prep_watch,prep_batch_calls,prep_pixel_calls,prep_geometry_calls,prep_draw_calls,prep_geometry_draws,prep_stage_unpack_calls,prep_in_geometry,prep_gs_cb_calls,prep_vs_cb_calls;
+static unsigned prep_watch,prep_reverse_calls,prep_batch_calls,prep_pixel_calls,prep_geometry_calls,prep_draw_calls,prep_geometry_draws,prep_stage_unpack_calls,prep_in_geometry,prep_gs_cb_calls,prep_vs_cb_calls;
 static int prep_program,prep_fixed,prep_output;
 static unsigned prep_border_unpack_calls;
+static unsigned owner_mark_checks;
+static unsigned cold_upload_watch,cold_upload_samples;
+static unsigned lru_selection_visits;
+static unsigned diagnostic_probes,diagnostic_dump_count,diagnostic_indices[128],dxt_palette_work;
 static void prep_validate_bindings(ID3D11DeviceContext *ctx);
 #include "prep_src/kernel/nv2a_pb_exec.c"
 #undef nv2a_fifo_kick
@@ -356,10 +374,271 @@ static void verify_swizzled_regions(void) {
         assert(((const uint32_t *)((const uint8_t *)locked.pBits+(size_t)y*locked.Pitch))[x]==((const uint32_t *)memory)[swizzle_offset(x,y,128,128)]);
     if(color->native_surface)free(locked.pBits);
     else hw_check(color->surface->lpVtbl->UnlockRect(color->surface),"test retained native extent unlock");
+
+    method(NV097_SET_SURFACE_PITCH,512u|(512u<<16));
+    method(NV097_SET_SURFACE_CLIP_VERTICAL,256u<<16);
+    method(NV097_SET_SURFACE_FORMAT,0x08070124);
+    color=hw_color(0);assert(color->width==128 && color->height==256);
+    memcpy(memory,swizzled,bytes);color->upload_needed=1;hw_upload_color(color,0);
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0x100000);
+    HwColor *unrelated=hw_color(0);
+    if(unrelated->native_surface)assert(nvk_image_clear(hw_vk_render(unrelated),rgba));
+    else ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),((D3D8Surface *)hw_render_surface(unrelated))->rtv,rgba);
+    unrelated->dirty=1;unrelated->dirty_bounds=(RECT){0,0,128,256};
+    hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,NULL);
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0x60000);
+    method(NV097_SET_SURFACE_FORMAT,0x08070224);
+    uint64_t readbacks=s_gpu.hardware_color_readbacks;
+    assert(hw_color(0)==color);
+    assert(s_gpu.hardware_color_readbacks==readbacks && unrelated->dirty);
+    if(color->native_surface){locked.pBits=malloc(bytes);locked.Pitch=128*4;assert(locked.pBits && nvk_image_read(color->native_surface,locked.pBits,locked.Pitch));}
+    else hw_check(color->surface->lpVtbl->LockRect(color->surface,&locked,NULL,D3DLOCK_READONLY),"test clean layout upload");
+    for(unsigned y=0;y<256;y++)assert(!memcmp((uint8_t *)locked.pBits+(size_t)y*locked.Pitch,linear+y*128,128u*4));
+    if(color->native_surface)free(locked.pBits);
+    else hw_check(color->surface->lpVtbl->UnlockRect(color->surface),"test clean layout unlock");
+
+    /* Dirty pixels must still be encoded using the old swizzled layout. */
+    color->dirty=1;color->dirty_bounds=(RECT){0,0,128,256};
+    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,NULL);
+    readbacks=s_gpu.hardware_color_readbacks;
+    method(NV097_SET_SURFACE_FORMAT,0x08070124);assert(hw_color(0)==color);
+    assert(s_gpu.hardware_color_readbacks==readbacks+2 && !unrelated->dirty);
+    assert(!memcmp(memory,swizzled,bytes));
+
+    /* A retained taller allocation keeps the original complete publication. */
+    unrelated->dirty=1;
+    hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,NULL);
+    readbacks=s_gpu.hardware_color_readbacks;
+    method(NV097_SET_SURFACE_CLIP_VERTICAL,128u<<16);
+    method(NV097_SET_SURFACE_FORMAT,0x07070224);assert(hw_color(0)==color);
+    assert(color->height==256 && s_gpu.hardware_color_readbacks==readbacks+1 && !unrelated->dirty);
+
+    method(NV097_SET_SURFACE_CLIP_VERTICAL,256u<<16);
+    method(NV097_SET_SURFACE_FORMAT,0x08070124);assert(hw_color(0)==color);
+    unrelated->dirty=1;
+    hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,NULL);
+    uint32_t *output=(uint32_t *)(xbox_GetMemoryOffset()+0x80180000u);
+    hw_defer_output((uint8_t *)output,0x12345678);assert(s_hw_query_count==1);
+    readbacks=s_gpu.hardware_color_readbacks;
+    method(NV097_SET_SURFACE_FORMAT,0x08070224);assert(hw_color(0)==color);
+    assert(!s_hw_query_count && *output==0x12345678 && !unrelated->dirty);
+    assert(s_gpu.hardware_color_readbacks==readbacks+1);
+    fprintf(stderr,"[CLEAN LAYOUT] clean equal extent skips unrelated publication; native new-layout pixels, dirty old-layout encoding, retained taller extent and pending output preserved\n");
     free(linear);free(swizzled);
     fprintf(stderr,"[SWIZZLE REGION] actual native128x256 upload, pitched readback, highY dirty origin and all outside bytes passed\n");
 }
 static HANDLE fault_observed;
+#include "d3d8_swizzle.h"
+
+/* Original API readback, including the actual bound D3D resource. */
+static void alias_read_bound(uint32_t *out,unsigned width,unsigned height,HwColor *guest) {
+    if(d3d8_IsNativeVulkan()) {
+        if(guest)assert(s_hw_vk_textures[0]==guest->native_surface);
+        assert(nvk_image_read(s_hw_vk_textures[0],out,width*4));
+    } else {
+        ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
+        ID3D11ShaderResourceView *srv=NULL;ID3D11Resource *resource=NULL;
+        ID3D11DeviceContext_PSGetShaderResources(ctx,0,1,&srv);assert(srv);
+        ID3D11ShaderResourceView_GetResource(srv,&resource);assert(resource);
+        if(guest)assert(resource==(ID3D11Resource *)((D3D8Surface *)guest->surface)->d3d11_texture);
+        ID3D11Texture2D *texture=NULL;assert(SUCCEEDED(ID3D11Resource_QueryInterface(resource,&IID_ID3D11Texture2D,(void **)&texture)));
+        D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(texture,&desc);
+        assert(desc.Width==width && desc.Height==height);
+        desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;desc.MiscFlags=0;
+        ID3D11Texture2D *read=NULL;assert(SUCCEEDED(ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&read)));
+        ID3D11DeviceContext_CopyResource(ctx,(ID3D11Resource *)read,resource);
+        D3D11_MAPPED_SUBRESOURCE mapped;assert(SUCCEEDED(ID3D11DeviceContext_Map(ctx,(ID3D11Resource *)read,0,D3D11_MAP_READ,0,&mapped)));
+        for(unsigned y=0;y<height;y++)memcpy(out+(size_t)y*width,(uint8_t *)mapped.pData+(size_t)y*mapped.RowPitch,width*4);
+        ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource *)read,0);
+        ID3D11Texture2D_Release(read);ID3D11Texture2D_Release(texture);ID3D11Resource_Release(resource);ID3D11ShaderResourceView_Release(srv);
+    }
+}
+static void alias_write_render(HwColor *color,const uint32_t *pixels) {
+    unsigned scale=d3d8_RenderScale();
+    if(color->native_surface)assert(nvk_image_upload(hw_vk_render(color),pixels,(size_t)color->width*scale*4));
+    else ID3D11DeviceContext_UpdateSubresource(d3d8_GetD3D11Context(),(ID3D11Resource *)((D3D8Surface *)hw_render_surface(color))->d3d11_texture,0,NULL,pixels,color->width*scale*4,0);
+}
+static void alias_dirty(HwColor *color,RECT bounds) {
+    if(color->upload_needed)hw_upload_color(color,0);
+    color->dirty=1;color->dirty_bounds=bounds;
+    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,NULL);
+}
+static unsigned alias_query_calls,alias_normal_calls;
+static uint32_t *alias_asset_pixels;
+static const void *alias_asset(const void *raw,size_t bytes,unsigned width,unsigned height,unsigned *ow,unsigned *oh) {
+    assert(bytes && width==1024 && height==512);
+    if(!raw){++alias_query_calls;return alias_asset_pixels;}
+    ++alias_normal_calls;*ow=width;*oh=height;return alias_asset_pixels;
+}
+static void verify_swizzled_argb_alias(void) {
+    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0x400000);
+    method(NV097_SET_SURFACE_CLIP_HORIZONTAL,1024u<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,512u<<16);
+    method(NV097_SET_SURFACE_PITCH,4096u|(4096u<<16));method(NV097_SET_SURFACE_FORMAT,0x090A0228);
+    HwColor *source=hw_color(0);assert(source->width==1024 && source->height==512 && source->bpp==4);
+    /* Allocate all identities before marking any GPU image dirty. */
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0x100000);method(NV097_SET_SURFACE_CLIP_HORIZONTAL,8u<<16);
+    method(NV097_SET_SURFACE_CLIP_VERTICAL,8u<<16);method(NV097_SET_SURFACE_PITCH,32u|(32u<<16));method(NV097_SET_SURFACE_FORMAT,0x128);
+    HwColor *unrelated=hw_color(0);
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0x200000);HwColor *target=hw_color(0);
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0x401000);HwColor *overlap=hw_color(0);
+    method(NV097_SET_SURFACE_ZETA_OFFSET,0x402000);HwDepth *depth=hw_depth();
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0x200000);
+    const unsigned w=1024,h=512,scale=d3d8_RenderScale();const size_t n=(size_t)w*h;
+    uint32_t *pattern=malloc(n*scale*scale*4),*reference=malloc(n*4),*actual=malloc(n*4),*saved=malloc(n*4);
+    assert(pattern && reference && actual && saved);
+    for(unsigned y=0;y<h*scale;y++)for(unsigned x=0;x<w*scale;x++)pattern[(size_t)y*w*scale+x]=((x*13u+y*7u)&255u)<<24|((x*5u+y*11u)&255u)<<16|((x^y)&255u)<<8|((x*3u+y*17u)&255u);
+    uint8_t *ram=source->memory->host_view+source->memory_offset;
+    Texture texture={.offset=source->address,.width=w,.height=h,.pitch=1472,.color=6,.levels=11,.valid=1};
+    s_gpu.texs[0]=texture;s_gpu.rc.stage_program=1;
+    /* Oracle is the original resolve + original dirty RAM publication + original unswizzle. */
+    alias_dirty(source,(RECT){0,0,w,h});alias_write_render(source,pattern);hw_copy_color_to_memory(source);
+    xbox_unswizzle_rect(reference,ram,w,h,4);
+    hw_protect(source->memory,source->memory_offset,hw_color_bytes(source),PAGE_READWRITE,NULL);memset(ram,0xA5,n*4);
+    alias_dirty(source,(RECT){0,0,w,h});alias_write_render(source,pattern);
+    alias_dirty(unrelated,(RECT){0,0,8,8});
+    target->upload_needed=1;
+    uint64_t color_uploads=s_gpu.hardware_color_uploads;
+    uint64_t reads=s_gpu.hardware_color_readbacks,uploads=s_gpu.hardware_texture_uploads;
+    hw_texture_bind(0,target);
+    assert(s_gpu.hardware_color_readbacks==reads && source->dirty && unrelated->dirty);
+    assert(s_gpu.hardware_texture_uploads==uploads && s_gpu.hardware_color_uploads==color_uploads+1);
+    MEMORY_BASIC_INFORMATION source_page;assert(VirtualQuery((void *)(xbox_GetMemoryOffset()+source->address),&source_page,sizeof source_page));assert(source_page.Protect==PAGE_NOACCESS);
+    alias_read_bound(actual,w,h,source);assert(!memcmp(actual,reference,n*4));
+    /* Read backing through a temporarily restored protection, without publishing it. */
+    hw_protect(source->memory,source->memory_offset,hw_color_bytes(source),PAGE_READWRITE,NULL);
+    for(size_t i=0;i<n*4;i++)assert(ram[i]==0xA5);
+    hw_protect(source->memory,source->memory_offset,hw_color_bytes(source),PAGE_NOACCESS,NULL);
+    hw_texture_bind(0,target);alias_read_bound(actual,w,h,source);assert(!memcmp(actual,reference,n*4));
+    assert(s_gpu.hardware_color_readbacks==reads && source->dirty && unrelated->dirty);
+    /* Actual guest read goes through the original fault/publication path. */
+    assert(BRIDGE_MEM32(source->address)==reference[0]);assert(!source->dirty);
+    xbox_unswizzle_rect(actual,ram,w,h,4);assert(!memcmp(actual,reference,n*4));
+    /* CPU write makes the source ineligible and the original texture path observes it. */
+    BRIDGE_MEM32(source->address)=0x7F123456;hw_texture_bind(0,target);
+    alias_read_bound(actual,w,h,NULL);xbox_unswizzle_rect(reference,ram,w,h,4);assert(!memcmp(actual,reference,n*4));
+    /* Partial publication: GPU is changed everywhere, RAM only inside original rect. */
+    const RECT partial={17,129,119,233};memcpy(saved,ram,n*4);
+    for(size_t i=0;i<n*scale*scale;i++)pattern[i]^=0x5A6B7C8Du;
+    alias_dirty(source,partial);alias_write_render(source,pattern);
+    target->upload_needed=1;color_uploads=s_gpu.hardware_color_uploads;
+    reads=s_gpu.hardware_color_readbacks;hw_texture_bind(0,target);
+    assert(s_gpu.hardware_color_readbacks>reads && !source->dirty);
+    assert(target->upload_needed && s_gpu.hardware_color_uploads==color_uploads);
+    xbox_unswizzle_rect(reference,ram,w,h,4);alias_read_bound(actual,w,h,NULL);assert(!memcmp(actual,reference,n*4));
+    xbox_unswizzle_rect(actual,saved,w,h,4);
+    for(unsigned y=0;y<h;y++)for(unsigned x=0;x<w;x++)
+        if(x<(unsigned)partial.left || x>=(unsigned)partial.right || y<(unsigned)partial.top || y>=(unsigned)partial.bottom)
+            assert(reference[(size_t)y*w+x]==actual[(size_t)y*w+x]);
+    /* Confirm the real counterexample: the resolved GPU image differs outside
+     * the published rectangle, while the bound texture still samples RAM. */
+    if(source->native_surface)assert(nvk_image_read(source->native_surface,actual,w*4));
+    else {
+        D3DLOCKED_RECT pixels;assert(SUCCEEDED(source->surface->lpVtbl->LockRect(source->surface,&pixels,NULL,D3DLOCK_READONLY)));
+        for(unsigned y=0;y<h;y++)memcpy(actual+(size_t)y*w,(const uint8_t *)pixels.pBits+(size_t)y*pixels.Pitch,w*4);
+        assert(SUCCEEDED(source->surface->lpVtbl->UnlockRect(source->surface)));
+    }
+    assert(actual[0]!=reference[0]);
+    /* Clean-after-partial remains on the RAM-decoded path. */
+    hw_texture_bind(0,target);alias_read_bound(actual,w,h,NULL);assert(!memcmp(actual,reference,n*4));
+    /* Pending relevant output must be published before raw texture decode. */
+    alias_dirty(source,(RECT){0,0,w,h});hw_defer_output((uint8_t *)(xbox_GetMemoryOffset()+source->address),0xCC445566);
+    hw_texture_bind(0,target);assert(!s_hw_query_count && BRIDGE_MEM32(source->address)==0xCC445566);
+    xbox_unswizzle_rect(reference,ram,w,h,4);alias_read_bound(actual,w,h,NULL);assert(!memcmp(actual,reference,n*4));
+    /* Other dirty color or depth in the complete source storage must exclude reuse. */
+    for(unsigned kind=0;kind<2;kind++) {
+        alias_dirty(source,(RECT){0,0,w,h});
+        if(!kind)alias_dirty(overlap,(RECT){0,0,8,8});else {depth->dirty=1;hw_protect(depth->memory,depth->memory_offset,hw_depth_bytes(depth),PAGE_NOACCESS,NULL);}
+        reads=s_gpu.hardware_color_readbacks;hw_texture_bind(0,target);assert(s_gpu.hardware_color_readbacks>reads && !source->dirty);
+        xbox_unswizzle_rect(reference,ram,w,h,4);alias_read_bound(actual,w,h,NULL);assert(!memcmp(actual,reference,n*4));
+    }
+    /* Distinct color pointer with the same physical memory is feedback, too. */
+    assert(overlap!=source && overlap->memory==source->memory && hw_ranges_overlap(source->memory_offset,tex_face_stride(&texture),overlap->memory_offset,hw_color_bytes(overlap)));
+    alias_dirty(source,(RECT){0,0,w,h});reads=s_gpu.hardware_color_readbacks;hw_texture_bind(0,overlap);
+    assert(s_gpu.hardware_color_readbacks>reads && !source->dirty);
+    xbox_unswizzle_rect(reference,ram,w,h,4);alias_read_bound(actual,w,h,NULL);assert(!memcmp(actual,reference,n*4));
+    /* Query token is not rendered; the original normal callback chooses actual pixels. */
+    alias_asset_pixels=malloc(n*4);assert(alias_asset_pixels);for(size_t i=0;i<n;i++)alias_asset_pixels[i]=0x7F1177AA;
+    for(size_t i=0;i<n*scale*scale;i++)pattern[i]=0x2A5B8C9D;
+    d3d8_SetTextureAssetLookup(alias_asset);alias_dirty(source,(RECT){0,0,w,h});alias_write_render(source,pattern);
+    unsigned ow=123,oh=456;assert(d3d8_TextureAsset(NULL,tex_face_stride(&texture),w,h,&ow,&oh)==alias_asset_pixels && ow==123 && oh==456 && !alias_normal_calls);
+    hw_texture_bind(0,target);assert(alias_query_calls>=1 && alias_normal_calls>=1 && !source->dirty);
+    alias_read_bound(actual,w,h,NULL);assert(!memcmp(actual,alias_asset_pixels,n*4));
+    d3d8_SetTextureAssetLookup(NULL);free(alias_asset_pixels);alias_asset_pixels=NULL;
+    /* Byte-disjoint targets on the same physical page must not weaken dirty source protection. */
+    method(NV097_SET_SURFACE_CLIP_HORIZONTAL,8u<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,8u<<16);
+    method(NV097_SET_SURFACE_PITCH,32u|(32u<<16));method(NV097_SET_SURFACE_FORMAT,0x03030228);
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0x800000);HwColor *page_source=hw_color(0);
+    method(NV097_SET_SURFACE_FORMAT,0x128);method(NV097_SET_SURFACE_COLOR_OFFSET,0x800400);HwColor *samepage=hw_color(0);
+    assert(page_source!=samepage && page_source->memory==samepage->memory && !hw_ranges_overlap(page_source->memory_offset,hw_color_bytes(page_source),samepage->memory_offset,hw_color_bytes(samepage)));
+    assert((page_source->memory_offset&~(size_t)4095)==(samepage->memory_offset&~(size_t)4095));
+    uint32_t *tiny=malloc((size_t)8*8*scale*scale*4);assert(tiny);for(size_t i=0;i<(size_t)8*8*scale*scale;i++)tiny[i]=0x7F336699;
+    alias_dirty(page_source,(RECT){0,0,8,8});alias_write_render(page_source,tiny);samepage->upload_needed=1;
+    s_gpu.texs[0]=(Texture){.offset=page_source->address,.width=8,.height=8,.pitch=32,.color=6,.levels=1,.valid=1};
+    color_uploads=s_gpu.hardware_color_uploads;reads=s_gpu.hardware_color_readbacks;
+    hw_texture_bind(0,samepage);assert(!page_source->dirty && s_gpu.hardware_color_readbacks>reads && samepage->upload_needed && s_gpu.hardware_color_uploads==color_uploads);
+    alias_read_bound(actual,8,8,NULL);uint8_t *smallram=page_source->memory->host_view+page_source->memory_offset;
+    xbox_unswizzle_rect(reference,smallram,8,8,4);assert(!memcmp(actual,reference,8u*8u*4u));assert(BRIDGE_MEM32(page_source->address)==reference[0]);free(tiny);
+    free(pattern);free(reference);free(actual);free(saved);
+    fprintf(stderr,"[SW ARGB ALIAS] full pixels/alpha, retained RAM, repeat, CPU read/write, partial/clean, pending, color/depth overlap, physical feedback and asset contract\n");
+}
+
+/* Append-only followup for the existing original clean-overlap consumer.
+ * Requires the previously prepared alias_write_render/alias_read_bound helpers.
+ * Intentionally never calls a preserve/publication helper between the two binds. */
+static void verify_alias_followup_linear_consumer(void) {
+    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0xA00000);
+    method(NV097_SET_SURFACE_CLIP_HORIZONTAL,32u<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,32u<<16);
+    method(NV097_SET_SURFACE_PITCH,128u|(128u<<16));method(NV097_SET_SURFACE_FORMAT,0x05050228);
+    HwColor *source=hw_color(0);assert(source->width==32 && source->height==32 && source->pitch==128);
+    method(NV097_SET_SURFACE_CLIP_HORIZONTAL,64u<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,16u<<16);
+    method(NV097_SET_SURFACE_PITCH,256u|(256u<<16));method(NV097_SET_SURFACE_FORMAT,0x128);
+    HwColor *linear=hw_color(0);
+    assert(source!=linear && source->memory==linear->memory && source->memory_offset==linear->memory_offset && hw_color_bytes(source)==4096 && hw_color_bytes(linear)==4096);
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0xA02000);
+    method(NV097_SET_SURFACE_CLIP_HORIZONTAL,8u<<16);method(NV097_SET_SURFACE_CLIP_VERTICAL,8u<<16);
+    method(NV097_SET_SURFACE_PITCH,32u|(32u<<16));HwColor *target=hw_color(0);
+    unsigned scale=d3d8_RenderScale();
+    uint32_t *pattern=malloc((size_t)32*32*scale*scale*4),*bound=malloc((size_t)64*16*scale*scale*4);
+    uint32_t reference[1024];assert(pattern && bound);
+    for(unsigned y=0;y<32*scale;y++)for(unsigned x=0;x<32*scale;x++)
+        pattern[(size_t)y*32*scale+x]=((x*13u+y*7u)&255u)<<24|((x*5u+y*11u)&255u)<<16|((x^y)&255u)<<8|((x*3u+y*17u)&255u);
+    /* Reference comes only from the existing publication encoder. */
+    hw_begin_color_write(source);alias_write_render(source,pattern);hw_end_color_write(source,(RECT){0,0,32,32});
+    hw_copy_color_to_memory(source);
+    uint8_t *ram=source->memory->host_view+source->memory_offset;memcpy(reference,ram,sizeof reference);
+    memset(ram,0xA5,sizeof reference);
+    hw_begin_color_write(source);assert(linear->upload_needed);
+    alias_write_render(source,pattern);hw_end_color_write(source,(RECT){0,0,32,32});
+    s_gpu.rc.stage_program=1;
+    s_gpu.texs[0]=(Texture){.offset=source->address,.width=32,.height=32,.pitch=128,.color=6,.levels=1,.valid=1};
+    uint64_t reads=s_gpu.hardware_color_readbacks;
+    hw_texture_bind(0,target);
+    assert(source->dirty && s_gpu.hardware_color_readbacks==reads);
+    for(unsigned i=0;i<sizeof reference;i++)assert(ram[i]==0xA5);
+    alias_read_bound(bound,32,32,source);
+    /* The next original linear alias must consume the source publication before upload. */
+    s_gpu.texs[0]=(Texture){.offset=linear->address,.width=64,.height=16,.pitch=256,.color=0x12,.levels=1,.valid=1};
+    hw_texture_bind(0,target);
+    assert(!source->dirty && !linear->upload_needed && s_gpu.hardware_color_readbacks==reads+1);
+    assert(!memcmp(ram,reference,sizeof reference));
+    if(d3d8_IsNativeVulkan())assert(s_hw_vk_textures[0]==hw_vk_render(linear));
+    else {
+        ID3D11ShaderResourceView *srv=NULL;ID3D11Resource *resource=NULL;
+        ID3D11DeviceContext_PSGetShaderResources(d3d8_GetD3D11Context(),0,1,&srv);assert(srv);
+        ID3D11ShaderResourceView_GetResource(srv,&resource);
+        assert(resource==(ID3D11Resource *)((D3D8Surface *)hw_render_surface(linear))->d3d11_texture);
+        ID3D11Resource_Release(resource);ID3D11ShaderResourceView_Release(srv);
+    }
+    alias_read_bound(bound,64*scale,16*scale,NULL);
+    for(unsigned y=0;y<16*scale;y++)for(unsigned x=0;x<64*scale;x++)
+        assert(bound[(size_t)y*64*scale+x]==reference[(size_t)(y/scale)*64+x/scale]);
+    assert(BRIDGE_MEM32(source->address)==reference[0]);
+    free(pattern);free(bound);
+    fprintf(stderr,"[SW LINEAR FOLLOWUP] original write ownership then SW guest binding then existing overlapping linear upload publishes source before CPU/native consumption\n");
+}
+
 static void verify_clean_texture_overlap(void) {
     seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
     method(NV097_SET_SURFACE_COLOR_OFFSET,0x60000);
@@ -407,6 +686,8 @@ static void verify_clean_texture_overlap(void) {
     assert(!source_color->dirty && !unrelated->dirty && s_gpu.hardware_color_readbacks==readbacks+2);
     assert(memory[0]==0xffff0000 && !memcmp(s_hw_textures->raw,memory,128u*256u*4u));
     fprintf(stderr,"[CLEAN OVERLAP] clean texture avoids unrelated colour readback; dirty texture still publishes original pixels\n");
+    verify_swizzled_argb_alias();
+    verify_alias_followup_linear_consumer();
 }
 static void verify_host_write_scope(const char *path) {
     seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
@@ -2093,6 +2374,57 @@ static void verify_clear_page_ownership(void) {
     assert(a->dirty && !s_hw_query_count);
     protection_pages_for_test(a->memory,a->memory_offset,1,PAGE_NOACCESS);
     assert(BRIDGE_MEM32(a->address)==0xff765432 && *(uint32_t *)output==0x1234abcd);
+
+    /* CPU faults use the same real views and original page owners above. */
+    for(unsigned view=0;view<a->memory->views.view_count;view++) {
+        hw_publish_all();
+        test_dirty_colour(unrelated,blue);
+        readbacks=s_gpu.hardware_color_readbacks;
+        volatile uint32_t *writer=(volatile uint32_t *)((uint8_t *)a->memory->views.cpu_views[view]+a->memory_offset);
+        writer[0]=0xff112200u+view;
+        assert(s_gpu.hardware_color_readbacks==readbacks && unrelated->dirty);
+        assert(a->upload_needed && am[0]==0xff112200u+view);
+        protection_pages_for_test(unrelated->memory,unrelated->memory_offset,1,PAGE_NOACCESS);
+
+        test_dirty_colour(a,red);test_dirty_colour(neighbor,green);
+        readbacks=s_gpu.hardware_color_readbacks;
+        writer[1]=0xff556600u+view;
+        assert(s_gpu.hardware_color_readbacks==readbacks+2 && unrelated->dirty);
+        assert(!a->dirty && !neighbor->dirty && a->upload_needed && neighbor->upload_needed);
+        for(unsigned i=0;i<64;i++)assert(am[i]==(i==1?0xff556600u+view:0xffff0000) && nm[i]==0xff00ff00);
+        protection_pages_for_test(unrelated->memory,unrelated->memory_offset,1,PAGE_NOACCESS);
+    }
+    hw_publish_all();
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0x20000);
+    method(NV097_SET_SURFACE_ZETA_OFFSET,0x20800);
+    HwDepth *near_depth=hw_depth();
+    assert(near_depth->memory==a->memory && near_depth->memory_offset/4096==a->memory_offset/4096);
+    method(NV097_SET_ZSTENCIL_CLEAR_VALUE,0x2468ac7b);method(NV097_CLEAR_SURFACE,3);
+    assert(near_depth->dirty);
+    test_dirty_colour(a,red);test_dirty_colour(neighbor,green);test_dirty_colour(unrelated,blue);
+    readbacks=s_gpu.hardware_color_readbacks;
+    volatile uint32_t *padding=(volatile uint32_t *)((uint8_t *)a->memory->views.cpu_views[1]+a->memory_offset+0x200);
+    *padding=0x12345678;
+    assert(s_gpu.hardware_color_readbacks==readbacks+2 && unrelated->dirty);
+    assert(!near_depth->dirty && near_depth->upload_needed);
+    const uint32_t *depth_bytes=(const uint32_t *)(near_depth->memory->host_view+near_depth->memory_offset);
+    for(unsigned i=0;i<64;i++)assert(am[i]==0xffff0000 && nm[i]==0xff00ff00 && depth_bytes[i]==0x2468ac7b);
+    protection_pages_for_test(unrelated->memory,unrelated->memory_offset,1,PAGE_NOACCESS);
+    hw_publish_all();
+    test_dirty_colour(unrelated,blue);
+    uint32_t *earlier=(uint32_t *)(xbox_GetMemoryOffset()+0x80180000u);
+    uint32_t *same_page=(uint32_t *)(xbox_GetMemoryOffset()+a->address+0xc00);
+    hw_defer_output((uint8_t *)earlier,0x11223344);hw_defer_output((uint8_t *)same_page,0xaabbccdd);
+    assert(s_hw_query_count==2);readbacks=s_gpu.hardware_color_readbacks;
+    *(volatile uint32_t *)((uint8_t *)a->memory->views.cpu_views[1]+a->memory_offset)=0x76543210;
+    assert(!s_hw_query_count && *earlier==0x11223344 && *same_page==0xaabbccdd);
+    assert(am[0]==0x76543210 && unrelated->dirty && s_gpu.hardware_color_readbacks==readbacks);
+    protection_pages_for_test(unrelated->memory,unrelated->memory_offset,1,PAGE_NOACCESS);
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0x300000);
+    method(NV097_SET_COLOR_CLEAR_VALUE,0xff998877);method(NV097_CLEAR_SURFACE,0xf0);
+    assert(unrelated->dirty && s_gpu.hardware_color_readbacks==readbacks);
+    assert(BRIDGE_MEM32(unrelated->address)==0xff998877 && s_gpu.hardware_color_readbacks==readbacks+1);
+    fprintf(stderr,"[CPU WRITE SCOPE] clean owner, all CPU views, dirty same-page neighbors/depth, padding, pending FIFO, unrelated noaccess and later overwrite/read passed\n");
     fprintf(stderr,"[CLEAR OWNERSHIP] overwrite discard, same-page nonoverlap preservation, unrelated GPU ownership and partial channels passed\n");
 }
 
@@ -3856,8 +4188,39 @@ int main(int argc,char **argv) {
 '''
     # Preserve the original relative includes while observing only actual preparation entries.
     shutil.copytree(root/'src',work/'prep_src')
+    pb_path=work/'prep_src/kernel/nv2a_pb_exec.c'
+    pb=pb_path.read_text(encoding='utf-8')
+    assert 'for (i = 0; i < s_tex_use_count; i++) {' in pb
+    pb=pb.replace('for (i = 0; i < s_tex_use_count; i++) {','for (i = 0; i < s_tex_use_count; i++) { ++diagnostic_probes;',1)
+    mark='static void dump_texture_bmp(uint32_t seq)\n{'
+    assert mark in pb
+    pb=pb.replace(mark,mark+'\n    if(diagnostic_dump_count<128)diagnostic_indices[diagnostic_dump_count]=seq; ++diagnostic_dump_count;',1)
+    pb_path.write_text(pb,encoding='utf-8')
+    hh=work/'prep_src/d3d/d3d8_swizzle.h'
+    header=hh.read_text(encoding='utf-8')
+    mark='    if (!block_bytes) return 0;'
+    assert mark in header
+    header=header.replace(mark,mark+'\n    ++dxt_palette_work;',1)
+    hh.write_text(header,encoding='utf-8')
+    pb_path=work/'prep_src/kernel/nv2a_pb_exec.c'
+    pb=pb_path.read_text(encoding='utf-8')
+    marker='static int sample_tex(const Texture *t,uint32_t face,uint32_t u,uint32_t v,uint32_t *argb)\n{'
+    assert marker in pb
+    pb=pb.replace(marker,marker+' if(cold_upload_watch)++cold_upload_samples;',1)
+    pb_path.write_text(pb,encoding='utf-8')
     bridge_path=work/'prep_src/kernel/nv2a_d3d11_bridge.inc'
     bridge=bridge_path.read_text(encoding='utf-8')
+    reverse_entry='static uint32_t hw_reverse_inputs(uint32_t word)\n{'
+    assert bridge.count(reverse_entry)==1
+    bridge=bridge.replace(reverse_entry,reverse_entry+'\n    if(prep_watch)++prep_reverse_calls;',1)
+    actual='hw_ranges_overlap(other->memory_offset,hw_color_bytes(other),color->memory_offset,hw_color_bytes(color))) other->upload_needed=1;'
+    assert bridge.count(actual)==1
+    bridge=bridge.replace(actual,'(++owner_mark_checks,hw_ranges_overlap(other->memory_offset,hw_color_bytes(other),color->memory_offset,hw_color_bytes(color)))) other->upload_needed=1;',1)
+
+    selection='        HwVertexBatch *entry=&s_hw_vertex_batches[set][way];\n        if(!selected'
+    assert selection in bridge
+    bridge=bridge.replace(selection,'        HwVertexBatch *entry=&s_hw_vertex_batches[set][way];\n        ++lru_selection_visits;\n        if(!selected',1)
+
     bridge='static void prep_unpack_for_test(uint32_t color,float out[4]) {if(prep_watch)++prep_stage_unpack_calls;nv2a_rc_unpack(color,out); }\n'+bridge
     bridge=bridge.replace('nv2a_rc_unpack(states[','prep_unpack_for_test(states[')
     bridge='static void prep_border_unpack_for_test(uint32_t color,float out[4]) {if(prep_watch)++prep_border_unpack_calls;nv2a_rc_unpack(color,out); }\n'+bridge
@@ -3871,7 +4234,7 @@ int main(int argc,char **argv) {
     bridge=bridge.replace(entry,entry+'\n    if(prep_watch){++prep_draw_calls;prep_geometry_draws+=prep_in_geometry;prep_validate_bindings(ctx);}')
     entry='    hw_enter();\n    uint64_t timing_start=gpu_timing_clock();'
     assert bridge.count(entry)==1
-    bridge=bridge.replace(entry,entry+'\n    if(prep_watch){++prep_batch_calls;prep_program=s_hw_program_active;prep_fixed=s_hw_fixed_active;prep_output=s_hw_output_active;}')
+    bridge=bridge.replace(entry,entry+'\n    if(prep_watch){++prep_batch_calls;prep_program=s_hw_program_active;prep_fixed=s_hw_fixed_active;prep_output=s_hw_output_active;layout_output=s_hw_output_active;}')
     entry='        hw_issue_draw(ctx,draw,first,count);'
     assert bridge.count(entry)==1
     bridge=bridge.replace(entry,'        prep_in_geometry=1;'+entry.strip()+'prep_in_geometry=0;')
@@ -3919,6 +4282,13 @@ unsigned combiner_test_shader_count(void) { unsigned count=0;for(unsigned i=0;i<
     source=source.replace('    if(!strcmp(argv[1],"combiner-effective")) {','    if(!strcmp(argv[1],"depth-sample-storage")) { verify_depth_sample_storage(); }\n    else if(!strcmp(argv[1],"combiner-effective")) {')
     source=source.replace('    if(!strcmp(argv[1],"depth-sample-storage")) {','    if(!strcmp(argv[1],"preparation-cost")) { verify_preparation_cost(); }\n    else if(!strcmp(argv[1],"depth-sample-storage")) {')
     source=source.replace('    if(!strcmp(argv[1],"preparation-cost")) {','    if(!strcmp(argv[1],"sampler-preparation")) { verify_sampler_preparation(); }\n    else if(!strcmp(argv[1],"preparation-cost")) {')
+    source=source.replace('    if(!strcmp(argv[1],"sampler-preparation")) {','    if(!strncmp(argv[1],"diagnostic-",11)) { verify_texture_diagnostics(argv[1]+11); }\n    else if(!strcmp(argv[1],"dxt-block-work")) { verify_dxt_block_work(); }\n    else if(!strcmp(argv[1],"sampler-preparation")) {')
+    source=source.replace('    if(!strncmp(argv[1],"diagnostic-",11)) {','    if(!strcmp(argv[1],"vertex-lru-selection")) { verify_original_vertex_lru_selection(); }\n    else if(!strncmp(argv[1],"diagnostic-",11)) {')
+    source=source.replace('    if(!strcmp(argv[1],"vertex-lru-selection")) {','    if(!strcmp(argv[1],"cold-dxt-upload")) { verify_cold_dxt_upload(); }\n    else if(!strcmp(argv[1],"vertex-lru-selection")) {')
+    source=source.replace('    if(!strcmp(argv[1],"cold-dxt-upload")) {','    if(!strcmp(argv[1],"owner-mark-work")) { verify_owner_mark_work(); }\n    else if(!strcmp(argv[1],"cold-dxt-upload")) {')
+    direct_transport=(root/'tools/recomp/test_gpu_direct_transport.c.inc').read_text(encoding='utf-8')
+    source=source.replace('int main(int argc,char **argv) {',direct_transport+'\nint main(int argc,char **argv) {')
+    source=source.replace('    if(!strcmp(argv[1],"owner-mark-work")) {','    if(!strcmp(argv[1],"direct-gpu-compare")){direct_gpu_compare(gpu);fflush(NULL);ExitProcess(0);}'+'\n    if(!strcmp(argv[1],"owner-mark-work")) {')
     (work/'gpu.c').write_text(source,encoding='utf-8')
     (work/'resources_counted.c').write_text(r'''
 #include "d3d8_internal.h"
@@ -3946,7 +4316,7 @@ static HRESULT readback_map_for_test(ID3D11DeviceContext *context,ID3D11Resource
         '/DWIN32_LEAN_AND_MEAN','/DNOMINMAX','/D_CRT_SECURE_NO_WARNINGS','/D_USE_MATH_DEFINES',
         '/I'+str(root/'src'),'/I'+str(root/'src/kernel'),'/I'+str(root/'src/d3d'),str(work/'gpu.c'),str(work/'resources_counted.c'),str(work/'combiner_counted.c'),
         str(root/'src/kernel/xbox_memory_layout.c'),str(root/'src/kernel/recomp_continuation.c'),
-        str(root/'src/kernel/kernel_hal.c'),str(root/'src/kernel/kernel_sync.c'),
+        str(root/'src/kernel/kernel_hal.c'),str(root/'src/kernel/kernel_sync.c'),str(root/'src/kernel/nv2a_pb_scan.c'),
         '/Fe:'+str(work/'gpu.exe'),'/link','/OPT:REF',*[str(p) for p in libraries],
         'kernel32.lib','user32.lib','gdi32.lib','advapi32.lib','ole32.lib','shell32.lib',
         'd3d11.lib','d3d12.lib','dxgi.lib','dxguid.lib','d3dcompiler.lib','winmm.lib','xaudio2_8.lib',
@@ -4778,3 +5148,51 @@ def test_native_sampler_preparation_uses_only_bound_images(native_gpu,tmp_path,b
     (tmp_path/'sampler_preparation.log').write_text(result.stdout+result.stderr,encoding='utf-8')
     assert result.returncode==0,result.stdout+result.stderr
     assert '[SAMPLER PREPARATION] null/sparse/mixed/all/query/restore passed' in result.stderr
+
+@pytest.mark.parametrize('case', ['default','every0','everyempty','every2','lateevery','legacy','prefix','prefixempty'])
+def test_texture_diagnostic_request_reuses_original_statistics(native_gpu,tmp_path,case):
+    executable,xbe=native_gpu
+    env={k:v for k,v in os.environ.items() if k not in ('RECOMP_TEX_DUMP','RECOMP_TEX_DUMP_EVERY','RECOMP_PB_EXEC')}
+    if case in ('every0','lateevery'):env['RECOMP_TEX_DUMP_EVERY']='0'
+    if case=='everyempty':env['RECOMP_TEX_DUMP_EVERY']=''
+    if case=='prefixempty':env['RECOMP_TEX_DUMP']=''
+    if case=='every2':env['RECOMP_TEX_DUMP_EVERY']='2'
+    if case=='legacy':env['RECOMP_PB_EXEC']='0'
+    if case=='prefix':env['RECOMP_TEX_DUMP']=str(tmp_path/'tex')
+    result=subprocess.run([str(executable),'diagnostic-'+case,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],env=env,cwd=tmp_path,capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[DIAGNOSTIC]' in result.stderr
+
+@pytest.mark.parametrize('hardware,backend',[('0','D3D11'),('1','D3D11'),('1','Vulkan')])
+def test_dxt_block_cache_uses_single_original_palette(native_gpu,tmp_path,hardware,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'dxt-block-work',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),hardware],env={**os.environ,'RECOMP_GPU_BACKEND':backend,'RECOMP_RENDER_SCALE':'1'},capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[DXT BLOCK]' in result.stderr
+
+def test_original_vertex_lru_first_empty_and_full_ties(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'vertex-lru-selection',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],env={**os.environ,'RECOMP_GPU_BACKEND':'Vulkan'},capture_output=True,text=True,errors='replace',timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[VERTEX LRU]' in result.stderr
+
+@pytest.mark.parametrize('backend',['D3D11','Vulkan','OpenGL'])
+def test_original_cold_dxt_upload_consumes_original_block_output(native_gpu,tmp_path,backend):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'cold-dxt-upload',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],env={**os.environ,'RECOMP_GPU_BACKEND':backend},capture_output=True,text=True,errors='replace',timeout=90)
+    (tmp_path/'cold.log').write_text(result.stdout+result.stderr,encoding='utf-8')
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[COLD DXT]' in result.stderr
+
+def test_original_color_owner_mark_reuses_upload_flag(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'owner-mark-work',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1'],env={**os.environ,'RECOMP_GPU_BACKEND':'Vulkan'},capture_output=True,text=True,errors='replace',timeout=60)
+    (tmp_path/'owner.log').write_text(result.stdout+result.stderr,encoding='utf-8')
+    assert result.returncode==0,result.stdout+result.stderr
+    assert '[OWNER MARK]' in result.stderr
+
+def test_original_gpu_static_guest_transport(native_gpu,tmp_path):
+    executable,xbe=native_gpu
+    result=subprocess.run([str(executable),'direct-gpu-compare',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],capture_output=True,text=True,errors='replace')
+    assert result.returncode==0,result.stdout+result.stderr
+    assert 'DIRECT_GPU_RESULT ' in result.stdout

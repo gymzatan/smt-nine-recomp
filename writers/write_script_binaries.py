@@ -1774,14 +1774,7 @@ def _plan_layout_rewrite_slices(
             except ValueError as exc:
                 fail(file_name, "marker_raw 非法", offset=payload.get("offset"))
                 raise exc
-            # Normalize timed_wait markers to standard -1.0f (→ 10s default)
-            if (
-                original_page.get("stop_opcode") == 4
-                and str(original_page.get("stop_kind") or "") == "timed_wait"
-                and len(marker_raw) == 5
-                and marker_raw[0] == 0x04
-            ):
-                marker_raw = b"\x04\x00\x00\x80\xbf"
+            marker_raw = reading_wait_marker(original_page)
             marker_start = int(marker_offset) - int(scene_abs_start)
             marker_end = marker_start + int(marker_length)
             if len(marker_raw) != int(marker_length):
@@ -2681,6 +2674,15 @@ def _rewrite_scene_code(
     return bytes(new_code), relocated_labels
 
 
+def reading_wait_marker(page):
+    """Keep the approved ten-second interval for native dialogue page waits."""
+    raw = bytes.fromhex(str(page.get("marker_raw") or ""))
+    if (page.get("stop_opcode") == 4 and page.get("stop_kind") == "timed_wait"
+            and len(raw) == 5 and raw[0] == 0x04):
+        return b"\x04\x00\x00\x80\xbf"
+    return raw
+
+
 def is_timed_wait(raw):
     """A finite nonnegative native delay is an execution boundary, not reader pagination."""
     if len(raw) != 5 or raw[0] != 0x04:
@@ -2885,6 +2887,7 @@ def _plan_paragraph_rewrite(
         terminal = decode_opcode_event(scene, marker_start)
         if terminal is None or terminal.raw != marker_raw:
             fail(file_name, "段落终止指令与原VM不一致", offset=scene_abs_start + marker_start)
+        marker_raw = reading_wait_marker(last_page)
     control_lines = payload.get("native_jp_lines")
     if control_lines is not None:
         if not isinstance(control_lines, list) or len(control_lines) != len(parts):
@@ -3127,6 +3130,20 @@ def _rewrite_single_scene_nested_v2(
                 patch_tasks.append((dict(part), int(assigned_local_idx)))
 
     source_code = bytearray(scene.code)
+    # The paragraph and layout paths normalize their own terminal markers.
+    # Unchanged slot counts use this same policy before the original relocator.
+    for payload in entries:
+        for page in payload.get("pages", []):
+            raw = bytes.fromhex(str(page.get("marker_raw") or ""))
+            normalized = reading_wait_marker(page)
+            if normalized == raw:
+                continue
+            position = int(page["marker_offset"]) - scene_abs_start
+            if any(int(info["start"]) <= position < int(info["end"]) for info in rewrite_slices):
+                continue
+            if bytes(source_code[position:position + len(raw)]) != raw:
+                fail(file_name, "阅读页等待与原VM不一致", offset=page["marker_offset"])
+            source_code[position:position + len(raw)] = normalized
     reachable_event_spans: List[Tuple[int, int]] = []
     for event_start in _collect_reachable_event_starts_for_rewrite(scene):
         event = decode_opcode_event(scene, int(event_start))
@@ -3657,3 +3674,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+

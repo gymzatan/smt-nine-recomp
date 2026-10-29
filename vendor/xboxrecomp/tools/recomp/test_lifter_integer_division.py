@@ -51,7 +51,7 @@ def test_translated_divide_traps_retry_and_skip(monkeypatch):
     translator=FunctionTranslator(bytes(data),functions,seh_prolog=0,seh_epilog=0)
     bodies='\n'.join(translator.translate_function(va,row) for va,row in functions.items())
     prefix='#define RECOMP_GENERATED_CODE 1\n'+PRELUDE+'''
-RECOMP_TLS uint32_t g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp,g_seh_ebp;
+RECOMP_TLS uint32_t g_ebp,g_seh_ebp;
 ptrdiff_t g_xbox_mem_offset;
 static unsigned char memory[0x20000];
 static unsigned traps,skip;static uint32_t expected_a,expected_d;

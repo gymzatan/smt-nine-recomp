@@ -32,8 +32,9 @@ def fault_binary(tmp_path_factory,request):
 #include <assert.h>
 void sub_00011000(void);void sub_00012000(void);
 ptrdiff_t g_xbox_mem_offset;
-RECOMP_TLS uint32_t g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp,g_seh_ebp;
-RECOMP_TLS uint32_t g_eflags=0x202;
+RECOMP_TLS RecompGprState g_gpr={0,0,0,0,0,0,0,0x202u,0};
+RECOMP_TLS uint32_t g_ebp,g_seh_ebp;
+
 #define eax g_eax
 #define ecx g_ecx
 #define edx g_edx

@@ -537,7 +537,8 @@ int nvk_image_upload(NvkImage *image,const void *pixels,size_t pitch) {
     size_t row=image->width*4,bytes=row*image->height*image->layers*image->depth;
     reserve(bytes+3);
     auto &chunk=begin();VkDeviceSize offset=0;
-    for(size_t y=0;y<(size_t)image->height*image->layers*image->depth;y++) {
+    if(pitch==row)offset=upload(pixels,bytes,4);
+    else for(size_t y=0;y<(size_t)image->height*image->layers*image->depth;y++) {
         VkDeviceSize current=upload(static_cast<const char *>(pixels)+pitch*y,row,4);
         if(!y)offset=current;
     }

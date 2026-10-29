@@ -6,8 +6,7 @@ from .test_lifter_pushal import _build_and_run
 
 HEADER=Path(__file__).resolve().parents[4]/'config/recomp_types.h'
 PRELUDE=f'''#include "{HEADER.as_posix()}"
-RECOMP_TLS uint32_t g_eflags=0x202u;
-RECOMP_TLS int g_df;
+RECOMP_TLS RecompGprState g_gpr={{0,0,0,0,0,0,0,0x202u,0}};
 static int interrupt_state=1;
 int xbox_CpuInterruptFlag(void) {{return interrupt_state & 1;}}
 void xbox_CpuLeaveInterrupt(int state) {{interrupt_state=state;}}
@@ -137,7 +136,7 @@ def test_translated_calls_joins_and_flag_stack(monkeypatch):
     assert 'g_eflags = (g_eflags & ~0x10u)' in bodies[0x19000]
     prefix='''#define RECOMP_GENERATED_CODE 1
 '''+PRELUDE+'''
-RECOMP_TLS uint32_t g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp,g_seh_ebp;
+RECOMP_TLS uint32_t g_ebp,g_seh_ebp;
 ptrdiff_t g_xbox_mem_offset;
 static unsigned char memory[0x20000];
 void guest_cpu_yield(void) {}
@@ -167,4 +166,14 @@ void guest_cpu_yield(void) {}
  return 0;
 }'''
     result=_build_and_run(prefix+prototypes+'\n'+'\n'.join(bodies.values())+main)
+    assert result.returncode==0,(result.returncode,result.stdout,result.stderr)
+
+
+def test_actual_header_parity_all_bytes_and_high_bits():
+    cases=[]
+    for low in range(256):
+        expected=int(low.bit_count()%2==0)
+        for high in (0,0x100,0x80000000,0xffffff00,0x12345600):
+            cases.append(f'if(RECOMP_PARITY8(0x{high|low:08x}u)!={expected})return {low+1};')
+    result=_build_and_run(PRELUDE+'\nint main(void) {'+'\n'.join(cases)+'return 0;}')
     assert result.returncode==0,(result.returncode,result.stdout,result.stderr)

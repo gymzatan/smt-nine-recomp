@@ -697,8 +697,57 @@ static void verify_original_file_policy_bounds(void) {
     file_policy_test_observe=0;
 }
 
+
+static HANDLE shadow_event(void) {HANDLE h=CreateEventW(NULL,TRUE,FALSE,NULL);assert(h);return h;}
+static int shadow_alive(HANDLE h) {DWORD f;return GetHandleInformation(h,&f)!=0;}
+static void shadow_empty(void) {for(unsigned i=0;i<KE_SHADOW_SIZE;i++)if(g_ke_shadow[i].in_use)ke_shadow_remove(g_ke_shadow[i].guest_va);}
+static int verify_shadow_insert(const char *mode) {
+ ke_shadow_init();assert(!g_ke_shadow[0].in_use);
+ HANDLE a=shadow_event(),b=shadow_event(),c=shadow_event();
+ assert(ke_shadow_insert(0x1000,a) && ke_shadow_insert(0x2000,b));ke_shadow_remove(0x1000);assert(!shadow_alive(a));
+ assert(ke_shadow_insert(0x2000,b) && !g_ke_shadow[0].in_use && g_ke_shadow[1].host_handle==b && shadow_alive(b));
+ assert(ke_shadow_insert(0x2000,c) && !shadow_alive(b) && shadow_alive(c) && !g_ke_shadow[0].in_use);
+ g_ke_shadow[0].references=71;g_ke_shadow[0].allocation=83;g_ke_shadow[0].name_length=19;
+ HANDLE fresh=shadow_event();assert(ke_shadow_insert(0x3000,fresh));assert(g_ke_shadow[0].references==71 && g_ke_shadow[0].allocation==83 && g_ke_shadow[0].name_length==19);
+ ke_shadow_remove(0x3000);assert(!shadow_alive(fresh));fresh=shadow_event();assert(ke_shadow_insert(0x4000,fresh) && g_ke_shadow[0].host_handle==fresh);
+ assert(ke_shadow_insert(0x4000,fresh));assert(!g_ke_shadow[0].references && !g_ke_shadow[0].allocation && !g_ke_shadow[0].name_length);
+ if(!strcmp(mode,"shadow_type")) {g_ke_shadow[0].object_type=1;ke_shadow_insert(0x4000,shadow_event());assert(0);}
+ shadow_empty();
+ for(unsigned i=0;i<KE_SHADOW_SIZE;i++)assert(ke_shadow_insert(0x10000+i*16,shadow_event()));
+ HANDLE tail=g_ke_shadow[KE_SHADOW_SIZE-1].host_handle;assert(ke_shadow_insert(0x10000+(KE_SHADOW_SIZE-1)*16,tail) && shadow_alive(tail));
+ HANDLE replaced=shadow_event();assert(ke_shadow_insert(0x10000+(KE_SHADOW_SIZE-1)*16,replaced) && !shadow_alive(tail));
+ HANDLE rejected=shadow_event();
+ assert(!ke_shadow_insert(0x900000,rejected) && !shadow_alive(rejected));
+ ke_shadow_remove(0x10000+17*16);fresh=shadow_event();
+ assert(ke_shadow_insert(0x900000,fresh) && g_ke_shadow[17].host_handle==fresh);
+ shadow_empty();HANDLE bad=shadow_event();assert(!ke_shadow_insert(0,bad) && !shadow_alive(bad));assert(!ke_shadow_insert(0x1000,NULL));
+ puts("shadow insertion semantic boundaries passed");return 0;
+}
+
+static int bound_basic(const char *mode){ke_shadow_init();assert(!ke_shadow_lookup(0x180000));
+ HANDLE a=shadow_event(),b=shadow_event();assert(ke_shadow_insert(0x180000,a));assert(ke_shadow_insert(0x180080,b));
+ ke_shadow_remove(0x180000);assert(ke_shadow_insert(0x180080,b));assert(!g_ke_shadow[0].in_use && g_ke_shadow[1].host_handle==b);
+ HANDLE c=shadow_event();assert(ke_shadow_insert(0x180100,c)&&g_ke_shadow[0].host_handle==c);ke_shadow_remove(0x180100);ke_shadow_remove(0x180080);
+ for(unsigned i=0;i<17;i++)assert(ke_shadow_insert(0x180000+i*128,shadow_event()));
+ HANDLE bad=shadow_event();assert(!ke_shadow_insert(0,bad)&&!shadow_alive(bad));assert(!ke_shadow_insert(0x380000,NULL));shadow_empty();puts("bound basic pass");return 0;}
+static int bound_restore(const char*mode,const char*path){assert(xbox_CheckpointBootstrapBegin());assert(checkpoint_clear_objects());
+ if(!strcmp(mode,"bound_load")){ke_initialize_header(0x1fff80,0,4,1);FILE*f=fopen(path,"rb");assert(f&&xbox_CheckpointLoadObjects(f,NULL,0));fclose(f);assert(g_ke_shadow[4095].guest_va==0x1fff80 && ke_shadow_lookup(0x1fff80));assert(checkpoint_clear_objects());xbox_CheckpointEnd();puts("bound cold sparse restore pass");return 0;}
+ _putenv_s("RECOMP_TITLE_KEVENTS","1");ke_initialize_header(0x26000,0,4,1);int type;HANDLE lazy=ke_guest_event(0x26000,&type);assert(lazy&&g_ke_shadow[0].in_use==2);assert(ke_guest_event(0x26000,&type)==lazy);
+ ke_initialize_header(0x26100,8,10,0);assert(!ke_guest_event(0x26100,&type));
+ assert(checkpoint_clear_objects());
+ for(unsigned i=0;i<4096;i++){uint32_t va=0x180000+i*128;ke_initialize_header(va,0,4,1);assert(ke_shadow_insert(va,shadow_event()));}
+ HANDLE failed=shadow_event();assert(!ke_shadow_insert(0x380000,failed)&&!shadow_alive(failed));
+ for(unsigned i=0;i<4095;i++)ke_shadow_remove(0x180000+i*128);
+ FILE*f=fopen(path,"wb");assert(f&&xbox_CheckpointWriteObjects(f));fclose(f);
+ assert(checkpoint_clear_objects());f=fopen(path,"rb");assert(f&&xbox_CheckpointLoadObjects(f,NULL,0));fclose(f);assert(g_ke_shadow[4095].guest_va==0x1fff80 && ke_shadow_lookup(0x1fff80));
+ HANDLE append=shadow_event();assert(ke_shadow_insert(0x380000,append)&&g_ke_shadow[0].host_handle==append);assert(checkpoint_clear_objects());xbox_CheckpointEnd();puts("bound lazy/full/hot sparse restore pass");return 0;}
+
 int main(int argc,char **argv) {
+    if(argc==2 && !strcmp(argv[1],"bound_basic"))return bound_basic(argv[1]);
+
+    if(argc==2 && (!strcmp(argv[1],"shadow_semantic") || !strcmp(argv[1],"shadow_type")))return verify_shadow_insert(argv[1]);
     assert(argc==7);setup(argv[2],argv[6],!strcmp(argv[1],"tls_owned_stack"));
+    if(!strcmp(argv[1],"bound_restore") || !strcmp(argv[1],"bound_load"))return bound_restore(argv[1],argv[3]);
     if(!strcmp(argv[1],"file_policy_bounds")) {verify_original_file_policy_bounds();cleanup();return 0;}
 
 
@@ -2947,3 +2996,34 @@ def test_original_file_policy_reuses_holes_and_retires_empty_tail(native_objects
         capture_output=True,text=True,errors='replace',timeout=60)
     assert result.returncode==0,result.stdout+result.stderr
     assert '[FILE POLICY] holes/unique/close-source/tail/full16384/overflow passed' in result.stderr
+
+
+def test_original_shadow_insert_preserves_identity_holes_and_handle_ownership(native_objects):
+    executable,_=native_objects
+    result=subprocess.run([str(executable),'shadow_semantic'],capture_output=True,text=True,errors='replace',timeout=35)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert 'shadow insertion semantic boundaries passed' in result.stdout
+
+
+def test_original_shadow_insert_rejects_typed_object_replacement(native_objects):
+    executable,_=native_objects
+    result=subprocess.run([str(executable),'shadow_type'],capture_output=True,text=True,errors='replace',timeout=35)
+    assert result.returncode==5,result.stdout+result.stderr
+    assert '[STOP] invalid generated guest continuation' in result.stderr
+
+
+
+def test_original_shadow_empty_prefix_and_hole_identity(native_objects):
+    executable,_=native_objects
+    result=subprocess.run([str(executable),'bound_basic'],capture_output=True,text=True,errors='replace',timeout=35)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert 'bound basic pass' in result.stdout
+
+
+def test_original_shadow_lazy_and_sparse_hot_cold_restore(native_objects,tmp_path):
+    executable,xbe=native_objects
+    archive=tmp_path/'sparse.objects'
+    for mode,marker in [('bound_restore','bound lazy/full/hot sparse restore pass'),('bound_load','bound cold sparse restore pass')]:
+        result=subprocess.run([str(executable),mode,str(xbe),str(archive),'-','-',str(tmp_path)],capture_output=True,text=True,errors='replace',timeout=60)
+        assert result.returncode==0,result.stdout+result.stderr
+        assert marker in result.stdout

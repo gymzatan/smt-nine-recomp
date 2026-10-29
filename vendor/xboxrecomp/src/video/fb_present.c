@@ -499,6 +499,7 @@ static void fb_screenshot(void) {
 static DWORD WINAPI fb_thread(LPVOID unused)
 {
     HWND hwnd,notice_window=NULL;
+    int notice_needs_hide=0;
     HDC hdc;
     BITMAPINFO bi;
     RECT r;
@@ -577,7 +578,11 @@ static DWORD WINAPI fb_thread(LPVOID unused)
                 SetWindowTextW(notice_window,GetTickCount64()<s_checkpoint_notice_until?s_checkpoint_notice:fb_text(0));
                 SetWindowPos(notice_window,HWND_TOP,display.left+8,display.bottom-28,
                     display.right-display.left>16?display.right-display.left-16:1,20,SWP_NOACTIVATE|SWP_SHOWWINDOW);
-            } else ShowWindow(notice_window,SW_HIDE);
+                notice_needs_hide=1;
+            } else if(notice_needs_hide) {
+                ShowWindow(notice_window,SW_HIDE);
+                notice_needs_hide=0;
+            }
         } else {
         RECT bars[4]={{0,0,client.right,display.top},{0,display.bottom,client.right,client.bottom},
             {0,display.top,display.left,display.bottom},{display.right,display.top,client.right,display.bottom}};

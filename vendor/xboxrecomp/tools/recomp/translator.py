@@ -2637,11 +2637,11 @@ class FunctionTranslator:
         lines.append(f"}}")
         lines.append(f"")
 
-        if self.continuations:
+        lines, cached_sse_leaf = self._cache_straightline_sse_leaf(
+            lines, instructions, blocks, frame_type, used_regs, used_xmm, start)
+        if self.continuations and not cached_sse_leaf:
             emitted_instructions = [insn for bb in blocks for insn in bb.instructions]
             lines = self._emit_continuation(lines, emitted_instructions, start, end)
-        lines = self._cache_straightline_sse_leaf(
-            lines, instructions, blocks, frame_type, used_regs, used_xmm, start)
         return "\n".join(lines)
 
     def _cache_fpu_block_gprs(self, statements, block, start, end):
@@ -2720,10 +2720,10 @@ class FunctionTranslator:
                        for i in instructions for op in i.operands)
                 or start in ENTRY_HOOKS or start in self.trace_functions
                 or start in self.force_returns):
-            return lines
-        # No guest call, branch, wait, loop or callback can observe intermediate
-        # register values. The original continuation leaf has site zero and is
-        # not a snapshot boundary. Keep its serialized locals unchanged.
+            return lines, False
+        # This existing successful class has no guest call, branch, wait or
+        # callback. Publish the same registers at RET; it needs no continuation
+        # frame, recovery dispatch or serialized locals.
         import re
         first_label = next(i for i, line in enumerate(lines)
                            if re.match(r"^loc_[0-9A-F]+:", line))
@@ -2737,15 +2737,11 @@ class FunctionTranslator:
         publish = " ".join(f"g_{r} = {names[r]};" for r in registers)
         for line in lines[first_label:]:
             line = pattern.sub(lambda m: names[m[0]], line)
-            # RET cleanup precedes publication; a continuation leave callback
-            # must see the completed architectural state.
-            if "recomp_cont_leave(&_cont_frame); return;" in line:
-                line = line.replace("recomp_cont_leave(&_cont_frame); return;",
-                                    publish + " recomp_cont_leave(&_cont_frame); return;")
-            elif "return;" in line:
+            # RET cleanup precedes architectural register publication.
+            if "return;" in line:
                 line = line.replace("return;", publish + " return;")
             rewritten.append(line)
-        return rewritten
+        return rewritten, True
 
     def _emit_continuation(self, lines, instructions, start, end):
         """Retain native frame locals and resume the same lifted dispatch sites."""

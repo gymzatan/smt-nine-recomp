@@ -347,6 +347,9 @@ HRESULT d3d8_states_apply_checked(void);
 /* Create sampler state from TSS and apply to slot */
 void    d3d8_states_apply_sampler(DWORD stage);
 
+/* raw==NULL queries shape eligibility only: return a possible replacement or NULL.
+ * Query callbacks must not read raw, write output dimensions, mark usage or log.
+ * The query return is not an image selected for rendering. */
 typedef const void *(*D3D8TextureAssetLookup)(const void *,size_t,unsigned,unsigned,unsigned *,unsigned *);
 void d3d8_SetTextureAssetLookup(D3D8TextureAssetLookup lookup);
 const void *d3d8_TextureAsset(const void *raw,size_t bytes,unsigned width,unsigned height,unsigned *host_width,unsigned *host_height);

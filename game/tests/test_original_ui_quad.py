@@ -529,3 +529,113 @@ int main(void){
     result=subprocess.run([shutil.which('cl'),'/nologo','/O2',str(c),'/Fe:'+str(exe)],cwd=tmp_path,capture_output=True,text=True)
     assert result.returncode==0,result.stdout+result.stderr
     subprocess.run([str(exe)],check=True,cwd=tmp_path)
+
+
+# Original provider lookup prefix is extracted in the same manner as quad_probe.
+_PROVIDER_QUERY_SUPPORTED = True
+_PROVIDER_MAIN = r'''
+static uint8_t title_data[1048576],title_copy[1048576],font_a[131072],font_b[131072],font_copy[131072];
+static uint8_t title_output[1],font_output_a[1],font_output_b[1];
+static FontPage fixture_pages[2];
+static void reset_provider(void) {
+    memset(title_data,0x31,sizeof title_data);memcpy(title_copy,title_data,sizeof title_data);
+    memset(font_a,0x42,sizeof font_a);memcpy(font_b,font_a,sizeof font_b);font_b[100]=0x43;
+    fixture_pages[0]=(FontPage){font_a,font_output_a,1024,1024,131072,4194304,0};
+    fixture_pages[1]=(FontPage){font_b,font_output_b,1536,1536,131072,9437184,0};
+    pages=fixture_pages;page_count=2;title_base=title_data;title_pixels=title_output;title_used=0;
+}
+static void normal_case(const char *label,const void *raw,size_t bytes,unsigned w,unsigned h,const void *want,unsigned want_w,unsigned want_h,int title,int a,int b) {
+    unsigned hw=71,hh=73;const void *got=lookup(raw,bytes,w,h,&hw,&hh);
+    assert(got==want && hw==want_w && hh==want_h);
+    assert(title_used==title && pages[0].used==a && pages[1].used==b);
+    printf("%s result=%s dims=%u,%u used=%d,%d,%d\n",label,got==title_output?"title":got==font_output_a?"font0":got==font_output_b?"font1":"none",hw,hh,title_used,pages[0].used,pages[1].used);
+}
+static void normal_checks(void) {
+    reset_provider();normal_case("title-match",title_copy,sizeof title_copy,512,512,title_output,512,512,1,0,0);
+    normal_case("title-repeat",title_copy,sizeof title_copy,512,512,title_output,512,512,1,0,0);
+    reset_provider();title_copy[0]^=1;normal_case("title-prefix-mismatch",title_copy,sizeof title_copy,512,512,NULL,71,73,0,0,0);
+    reset_provider();title_copy[100]^=1;normal_case("title-late-mismatch",title_copy,sizeof title_copy,512,512,NULL,71,73,0,0,0);
+    reset_provider();title_base=NULL;normal_case("title-absent",title_copy,sizeof title_copy,512,512,NULL,71,73,0,0,0);
+    reset_provider();memcpy(font_copy,font_b,sizeof font_copy);normal_case("font-later-page",font_copy,sizeof font_copy,512,512,font_output_b,1536,1536,0,0,1);
+    normal_case("font-repeat",font_copy,sizeof font_copy,512,512,font_output_b,1536,1536,0,0,1);
+    reset_provider();memcpy(font_copy,font_a,sizeof font_copy);normal_case("font-first-page",font_copy,sizeof font_copy,512,512,font_output_a,1024,1024,0,1,0);
+    reset_provider();fixture_pages[1].base=font_a;normal_case("font-first-wins",font_copy,sizeof font_copy,512,512,font_output_a,1024,1024,0,1,0);
+    reset_provider();font_copy[0]^=1;normal_case("font-prefix-mismatch",font_copy,sizeof font_copy,512,512,NULL,71,73,0,0,0);
+    reset_provider();memcpy(font_copy,font_a,sizeof font_copy);font_copy[100]^=2;normal_case("font-late-mismatch",font_copy,sizeof font_copy,512,512,NULL,71,73,0,0,0);
+    reset_provider();memcpy(font_copy,font_a,sizeof font_copy);page_count=0;normal_case("font-no-pages",font_copy,sizeof font_copy,512,512,NULL,71,73,0,0,0);
+    reset_provider();normal_case("font-size-reject",font_copy,131071,512,512,NULL,71,73,0,0,0);
+    normal_case("title-size-reject",title_copy,1048575,512,512,NULL,71,73,0,0,0);
+    normal_case("actual-1024x512-font-reject",font_copy,131072,1024,512,NULL,71,73,0,0,0);
+    normal_case("actual-1024x512-title-reject",title_copy,1048576,1024,512,NULL,71,73,0,0,0);
+    normal_case("height-reject",font_copy,131072,512,1024,NULL,71,73,0,0,0);
+}
+#if PROVIDER_QUERY_MODE
+static void query_case(const char *label,size_t bytes,unsigned w,unsigned h,const void *want) {
+    unsigned hw=71,hh=73;int t=title_used,a=pages[0].used,b=pages[1].used;
+    assert(lookup(NULL,bytes,w,h,&hw,&hh)==want);
+    assert(hw==71 && hh==73 && title_used==t && pages[0].used==a && pages[1].used==b);
+    assert(lookup(NULL,bytes,w,h,NULL,NULL)==want);
+    assert(title_used==t && pages[0].used==a && pages[1].used==b);
+    printf("%s query-result=%s unchanged\n",label,want?"candidate":"none");
+}
+static void query_checks(void) {
+    reset_provider();void *guard=VirtualAlloc(NULL,4096,MEM_RESERVE|MEM_COMMIT,PAGE_NOACCESS);assert(guard);
+    /* Neither raw(NULL) nor any original base/pixels may be read by query. */
+    title_base=guard;title_pixels=guard;fixture_pages[0].base=guard;fixture_pages[1].base=guard;
+    fixture_pages[0].pixels=guard;fixture_pages[1].pixels=guard;
+    title_used=0;pages[0].used=0;pages[1].used=0;
+    query_case("title",1048576,512,512,guard);
+    query_case("font",131072,512,512,guard);
+    title_used=7;pages[0].used=9;pages[1].used=11;
+    query_case("already-used-title",1048576,512,512,guard);
+    query_case("already-used-font",131072,512,512,guard);
+    query_case("actual-1024x512-font",131072,1024,512,NULL);
+    query_case("actual-1024x512-title",1048576,1024,512,NULL);
+    query_case("wrong-size",131071,512,512,NULL);
+    query_case("wrong-height",131072,512,1024,NULL);
+    title_base=NULL;query_case("no-title",1048576,512,512,NULL);
+    page_count=0;query_case("no-pages",131072,512,512,NULL);
+    assert(VirtualFree(guard,0,MEM_RELEASE));
+}
+#endif
+int main(int argc,char **argv) {
+    assert(argc==2);
+    if(!strcmp(argv[1],"normal")){normal_checks();return 0;}
+#if PROVIDER_QUERY_MODE
+    if(!strcmp(argv[1],"query")){query_checks();return 0;}
+#endif
+    assert(!"Unsupported provider probe mode");return 1;
+}
+'''
+
+@pytest.fixture(scope='module')
+def asset_provider_probe(tmp_path_factory):
+    compiler=shutil.which('cl')
+    assert compiler, 'requires the existing MSVC environment'
+    source=(Path(__file__).resolve().parents[1] / 'src/font_assets.c').read_text(encoding='utf-8')
+    helper=source[source.index('typedef struct FontPage'):source.index('int nine_title_assets_init')]
+    headers='#include <stdint.h>\n#include <stddef.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <assert.h>\n#include <windows.h>\n'
+    program=headers+'#define PROVIDER_QUERY_MODE '+str(int(_PROVIDER_QUERY_SUPPORTED))+'\n'+helper+_PROVIDER_MAIN.lstrip('\n')
+    work=tmp_path_factory.mktemp('asset_provider')
+    c=work/'provider_probe.c';exe=work/'provider_probe.exe';c.write_text(program,encoding='utf-8')
+    result=subprocess.run([compiler,'/nologo','/O2',str(c),'/Fe:'+str(exe)],cwd=work,capture_output=True,text=True)
+    (work/'compile.stdout').write_text(result.stdout);(work/'compile.stderr').write_text(result.stderr)
+    assert result.returncode==0,result.stdout+result.stderr
+    return exe
+
+def test_original_asset_provider_normal(asset_provider_probe):
+    result=subprocess.run([str(asset_provider_probe),'normal'],cwd=asset_provider_probe.parent,capture_output=True,text=True)
+    (asset_provider_probe.parent/'normal.stdout').write_text(result.stdout)
+    (asset_provider_probe.parent/'normal.stderr').write_text(result.stderr)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert len(result.stdout.splitlines())==17
+
+def test_original_asset_provider_query(asset_provider_probe):
+    if not _PROVIDER_QUERY_SUPPORTED:
+        pytest.skip('original before provider has no NULL-query contract')
+    result=subprocess.run([str(asset_provider_probe),'query'],cwd=asset_provider_probe.parent,capture_output=True,text=True)
+    (asset_provider_probe.parent/'query.stdout').write_text(result.stdout)
+    (asset_provider_probe.parent/'query.stderr').write_text(result.stderr)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert result.stderr==''
+    assert len(result.stdout.splitlines())==10

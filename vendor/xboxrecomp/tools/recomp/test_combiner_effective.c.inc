@@ -134,8 +134,14 @@ static void preparation_draw_check(const char *label,unsigned primitive,unsigned
     method(NV097_SET_COLOR_CLEAR_VALUE,0xff010203);method(NV097_CLEAR_SURFACE,0xf0);
     method(NV097_CLEAR_REPORT_VALUE,0);method(NV097_SET_ZPASS_PIXEL_COUNT_ENABLE,1);
     prep_batch_calls=prep_pixel_calls=prep_geometry_calls=prep_draw_calls=prep_geometry_draws=prep_stage_unpack_calls=prep_gs_cb_calls=prep_vs_cb_calls=0;
-    prep_border_unpack_calls=0;
-    prep_watch=1;raster_draw_for_test(primitive,0,count);nv2a_pb_checkpoint_publish();prep_watch=0;
+    prep_border_unpack_calls=0;prep_reverse_calls=0;
+    layout_query_calls=layout_output_draws=0;layout_watch=1;
+    prep_watch=1;raster_draw_for_test(primitive,0,count);nv2a_pb_checkpoint_publish();prep_watch=0;layout_watch=0;
+    if(d3d8_IsNativeVulkan()) {
+        unsigned expected=program&&!output?1:0;
+        if(layout_query_calls!=expected){fprintf(stderr,"[OUTPUT LAYOUT] %s getter=%u expected=%u\n",label,layout_query_calls,expected);exit(5);}
+        if(output)assert(layout_output_draws==prep_draw_calls);
+    }
     unsigned border_expected=0;
     if(d3d8_IsNativeVulkan())for(unsigned st=0;st<4;st++)border_expected+=s_hw_vk_textures[st]!=NULL;
     if(prep_border_unpack_calls!=border_expected) {
@@ -151,6 +157,9 @@ static void preparation_draw_check(const char *label,unsigned primitive,unsigned
         fprintf(stderr,"[PREPARATION COST] %s actual GS/PS %u/%u expected %u/%u finaldraws=%u\n",label,prep_geometry_calls,prep_pixel_calls,geometry,pixel,prep_draw_calls);exit(5);
     }
     unsigned active=s_gpu.rc.control&255;if(active>8)active=8;if(!active)active=1;
+    if(prep_reverse_calls!=(2*active+2)*prep_batch_calls) {
+        fprintf(stderr,"[DRAW STATE PREPARATION] %s reverse=%u expected=%u\n",label,prep_reverse_calls,(2*active+2)*prep_batch_calls);exit(5);
+    }
     if(prep_stage_unpack_calls!=active*2*prep_batch_calls) {
         fprintf(stderr,"[PREPARATION COST] %s actual stage-unpack %u expected %u\n",label,prep_stage_unpack_calls,active*2*prep_batch_calls);exit(5);
     }
@@ -177,10 +186,10 @@ static void verify_preparation_cost(void) {
         method(NV097_SET_COMBINER_COLOR_ICW+i*4,0x01200000);method(NV097_SET_COMBINER_ALPHA_ICW+i*4,0x11200000);
         method(NV097_SET_COMBINER_COLOR_OCW+i*4,0xc00);method(NV097_SET_COMBINER_ALPHA_OCW+i*4,0xc00);
     }
-    const unsigned stages[]={0,1,2,8};
-    for(unsigned i=0;i<4;i++) {
+    const unsigned stages[]={0,1,2,8,255};
+    for(unsigned i=0;i<5;i++) {
         unsigned n=stages[i];method(NV097_SET_COMBINER_CONTROL,0x1000|n);
-        preparation_draw_check("material",5,3,1,0,0,(int)(n?colors[n-1]:0xff000000));assert(s_gpu.zpass_count==samples);
+        preparation_draw_check("material",5,3,1,0,0,(int)(n?colors[(n>8?8:n)-1]:0xff000000));assert(s_gpu.zpass_count==samples);
     }
     method(NV097_SET_COMBINER_CONTROL,0x1001);method(NV097_SET_COMBINER_FACTOR0+7*4,0xff123456);
     preparation_draw_check("inactive-material",5,3,1,0,0,(int)colors[0]);
@@ -255,4 +264,187 @@ static void verify_sampler_preparation(void) {
     if(d3d8_IsNativeVulkan())assert(native_texture_mask==8);
     method(NV097_SET_ZPASS_PIXEL_COUNT_ENABLE,0);
     fprintf(stderr,"[SAMPLER PREPARATION] null/sparse/mixed/all/query/restore passed\n");
+}
+
+static void verify_texture_diagnostics(const char *mode) {
+    extern void nv2a_pb_scan(uint32_t,uint32_t);
+    if(!strcmp(mode,"legacy"))nv2a_pb_scan(0,0);
+    s_gpu.texs[0]=(Texture){0};s_gpu.texs[0].valid=1;s_gpu.texs[0].width=s_gpu.texs[0].height=1;
+    s_gpu.texs[0].color=0x12;s_gpu.texs[0].offset=0x80050000;
+    *(uint32_t *)(xbox_GetMemoryOffset()+0x80050000)=0xff123456;
+    diagnostic_probes=diagnostic_dump_count=0;
+    note_texture_use(nv2a_pb_scan_exec_enabled());
+    if(!strcmp(mode,"lateevery"))_putenv_s("RECOMP_TEX_DUMP_EVERY","2");
+    for(unsigned i=0;i<100;i++)note_texture_use(nv2a_pb_scan_exec_enabled());
+    if(!strcmp(mode,"default")) {
+        if(s_tex_use_count || diagnostic_probes || diagnostic_dump_count){fprintf(stderr,"[DIAGNOSTIC] default actual count=%d probes=%u dumps=%u expected0\n",s_tex_use_count,diagnostic_probes,diagnostic_dump_count);exit(5);}
+    } else {
+        assert(s_tex_use_count==1 && s_tex_use[0].batches==101 && diagnostic_probes==100);
+        unsigned repeated=(!strcmp(mode,"every2")||!strcmp(mode,"lateevery"))?40:0;
+        assert(diagnostic_dump_count==1+repeated && diagnostic_indices[0]==0);
+        for(unsigned i=0;i<repeated;i++)assert(diagnostic_indices[1+i]==1000+i);
+        for(unsigned i=1;i<65;i++){s_gpu.texs[0].offset=0x80050000+i*4;note_texture_use(nv2a_pb_scan_exec_enabled());}
+        assert(s_tex_use_count==64 && diagnostic_dump_count==64+repeated);
+        for(unsigned i=0;i<64;i++)assert(s_tex_use[i].offset==0x80050000+i*4);
+        s_gpu.texs[0].offset=0x80050000;note_texture_use(nv2a_pb_scan_exec_enabled());assert(s_tex_use[0].batches==102);
+        unsigned before=diagnostic_probes;s_gpu.texs[0].offset=0x80050000+65*4;note_texture_use(nv2a_pb_scan_exec_enabled());assert(diagnostic_probes==before+64);
+    }
+    unsigned legacy=!strcmp(mode,"legacy");
+    s_gpu.blend_npairs=1;s_gpu.blend_pairs[0]=0x12345678;s_gpu.xf_nfmt=1;s_gpu.xf_fmt[0]=0x12345678;
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_BLEND_ENABLE,1);
+    raster_draw_for_test(5,0,3);
+    assert(s_gpu.blend_npairs==(legacy?2:1));assert(s_gpu.xf_nfmt==(legacy?3:1));
+    FILE *history=tmpfile();assert(history);assert(nv2a_gpu_save_checkpoint(history));
+    s_gpu.blend_npairs=0;s_gpu.xf_nfmt=0;rewind(history);assert(nv2a_gpu_load_checkpoint(history));fclose(history);
+    assert(s_gpu.blend_pairs[0]==0x12345678 && s_gpu.xf_fmt[0]==0x12345678);
+    assert(s_gpu.blend_npairs==(legacy?2:1));assert(s_gpu.xf_nfmt==(legacy?3:1));
+    fprintf(stderr,"[DIAGNOSTIC] %s count=%d probes=%u dumpAttempts=%u history/restore passed\n",mode,s_tex_use_count,diagnostic_probes,diagnostic_dump_count);
+}
+static void verify_dxt_block_work(void) {
+    Texture t={0};t.valid=1;t.width=t.height=4;t.addr_u=t.addr_v=3;t.offset=0x80060000;
+    uint8_t *mem=(uint8_t *)xbox_GetMemoryOffset();unsigned fills=0;
+    for(unsigned fmt=0;fmt<3;fmt++) {
+        t.color=(uint32_t[]){0xc,0xe,0xf}[fmt];
+        for(unsigned rewrite=0;rewrite<5;rewrite++) {
+            uint8_t *b=mem+t.offset;memset(b,0,16);unsigned c=fmt?8:0;
+            b[c]=0;b[c+1]=rewrite&1?0xf8:0x07;b[c+2]=0x1f;b[c+3]=0;
+            if(fmt==1)memset(b,0xff,8);if(fmt==2){b[0]=255;b[1]=0;}
+            uint32_t expect=0xff000000;assert(d3d8_dxt_decode_texel(b,t.color,0,0,4,&expect));
+            dxt_palette_work=0;
+            for(unsigned y=0;y<4;y++)for(unsigned x=0;x<4;x++){uint32_t actual=0;assert(sample_tex_value(&t,0,x,y,0,0,&actual,NULL));assert(actual==expect);}
+            if(dxt_palette_work!=1){fprintf(stderr,"[DXT BLOCK] actual palette work=%u expected1\n",dxt_palette_work);exit(5);}++fills;
+            uint32_t actual;dxt_palette_work=0;assert(sample_tex_value(&t,0,0,0,0,0,&actual,NULL));assert(!dxt_palette_work);
+            t.addr_u=4;t.border_color=0xffabcdef;assert(sample_tex_value(&t,0,UINT32_MAX,0,0,0,&actual,NULL)&&actual==t.border_color);assert(!dxt_palette_work);t.addr_u=3;
+        }
+    }
+    /* Same-slot address collision must displace/reload the original raw-key entry. */
+    uint32_t bb=d3d8_format_dxt_block_bytes(t.color);uintptr_t key=(uintptr_t)(mem+t.offset);
+    size_t slot=((key/bb)^(key>>16))&4095;uint32_t other=t.offset+16;
+    for(;other<t.offset+0x200000;other+=16){uintptr_t k=(uintptr_t)(mem+other);if((((k/bb)^(k>>16))&4095)==slot)break;}
+    assert(other<t.offset+0x200000);memcpy(mem+other,mem+t.offset,16);
+    uint32_t first;assert(sample_tex_value(&t,0,0,0,0,0,&first,NULL));
+    t.offset=other;dxt_palette_work=0;uint32_t actual;assert(sample_tex_value(&t,0,0,0,0,0,&actual,NULL)&&actual==first&&dxt_palette_work==1);
+    t.offset=0x80060000;dxt_palette_work=0;assert(sample_tex_value(&t,0,0,0,0,0,&actual,NULL)&&actual==first&&dxt_palette_work==1);
+    t.width=t.height=3;assert(sample_tex_value(&t,0,2,2,0,0,&actual,NULL)&&actual==first);
+    /* Actual existing native upload/software fragment and original draw publication. */
+    seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_TRANSFORM_EXECUTION_MODE,0);method(NV097_SET_CONTEXT_DMA_A,0x100);
+    method(NV097_SET_TEXTURE_OFFSET,0x80000);method(NV097_SET_TEXTURE_CONTROL0,NV_PGRAPH_TEXCTL0_0_ENABLE);
+    method(NV097_SET_TEXTURE_ADDRESS,3|(3<<8));method(NV097_SET_TEXTURE_FILTER,0x01010000);
+    method(NV097_SET_SHADER_STAGE_PROGRAM,1);method(NV097_SET_COMBINER_COLOR_ICW,0x08200000);method(NV097_SET_COMBINER_ALPHA_ICW,0x18200000);
+    float coordinates[3][4]={{.5f,.5f,0,1},{.5f,.5f,0,1},{.5f,.5f,0,1}};
+    memcpy(mem+0x80050000u,coordinates,sizeof coordinates);method(NV097_SET_VERTEX_DATA_ARRAY_OFFSET+9*4,0x50000);method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT+9*4,0x1042);
+    for(unsigned f=0;f<3;f++)for(unsigned rewrite=0;rewrite<2;rewrite++) {
+        uint32_t fmt=(uint32_t[]){0xc,0xe,0xf}[f];uint8_t *b=mem+0x80080000u;memset(b,0,16);unsigned c=f?8:0;
+        b[c+1]=rewrite?0xf8:0x07;b[c]=rewrite?0:0xe0;if(f==1)memset(b,0xff,8);if(f==2)b[0]=255;
+        method(NV097_SET_TEXTURE_FORMAT,(fmt<<8)|(1<<16)|(2<<20)|(2<<24));
+        method(NV097_CLEAR_SURFACE,0xf0);raster_draw_for_test(5,0,3);nv2a_pb_checkpoint_publish();
+        uint32_t expected=rewrite?0xffff0000:0xff00ff00;
+        assert(BRIDGE_MEM32(s_gpu.color_base)==expected);
+    }
+    fprintf(stderr,"[DXT BLOCK] %u format/rewrite fills one palette, hits/border/edge/collision and original native/software pixels passed\n",fills);
+}
+
+static HwVertexBatch *lru_append(unsigned identity,unsigned selected,unsigned visits) {
+    s_gpu.idx_count=6;s_gpu.inline_active=0;
+    for(unsigned i=0;i<6;i++)s_gpu.idx[i]=identity*8+i;
+    int hit=-1;lru_selection_visits=0;HwVertexBatch *entry=hw_vertex_batch_begin(0,0,&hit);
+    HwVertexBatch *expected=&s_hw_vertex_batches[selected/HW_VERTEX_CACHE_WAYS][selected%HW_VERTEX_CACHE_WAYS];
+    if(entry!=expected || hit || lru_selection_visits!=visits){fprintf(stderr,"[VERTEX LRU] identity=%u selected=%td expected=%u visits=%u expected=%u hit=%d\n",identity,entry-&s_hw_vertex_batches[0][0],selected,lru_selection_visits,visits,hit);exit(5);}
+    memset(entry->data+6*4,0,6*4);entry->valid=1;return entry;
+}
+static void verify_original_vertex_lru_selection(void) {
+    hw_free_vertex_batches();
+    lru_append(1,0,1); /* firstzero wins the original unsigned minimum tie. */
+    hw_free_vertex_batches();
+    for(unsigned i=0;i<123;i++)lru_append(i+1,i,i+1);
+    lru_append(500,123,124); /* middle firstempty, laterzeros must not replace it. */
+    hw_free_vertex_batches();
+    for(unsigned i=0;i<512;i++)lru_append(i+1,i,i+1);
+    for(unsigned i=0;i<512;i++)s_hw_vertex_batches[i/4][i%4].used=100+i;
+    s_hw_vertex_batches[50][0].used=2;s_hw_vertex_batches[25][0].used=3;
+    lru_append(600,200,512); /* full unsignedLRU still scans all. */
+    for(unsigned i=0;i<512;i++)s_hw_vertex_batches[i/4][i%4].used=100+i;
+    s_hw_vertex_batches[1][1].used=2;s_hw_vertex_batches[50][0].used=2;
+    lru_append(601,5,512); /* strictless retains earliest equalminimum. */
+    /* Clockwrap can create used0 with live data: preserve original choice. */
+    s_hw_vertex_cache_clock=UINT64_MAX;
+    int hit=0;lru_selection_visits=0;HwVertexBatch *entry=hw_vertex_batch_begin(0,0,&hit);
+    assert(hit && entry==&s_hw_vertex_batches[1][1] && !entry->used && !lru_selection_visits);
+    lru_append(602,5,6);
+    hw_free_vertex_batches();assert(!s_hw_vertex_batches[0][0].used);
+    fprintf(stderr,"[VERTEX LRU] cold/middle/full/tie/wrap/discard original selection and exact visit bounds passed\n");
+}
+
+static void cold_dxt_read(HwTexture *entry,const Texture *source,uint32_t *pixels) {
+    unsigned faces=source->cube?6:1,width=source->width,height=source->height;
+    if(entry->native)assert(nvk_image_read(entry->native,pixels,width*4));
+    else {
+        ID3D11Texture2D *image=source->cube?((D3D8CubeTexture *)entry->texture)->d3d11_texture:((D3D8Texture *)entry->texture)->d3d11_texture;
+        D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(image,&desc);desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;desc.MiscFlags=0;
+        ID3D11Texture2D *staging=NULL;hw_check(ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&staging),"coldDXTtest staging");
+        ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();ID3D11DeviceContext_CopyResource(ctx,(ID3D11Resource *)staging,(ID3D11Resource *)image);
+        for(unsigned face=0;face<faces;face++) {
+            D3D11_MAPPED_SUBRESOURCE mapped;hw_check(ID3D11DeviceContext_Map(ctx,(ID3D11Resource *)staging,face, D3D11_MAP_READ,0,&mapped),"coldDXTtest read");
+            for(unsigned y=0;y<height;y++)memcpy(pixels+((size_t)face*height+y)*width,(uint8_t *)mapped.pData+(size_t)y*mapped.RowPitch,width*4);
+            ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource *)staging,face);
+        }
+        ID3D11Texture2D_Release(staging);
+    }
+}
+static void verify_cold_dxt_upload(void) {
+    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();s_gpu.rc.stage_program=1;
+    uint8_t *memory=(uint8_t *)xbox_GetMemoryOffset();unsigned cases=0;
+    for(unsigned format=0;format<3;format++)for(unsigned cube=0;cube<2;cube++)for(unsigned edge=0;edge<2;edge++) {
+        Texture texture={0};texture.valid=1;texture.width=edge?5:cube?16:8;texture.height=edge?(cube?5:3):(cube?16:4);
+        texture.levels=3;texture.cube=cube;texture.color=(uint32_t[]){0xc,0xe,0xf}[format];texture.offset=0x80090000u+cases*0x10000;texture.addr_u=texture.addr_v=3;texture.dma_format=2u<<4;
+        unsigned stride=tex_face_stride(&texture),faces=cube?6:1,bb=d3d8_format_dxt_block_bytes(texture.color),bw=(texture.width+3)/4,bh=(texture.height+3)/4;
+        uint8_t *raw=memory+texture.offset;memset(raw,0xa5,stride*faces);
+        for(unsigned face=0;face<faces;face++)for(unsigned block=0;block<bw*bh;block++) {
+            uint8_t *b=raw+face*stride+block*bb;memset(b,0,bb);unsigned c=format?8:0;
+            b[c]=0;b[c+1]=0xf8;b[c+2]=0x1f;b[c+3]=0;
+            uint32_t selectors=0x1b1b1b1b ^(face*0x55555555u)^(block*0x01010101u);memcpy(b+c+4,&selectors,4);
+            if(format==1)for(unsigned i=0;i<8;i++)b[i]=(uint8_t)(0x10*i+face);
+            if(format==2){b[0]=face&1?0:255;b[1]=face&1?255:0;for(unsigned i=2;i<8;i++)b[i]=(uint8_t)(i*37+block);}
+        }
+        s_gpu.texs[0]=texture;
+        for(unsigned phase=0;phase<3;phase++) {
+            if(phase==2)raw[(cube?5:0)*stride+(format?8:0)+1]^=0xff; /* original guardedCPUwrite invalidates */
+            uint64_t uploads=s_gpu.hardware_texture_uploads;cold_upload_samples=0;cold_upload_watch=1;
+            hw_enter();HwColor *target=hw_color_target();hw_texture_bind(0,target);hw_leave();cold_upload_watch=0;
+            if(cold_upload_samples){fprintf(stderr,"[COLD DXT] fmt=%x cube=%u edge=%u phase=%u sampler=%u expected0\n",texture.color,cube,edge,phase,cold_upload_samples);exit(5);}
+            assert(s_gpu.hardware_texture_uploads==uploads+(phase!=1));
+            HwTexture *entry=s_hw_textures;while(entry && entry->identity.offset!=texture.offset)entry=entry->next;assert(entry && entry->content_valid && !memcmp(entry->raw,raw,stride*faces));
+            size_t count=(size_t)faces*texture.width*texture.height;uint32_t *pixels=malloc(count*4+32);assert(pixels);memset(pixels,0xcc,count*4+32);cold_dxt_read(entry,&texture,pixels);
+            for(unsigned face=0;face<faces;face++)for(unsigned y=0;y<texture.height;y++)for(unsigned x=0;x<texture.width;x++) {
+                uint32_t expected;assert(sample_tex(&texture,face*stride,x,y,&expected));assert(pixels[((size_t)face*texture.height+y)*texture.width+x]==expected);
+            }
+            for(unsigned i=0;i<32;i++)assert(((uint8_t *)pixels)[count*4+i]==0xcc);free(pixels);
+        }
+        ++cases;
+    }
+    /* Reuse the existing actualdraw path after testing upload-only cube/edge tuples. */
+    verify_dxt_block_work();
+    fprintf(stderr,"[COLD DXT] %u2D/cube regular/oddedge cases allfaces/mipsstride/rawrewrite/stable guards passed\n",cases);
+}
+
+static HwColor *owner_color(uint32_t address) {method(NV097_SET_SURFACE_COLOR_OFFSET,address);return hw_color(0);}
+static void verify_owner_mark_work(void) {
+    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();hw_enter();
+    HwColor *a=owner_color(0x20000),*b=owner_color(0x20020),*c=owner_color(0xb0000),*marked=owner_color(0x20040);
+    a->dirty=b->dirty=c->dirty=marked->dirty=0;
+    a->upload_needed=b->upload_needed=c->upload_needed=0;marked->upload_needed=1;
+    owner_mark_checks=0;hw_begin_color_write(a);
+    if(owner_mark_checks!=2){fprintf(stderr,"[OWNER MARK] actual rangechecks=%u expected2\n",owner_mark_checks);exit(5);}
+    assert(!a->upload_needed && b->upload_needed && !c->upload_needed && marked->upload_needed);
+    owner_mark_checks=0;hw_begin_color_write(a);assert(owner_mark_checks==1); /* only unmarkeddisjoint stilltested */
+    /* Originalupload clearsaliasflag; next actualwrite invalidatesit again. */
+    hw_upload_color(b,0);assert(!b->upload_needed);owner_mark_checks=0;hw_begin_color_write(a);assert(owner_mark_checks==2 && b->upload_needed);
+    /* Depthpublication still runsbeforecolor-onlymark optimization. */
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0x20000);method(NV097_SET_SURFACE_ZETA_OFFSET,0x20000);
+    HwDepth *depth=hw_depth();assert(depth);hw_upload_depth(depth);depth->dirty=1;
+    uint64_t reads=depth_transfer_test_reads;hw_begin_color_write(a);assert(!depth->dirty && depth->upload_needed && depth_transfer_test_reads==reads+1);
+    hw_leave();
+    /* Existing real alias/sampler consumer validates pixels and protections afterwrite/rebind. */
+    verify_clean_texture_overlap();
+    fprintf(stderr,"[OWNER MARK] marked/unmarked/self/disjoint,clearthenremark,depthpublication and originalaliaspixels passed\n");
 }

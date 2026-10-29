@@ -36,7 +36,7 @@ def test_decoded_port_instruction_executes(opcode, read, width, immediate):
     program = f'''
 #include "{header.as_posix()}"
 #include <assert.h>
-RECOMP_TLS uint32_t g_eax, g_edx;
+RECOMP_TLS RecompGprState g_gpr;
 #define eax g_eax
 #define edx g_edx
 static unsigned calls;

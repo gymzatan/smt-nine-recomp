@@ -128,6 +128,8 @@ void mcpx_ac97_frame(void)
         unsigned elapsed=NUM_SAMPLES_PER_FRAME*4;
         bool holding=index==1 && (r->sr&1) && s_ac97.analog_bup_last;
         if (!(r->cr&1) || ((r->sr&1) && !holding)) continue;
+        extern MCPXAPUState *g_apu_state;
+        if (holding && g_apu_state->monitor.point!=MCPX_APU_DEBUG_MON_AC97) continue;
         while (elapsed && (!(r->sr&1) || holding)) {
             if (!holding && !r->bd_valid) fetch_bd(r);
             if (!holding && !r->picb) {

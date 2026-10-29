@@ -318,7 +318,8 @@ static CRITICAL_SECTION* xbox_cs_shadow(PRTL_CRITICAL_SECTION guest)
  * pointer does not. */
 extern ptrdiff_t g_xbox_mem_offset;
 
-extern RECOMP_TLS uint32_t g_esp;
+#include "recomp_gpr_state.h"
+extern RECOMP_TLS RecompGprState g_gpr;
 extern uint32_t g_xbox_code_lo, g_xbox_code_hi;
 
 /* A guest backtrace, printed where the guest is standing.
@@ -349,7 +350,6 @@ static void xbox_guest_backtrace(int depth)
 }
 
 static LONG g_cs_contention_reports;
-static LONG g_cs_enters, g_cs_leaves;
 
 /* Which CRT lock is this?
  *
@@ -477,7 +477,6 @@ VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSectio
     CRITICAL_SECTION* cs = xbox_cs_shadow(CriticalSection);
     if (!cs)
         return;
-    InterlockedIncrement(&g_cs_enters);
     crt_lock_trace("take", CriticalSection);
     if (TryEnterCriticalSection(cs)) {
         xbox_cs_note_owner(cs);
@@ -509,8 +508,6 @@ VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSectio
                                 " 0x%08X (depth %ld)\n",
                         slot->owner_tid, slot->owner_site, slot->depth);
         }
-        fprintf(stderr, "  [CS] enters=%ld leaves=%ld (outstanding %ld)\n",
-                g_cs_enters, g_cs_leaves, g_cs_enters - g_cs_leaves);
         xbox_guest_backtrace(10);
         fflush(stderr);
     }
@@ -530,7 +527,6 @@ VOID __stdcall xbox_RtlLeaveCriticalSection(PRTL_CRITICAL_SECTION CriticalSectio
 {
     CRITICAL_SECTION* cs = xbox_cs_shadow(CriticalSection);
     if (cs) {
-        InterlockedIncrement(&g_cs_leaves);
         crt_lock_trace("drop", CriticalSection);
         xbox_cs_clear_owner(cs);
         LeaveCriticalSection(cs);

@@ -592,13 +592,17 @@ void mcpx_apu_vp_write(void *opaque, hwaddr addr, uint64_t val,
  * SGE data pointer resolution
  * ============================================================ */
 
-static hwaddr get_data_ptr(hwaddr sge_base, unsigned int max_sge, uint32_t addr)
+static hwaddr get_data_ptr(hwaddr sge_base, unsigned int max_sge, uint32_t addr,
+                           uint32_t *current_entry, uint32_t *current_base)
 {
     unsigned int entry = addr / TARGET_PAGE_SIZE;
     assert(entry <= max_sge);
-    uint32_t prd_address =
-        ldl_le_phys(address_space_memory, sge_base + entry * 4 * 2);
-    return prd_address + addr % TARGET_PAGE_SIZE;
+    if (entry != *current_entry) {
+        *current_base =
+            ldl_le_phys(address_space_memory, sge_base + entry * 4 * 2);
+        *current_entry = entry;
+    }
+    return *current_base + addr % TARGET_PAGE_SIZE;
 }
 
 /* ============================================================
@@ -876,6 +880,8 @@ static int voice_get_samples(MCPXAPUState *d, uint32_t v, float samples[][2],
         exit(5);
     }
 
+    uint32_t current_sge_entry = UINT32_MAX;
+    uint32_t current_sge_base = 0;
     int sample_count = 0;
     for (; (sample_count < num_samples_requested) && (cbo <= ebo);
          sample_count++, cbo++) {
@@ -893,7 +899,8 @@ static int voice_get_samples(MCPXAPUState *d, uint32_t v, float samples[][2],
                     for (unsigned int word_index = 0;
                          word_index < (9 * samples_per_block); word_index++) {
                         hwaddr addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR],
-                                                   0xFFFFFFFF, linear_addr);
+                                                   0xFFFFFFFF, linear_addr,
+                                                   &current_sge_entry, &current_sge_base);
                         adpcm_block[word_index] =
                             ldl_le_phys(address_space_memory, addr);
                         linear_addr += 4;
@@ -917,7 +924,8 @@ static int voice_get_samples(MCPXAPUState *d, uint32_t v, float samples[][2],
             } else {
                 uint32_t linear_addr = ba + cbo * (uint32_t)block_size;
                 addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF,
-                                    linear_addr);
+                                    linear_addr, &current_sge_entry,
+                                    &current_sge_base);
             }
 
             for (unsigned int channel = 0; channel < channels; channel++) {

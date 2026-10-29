@@ -53,8 +53,9 @@
  * xbox_memory_layout.h and must match the definitions there -- a plain extern
  * here binds to the TLS template rather than the calling thread's copy, which
  * reads as every register being zero. */
-extern RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_esp;
-extern RECOMP_TLS uint32_t g_ebx, g_esi, g_edi, g_ebp;
+#include "recomp_gpr_state.h"
+extern RECOMP_TLS RecompGprState g_gpr;
+extern RECOMP_TLS uint32_t g_ebp;
 extern uint32_t g_xbox_code_lo, g_xbox_code_hi;
 extern RECOMP_TLS uint32_t g_seh_ebp;
 extern ptrdiff_t g_xbox_mem_offset;
@@ -1802,10 +1803,15 @@ static uint32_t ke_call_guest(uint32_t routine,const uint32_t *args,unsigned cou
     return g_eax;
 }
 
-int xbox_ThreadApcsEnabled(void)
+static uint32_t ke_apc_enabled_thread(void)
 {
     uint32_t thread=t_guest_thread?ke_current_thread():0;
-    return thread && BRIDGE_MEM8(thread+0x4b);
+    return thread && BRIDGE_MEM8(thread+0x4b)?thread:0;
+}
+
+int xbox_ThreadApcsEnabled(void)
+{
+    return ke_apc_enabled_thread()!=0;
 }
 
 #define GUEST_REGISTER_CONT_LOCALS(object,prefix) \
@@ -1906,9 +1912,10 @@ int xbox_DeliverThreadApcs(BOOLEAN user_apcs)
     int recovering=recomp_cont_recovering(KERNEL_CONT_APC);
     uint32_t thread=0;
     if(!recovering) {
-        if(!xbox_ThreadApcsEnabled())return 0;
+        thread=ke_apc_enabled_thread();
+        if(!thread)return 0;
         if(xbox_CurrentIrql()>=APC_LEVEL || !xbox_CpuInterruptFlag())return 0;
-        thread=ke_current_thread();
+        if(!guest_cpu_is_held())thread=ke_current_thread();
         if(!thread || !BRIDGE_MEM8(thread+0x4b))return 0;
         if(!BRIDGE_MEM8(thread+0x49) && (!user_apcs || BRIDGE_MEM32(thread+0x3c)==thread+0x3c))return 0;
     }
@@ -7772,6 +7779,7 @@ typedef struct {
     uint32_t name_parent,name_address,name_length,name_attributes,namespace_root,path_rule;
 } KE_SHADOW_SLOT;
 static KE_SHADOW_SLOT g_ke_shadow[KE_SHADOW_SIZE];
+static unsigned g_ke_shadow_used_end;
 static KE_SHADOW_SLOT *ke_object_slot(uint32_t);
 static CRITICAL_SECTION g_ke_shadow_cs;
 static int g_ke_shadow_init;
@@ -7783,6 +7791,7 @@ static void ke_shadow_init(void)
     InitializeCriticalSection(&g_ke_shadow_cs);
     /* Wipe any stale pointers from a prior lifecycle (defensive). */
     memset(g_ke_shadow, 0, sizeof(g_ke_shadow));
+    g_ke_shadow_used_end = 0;
     g_ke_shadow_init = 1;
 }
 
@@ -7790,7 +7799,7 @@ static void ke_shadow_init(void)
  * the same guest_va (closing the old handle and inserting the new one). */
 static int ke_shadow_insert(uint32_t guest_va, HANDLE host)
 {
-    uint32_t i;
+    uint32_t i, first_free = KE_SHADOW_SIZE;
 
     if (!guest_va || !host) {
         if (host) CloseHandle(host);
@@ -7801,27 +7810,31 @@ static int ke_shadow_insert(uint32_t guest_va, HANDLE host)
 
     EnterCriticalSection(&g_ke_shadow_cs);
 
-    /* Reuse an existing slot for this VA, if present. */
-    for (i = 0; i < KE_SHADOW_SIZE; i++) {
-        if (g_ke_shadow[i].in_use && g_ke_shadow[i].guest_va == guest_va) {
-            if (g_ke_shadow[i].host_handle && g_ke_shadow[i].host_handle != host)
-                CloseHandle(g_ke_shadow[i].host_handle);
-            if(g_ke_shadow[i].object_type)recomp_cont_invalid();
-            g_ke_shadow[i]=(KE_SHADOW_SLOT){guest_va,host,1};
-            LeaveCriticalSection(&g_ke_shadow_cs);
-            return 1;
+    /* Remember only the first hole, then finish the original identity search. */
+    for (i = 0; i < g_ke_shadow_used_end; i++) {
+        if (g_ke_shadow[i].in_use) {
+            if (g_ke_shadow[i].guest_va == guest_va) goto replace_existing;
+        } else {
+            first_free = i;
+            break;
         }
     }
+    for (++i; i < g_ke_shadow_used_end; i++) {
+        if (g_ke_shadow[i].in_use && g_ke_shadow[i].guest_va == guest_va)
+            goto replace_existing;
+    }
 
-    /* Otherwise find a free slot. */
-    for (i = 0; i < KE_SHADOW_SIZE; i++) {
-        if (!g_ke_shadow[i].in_use) {
+    /* Otherwise use the original first free slot. */
+    if (first_free == KE_SHADOW_SIZE && g_ke_shadow_used_end < KE_SHADOW_SIZE)
+        first_free = g_ke_shadow_used_end;
+    i = first_free;
+    if (i < KE_SHADOW_SIZE) {
             g_ke_shadow[i].in_use      = 1;
             g_ke_shadow[i].guest_va    = guest_va;
             g_ke_shadow[i].host_handle = host;
+            if (i >= g_ke_shadow_used_end) g_ke_shadow_used_end = i + 1;
             LeaveCriticalSection(&g_ke_shadow_cs);
             return 1;
-        }
     }
 
     /* Table full -- log and drop the new object. The caller's subsequent
@@ -7831,6 +7844,14 @@ static int ke_shadow_insert(uint32_t guest_va, HANDLE host)
     LeaveCriticalSection(&g_ke_shadow_cs);
     CloseHandle(host);
     return 0;
+
+replace_existing:
+            if (g_ke_shadow[i].host_handle && g_ke_shadow[i].host_handle != host)
+                CloseHandle(g_ke_shadow[i].host_handle);
+            if(g_ke_shadow[i].object_type)recomp_cont_invalid();
+            g_ke_shadow[i]=(KE_SHADOW_SLOT){guest_va,host,1};
+            LeaveCriticalSection(&g_ke_shadow_cs);
+            return 1;
 }
 
 /* Look up the host HANDLE for a guest object VA. Returns NULL if not found. */
@@ -7845,7 +7866,7 @@ static HANDLE ke_shadow_lookup(uint32_t guest_va)
     ke_shadow_init();
 
     EnterCriticalSection(&g_ke_shadow_cs);
-    for (i = 0; i < KE_SHADOW_SIZE; i++) {
+    for (i = 0; i < g_ke_shadow_used_end; i++) {
         if (g_ke_shadow[i].in_use && g_ke_shadow[i].guest_va == guest_va) {
             h = g_ke_shadow[i].host_handle;
             break;
@@ -7866,7 +7887,7 @@ static void ke_shadow_remove(uint32_t guest_va)
     ke_shadow_init();
 
     EnterCriticalSection(&g_ke_shadow_cs);
-    for (i = 0; i < KE_SHADOW_SIZE; i++) {
+    for (i = 0; i < g_ke_shadow_used_end; i++) {
         if (g_ke_shadow[i].in_use && g_ke_shadow[i].guest_va == guest_va) {
             if (g_ke_shadow[i].host_handle)
                 CloseHandle(g_ke_shadow[i].host_handle);
@@ -7911,7 +7932,7 @@ static HANDLE ke_guest_event(uint32_t guest_va, int *type)
     }
     ke_shadow_init();
     EnterCriticalSection(&g_ke_shadow_cs);
-    for (i = 0; i < KE_SHADOW_SIZE; i++) {
+    for (i = 0; i < g_ke_shadow_used_end; i++) {
         if (g_ke_shadow[i].in_use && g_ke_shadow[i].guest_va == guest_va) {
             h = g_ke_shadow[i].host_handle;
             if (g_ke_shadow[i].in_use == 2) *type |= KE_EVENT_TITLE_HEADER;
@@ -7930,6 +7951,7 @@ static HANDLE ke_guest_event(uint32_t guest_va, int *type)
                 g_ke_shadow[i].in_use      = 2;
                 g_ke_shadow[i].guest_va    = guest_va;
                 g_ke_shadow[i].host_handle = h;
+                if (i >= g_ke_shadow_used_end) g_ke_shadow_used_end = i + 1;
             }
             break;
         }
@@ -11397,7 +11419,7 @@ static uint32_t ke_completion_for_handle(HANDLE handle)
 {
     if(!handle || (!checkpoint_native.compare && !checkpoint_native_init()))return 0;
     ke_shadow_init();EnterCriticalSection(&g_ke_shadow_cs);uint32_t queue=0;
-    for(unsigned i=0;i<KE_SHADOW_SIZE;i++)if(g_ke_shadow[i].in_use &&
+    for(unsigned i=0;i<g_ke_shadow_used_end;i++)if(g_ke_shadow[i].in_use &&
         BRIDGE_MEM8(g_ke_shadow[i].guest_va)==4 && checkpoint_native.compare(handle,g_ke_shadow[i].host_handle)==0) {
         queue=g_ke_shadow[i].guest_va;break;
     }
@@ -11406,7 +11428,7 @@ static uint32_t ke_completion_for_handle(HANDLE handle)
 static void ke_mark_owned_queue(uint32_t queue)
 {
     EnterCriticalSection(&g_ke_shadow_cs);
-    for(unsigned i=0;i<KE_SHADOW_SIZE;i++)if(g_ke_shadow[i].in_use && g_ke_shadow[i].guest_va==queue) {
+    for(unsigned i=0;i<g_ke_shadow_used_end;i++)if(g_ke_shadow[i].in_use && g_ke_shadow[i].guest_va==queue) {
         g_ke_shadow[i].in_use=3;g_ke_shadow[i].object_type=XBOX_KERNEL_DATA_BASE+KDATA_IO_COMPLETION_TYPE;
         g_ke_shadow[i].allocation=queue;
     }
@@ -11419,7 +11441,7 @@ static void ke_maybe_release_queue(uint32_t queue)
     if(BRIDGE_MEM32(queue+0x20)!=queue+0x20)return;
     HANDLE event=NULL;int owned=0;
     EnterCriticalSection(&g_ke_shadow_cs);
-    for(unsigned i=0;i<KE_SHADOW_SIZE;i++)if(g_ke_shadow[i].in_use==3 && g_ke_shadow[i].guest_va==queue) {
+    for(unsigned i=0;i<g_ke_shadow_used_end;i++)if(g_ke_shadow[i].in_use==3 && g_ke_shadow[i].guest_va==queue) {
         if(g_ke_shadow[i].references || (g_ke_shadow[i].name_address && (g_ke_shadow[i].name_attributes&0x10)))break;
         event=g_ke_shadow[i].host_handle;owned=1;break;
     }
@@ -11513,7 +11535,7 @@ static uint32_t ke_object_for_handle(HANDLE handle) {
     if(!checkpoint_native_init())recomp_cont_invalid();
     ke_shadow_init();uint32_t address=0;
     EnterCriticalSection(&g_ke_shadow_cs);
-    for(unsigned i=0;i<KE_SHADOW_SIZE;i++)if(g_ke_shadow[i].in_use && g_ke_shadow[i].object_type &&
+    for(unsigned i=0;i<g_ke_shadow_used_end;i++)if(g_ke_shadow[i].in_use && g_ke_shadow[i].object_type &&
         checkpoint_native.compare(handle,g_ke_shadow[i].host_handle)==0) {
         address=g_ke_shadow[i].guest_va;break;
     }
@@ -11524,7 +11546,7 @@ static uint32_t ke_object_for_handle(HANDLE handle) {
  * compare every event/file/thread identity for each ordinary signal. */
 NTSTATUS xbox_kernel_reject_timer_signal(HANDLE handle) {
     NTSTATUS status=0;ke_shadow_init();EnterCriticalSection(&g_ke_shadow_cs);
-    for(unsigned i=0;i<KE_SHADOW_SIZE;i++) {
+    for(unsigned i=0;i<g_ke_shadow_used_end;i++) {
         KE_SHADOW_SLOT *slot=&g_ke_shadow[i];
         if(!slot->in_use || (slot->object_type!=XBOX_KERNEL_DATA_BASE+KDATA_TIMER_OBJ_TYPE &&
             !(slot->in_use==4 && slot->object_type==XBOX_KERNEL_DATA_BASE+KDATA_FILE_OBJ_TYPE)))continue;
@@ -12625,6 +12647,7 @@ static int checkpoint_clear_objects(void) {
         }
         memset(s_handle_table,0,sizeof s_handle_table);memset(s_handle_private,0,sizeof s_handle_private);
         memset(g_ke_shadow,0,sizeof g_ke_shadow);
+        g_ke_shadow_used_end = 0;
         memset(g_async_handles,0,sizeof g_async_handles);
     } else checkpoint_clear_owner_requests();
     free(handles);free(critical);return ok;
@@ -12805,9 +12828,12 @@ int xbox_CheckpointLoadObjects(FILE *in,const XboxCheckpointRoot *roots,unsigned
                 s_handle_private[ref->index]=(uint8_t)ref->private_handle;
                 if (ref->async) bridge_note_async_handle(BRIDGE_HANDLE_TAG|ref->index);
             }
-            else g_ke_shadow[ref->index]=(KE_SHADOW_SLOT){ref->address,aliases[i],ref->flag,
-                ref->object_type,ref->references,ref->allocation,ref->name_parent,ref->name_address,
-                ref->name_length,ref->name_attributes,ref->namespace_root,ref->path_rule};
+            else {
+                g_ke_shadow[ref->index]=(KE_SHADOW_SLOT){ref->address,aliases[i],ref->flag,
+                    ref->object_type,ref->references,ref->allocation,ref->name_parent,ref->name_address,
+                    ref->name_length,ref->name_attributes,ref->namespace_root,ref->path_rule};
+                if (ref->index >= g_ke_shadow_used_end) g_ke_shadow_used_end = ref->index + 1;
+            }
             if (ref->attributes&1) SetHandleInformation(aliases[i],HANDLE_FLAG_PROTECT_FROM_CLOSE,HANDLE_FLAG_PROTECT_FROM_CLOSE);
             aliases[i]=NULL;
         }
