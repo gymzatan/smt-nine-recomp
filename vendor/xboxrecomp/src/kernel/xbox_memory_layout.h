@@ -37,6 +37,12 @@ extern "C" {
 /* Base address of all XBE files in Xbox memory */
 #define XBOX_BASE_ADDRESS       0x00010000
 
+/* Observe existing fatal endpoints before they bypass CRT exit handlers.
+ * The observer writes diagnostics; callers retain their original termination. */
+typedef void (*XboxFatalErrorReporter)(const char *reason,unsigned code);
+void xbox_SetFatalErrorReporter(XboxFatalErrorReporter reporter);
+void xbox_ReportFatalError(const char *reason,unsigned code);
+
 /* Start of mapped region - includes low memory (KPCR at 0x0) because
  * game code reads from addresses like 0x20 and 0x28 (Xbox kernel structures). */
 #define XBOX_MAP_START          0x00000000

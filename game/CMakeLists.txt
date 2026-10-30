@@ -117,6 +117,7 @@ file(GLOB RECOMP_GEN_SOURCES CONFIGURE_DEPENDS "${SMT9_RECOMP_GEN_DIR}/*.c")
 # Core game sources
 set(GAME_SOURCES
     src/main.c
+    src/error_log.c
     src/game_paths.c
     src/config.c
     src/language.c

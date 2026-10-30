@@ -32,6 +32,7 @@ def startup_probe(tmp_path_factory, request):
 #include "config.h"
 #include "game_paths.h"
 ''' + display + r'''
+static void error_game_context(EXCEPTION_POINTERS *exception) {(void)exception;}
 static const char *scenario;
 static unsigned dialog_calls, game_calls;
 static wchar_t observed[2048];
@@ -81,7 +82,7 @@ int main(int argc,char **argv) {
     compiler = shutil.which('cl')
     assert compiler
     subprocess.run([compiler, '/nologo', '/O2', '/utf-8', '/I'+str(work), '/I'+str(ROOT/'game/src'),
-                    str(work/'probe.c'), *[str(ROOT/'game/src'/name) for name in ('config.c', 'language.c', 'game_paths.c')],
+                    str(work/'probe.c'), *[str(ROOT/'game/src'/name) for name in ('config.c', 'language.c', 'game_paths.c', 'error_log.c')],
                     '/Fe:'+str(work/'probe.exe'), '/link', 'shell32.lib', 'user32.lib'],
                    cwd=work, check=True, capture_output=True)
     return work/'probe.exe', 'Chinese' if request.param else 'English'

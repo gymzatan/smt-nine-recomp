@@ -36,6 +36,7 @@ Repeated GPU-progress polls reuse an existing posted worker request instead of r
 
 Known coverage limits:
 
+- Partial outdoor-background loss and an underground-street crash have been reported on another player configuration; that player reports unaffected indoor/dungeon screens and normal behavior in earlier builds. The failing draw and crash cause remain unconfirmed. Fatal diagnostics are available in `err.log` beside the executable.
 - Horizontal character gaps and incorrect occlusion have been reported on some player configurations. Local four-backend street samples and an AMD-integrated D3D11 sample did not reproduce them; the exact female-player and restaurant scenes, affected builds and drivers remain unverified. A graphics-memory cause has not been established, and 512 MiB support is not certified. See the README for hardware requirements and memory-report fields.
 - Intermediate chapters, scenes, battles and branching routes have not yet been fully tested. The final battle through the ending is tested successfully. Coverage of every route, all audio and long-session stability across configurations remains incomplete.
 - Performance in heavy scenes still needs work. Selecting 60 Hz is not a promise that every scene maintains it.

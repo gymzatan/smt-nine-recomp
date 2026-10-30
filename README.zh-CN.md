@@ -17,7 +17,7 @@
 
 本机使用 AMD Ryzen 9 9950X 和 RTX 5090 对照了 D3D11／Vulkan／OpenGL／D3D12，另补测 AMD Radeon Graphics 核显的 D3D11。日文、1 倍、4:3、30 Hz 的街道采样约 29～31 FPS，未复现人物横向缺口。[进程显存采样数值](docs/VALIDATION.md#process-graphics-memory-samples)单独列出。这是测试参考配置，不是最低配置或全流程保证；玩家来件中的同一女性主角与餐厅场景仍待复现。
 
-报告图形问题时，请提供发生异常那次运行的 `runtime/startup.log`、驱动版本和附近的普通存档。使用 DXGI 的后端会记录专用／共享容量；若所选运行库支持 DXGI 显存查询，还会在呈现画面时每五秒记录 local／nonlocal 内存段的进程用量 `current_bytes` 和预算 `budget_bytes`，不支持的 DXGI 查询会明确标注 unavailable。直接 Vulkan 后端目前报告设备与 API 选择，不提供这些 DXGI 显存测量。容量、进程用量和预算是不同数据，专用显存显示 512 MiB 不能单独证明显存耗尽。转换层可能返回兼容用的适配器名称与容量，请同时提供 Windows 显示的显卡／驱动信息。双击重新启动会覆盖日志，请在下次启动前复制。
+报告图形问题时，请提供发生异常那次运行的 `runtime/startup.log`、驱动版本和附近的普通存档。致命错误另会在**游戏程序旁生成 `err.log`**，记录当前运行的设置／日志片段、错误信息和宿主／游戏诊断上下文；报告闪退时请一并提供。正常启动和正常退出保留上一次错误报告，请核对其中的 UTC 时间。使用 DXGI 的后端会记录专用／共享容量；若所选运行库支持 DXGI 显存查询，还会在呈现画面时每五秒记录 local／nonlocal 内存段的进程用量 `current_bytes` 和预算 `budget_bytes`，不支持的 DXGI 查询会明确标注 unavailable。直接 Vulkan 后端目前报告设备与 API 选择，不提供这些 DXGI 显存测量。容量、进程用量和预算是不同数据，专用显存显示 512 MiB 不能单独证明显存耗尽。转换层可能返回兼容用的适配器名称与容量，请同时提供 Windows 显示的显卡／驱动信息。双击重新启动会覆盖日志，请在下次启动前复制。
 
 Config 提供 Auto、Vulkan、OpenGL、D3D12 和 D3D11。Auto 在初始化失败时按 **Vulkan → OpenGL → D3D12 → D3D11** 尝试。D3D12 通过[微软 D3D11On12](https://learn.microsoft.com/en-us/windows/win32/direct3d12/direct3d-11-on-12)复用现有 D3D11 渲染代码，不保证更快或降低显存要求。
 

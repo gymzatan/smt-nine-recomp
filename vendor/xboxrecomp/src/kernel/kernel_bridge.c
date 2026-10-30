@@ -4888,7 +4888,7 @@ static void bridge_restore_context(uint32_t,XboxGuestRegisters *);
 static uint32_t bridge_raise_record(uint32_t,uint32_t,uint32_t,uint32_t);
 static void bridge_unhandled_exception(uint32_t record,uint32_t address) {
     fprintf(stderr,"[STOP] unhandled guest exception %08X at %08X\n",BRIDGE_MEM32(record),address);
-    fflush(stderr);ExitProcess(5);
+    fflush(stderr);xbox_ReportFatalError("Unhandled guest exception",BRIDGE_MEM32(record));ExitProcess(5);
 }
 
 typedef struct GuestUnwind {

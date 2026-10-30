@@ -548,6 +548,7 @@ VOID __stdcall xbox_KeBugCheck(ULONG BugCheckCode)
     DebugBreak();
 #endif
 
+    xbox_ReportFatalError("Guest kernel bug check",BugCheckCode);
     ExitProcess(BugCheckCode);
 }
 
@@ -567,6 +568,7 @@ VOID __stdcall xbox_KeBugCheckEx(
     DebugBreak();
 #endif
 
+    xbox_ReportFatalError("Guest kernel bug check",BugCheckCode);
     ExitProcess(BugCheckCode);
 }
 

@@ -45,6 +45,12 @@
 #define SECTHDR_NAME_ADDR   0x14
 #define SECTHDR_SIZE        56
 
+static XboxFatalErrorReporter g_fatal_error_reporter;
+void xbox_SetFatalErrorReporter(XboxFatalErrorReporter reporter) { g_fatal_error_reporter=reporter; }
+void xbox_ReportFatalError(const char *reason,unsigned code) {
+    if(g_fatal_error_reporter)g_fatal_error_reporter(reason,code);
+}
+
 static void *g_memory_base = NULL;
 static size_t g_memory_size = 0;
 static ptrdiff_t g_memory_offset = 0;  /* actual_base - XBOX_BASE_ADDRESS */
@@ -1543,6 +1549,7 @@ static DWORD WINAPI xbox_watchdog_thread(LPVOID unused)
                 *(const uint32_t *)(mem + a));
     }
     fflush(stderr);
+    xbox_ReportFatalError("Guest execution watchdog",3);
     _exit(3);
     return 0;
 }

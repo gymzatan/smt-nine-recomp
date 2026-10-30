@@ -38,6 +38,8 @@
 #include "game_paths.h"
 #include "config.h"
 #include "font_assets.h"
+#include "error_log.h"
+#include "kernel/xbox_memory_layout.h"
 static NineConfig s_display={.interface_language=SMT9_DEFAULT_UI_LANGUAGE_W};
 int smt9_is_japanese(void){return !wcscmp(s_display.language,L"Japanese");}
 int smt9_is_chinese(void){return !wcscmp(s_display.language,L"Chinese");}
@@ -200,11 +202,14 @@ static void print_guest_context(void *rip)
                 sym->Name, (unsigned long long)disp);
 
     if (g_xbox_mem_offset && g_esp) {
-        const uint32_t *sp =
-            (const uint32_t *)((uintptr_t)g_xbox_mem_offset + g_esp);
+        uint32_t words[256];SIZE_T bytes=0;
+        ReadProcessMemory(GetCurrentProcess(),(const void *)((uintptr_t)g_xbox_mem_offset+g_esp),words,sizeof words,&bytes);
+        unsigned available=(unsigned)(bytes/sizeof words[0]);
+        if(!available){fprintf(stderr,"  guest stack is unreadable\n");return;}
+        const uint32_t *sp=words;
         int shown = 0, i;
         fprintf(stderr, "  guest stack (return addresses, innermost first):\n");
-        for (i = 0; i < 256 && shown < 24; i++) {
+        for (i = 0; (unsigned)i < available && shown < 24; i++) {
             uint32_t v = sp[i];
             if (v > g_xbox_code_lo && v < g_xbox_code_hi) {
                 fprintf(stderr, "    [esp+%-4d] 0x%08X\n", i * 4, v);
@@ -252,10 +257,20 @@ static void print_guest_context(void *rip)
              * was written for, one of these words was the end of the mapped
              * RAM mirror -- which is what identified the fault as a copy
              * running off its buffer rather than a stray pointer. */
-            for (i = 0; i < 20; i++)
+            for (i = 0; i < 20 && (unsigned)i < available; i++)
                 fprintf(stderr, "    raw[esp+%-4d] 0x%08X\n", i * 4, sp[i]);
         }
     }
+}
+
+static void error_game_context(EXCEPTION_POINTERS *exception)
+{
+    fprintf(stderr,"\n--- Game context ---\n");
+    fprintf(stderr,"[DISPLAY] configured_backend=%ls render_scale=%u aspect=%u:%u refresh=%u language=%ls\n",s_display.backend,s_display.render_scale,s_display.aspect_width,s_display.aspect_height,s_display.refresh_hz,s_display.language);
+    fprintf(stderr,"Xbox eax=%08X ecx=%08X edx=%08X ebx=%08X esp=%08X esi=%08X edi=%08X seh_frame=%08X flags=%08X\n",g_eax,g_ecx,g_edx,g_ebx,g_esp,g_esi,g_edi,g_seh_ebp,g_eflags);
+    fprintf(stderr,"Guest memory offset=%p x87 control=%04X top=%d\n",(void *)(uintptr_t)g_xbox_mem_offset,g_fp_control_word,g_fp_top);
+    void *address=exception?(void *)(uintptr_t)exception->ContextRecord->Rip:NULL;
+    print_guest_context(address);
 }
 
 /* APU/AC97 VEH adapters share the original GPU instruction decoder.
@@ -324,6 +339,7 @@ static void write_crash_ram(void)
 static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
 {
     if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_STACK_OVERFLOW) {
+        nine_error_log_exception("Native stack overflow",ep);
         fprintf(stderr, "[CRASH] native stack overflow RIP=0x%llX guest ESP=0x%08X\n",
                 (unsigned long long)ep->ContextRecord->Rip, g_esp);
         print_guest_context((void *)ep->ContextRecord->Rip);
@@ -393,10 +409,14 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
 
         /* Print native stack return addresses for debugging */
         {
-            uintptr_t *sp = (uintptr_t *)ep->ContextRecord->Rsp;
-            fprintf(stderr, "  Native stack (first 8 return addrs):\n");
-            for (int i = 0; i < 64 && sp[i]; i++) {
-                if (sp[i] >= 0x140000000ULL && sp[i] < 0x150000000ULL) {
+            uintptr_t sp[64];SIZE_T bytes=0;
+            ReadProcessMemory(GetCurrentProcess(),(const void *)ep->ContextRecord->Rsp,sp,sizeof sp,&bytes);
+            uintptr_t base=(uintptr_t)GetModuleHandleW(NULL);
+            IMAGE_DOS_HEADER *dos=(IMAGE_DOS_HEADER *)base;
+            IMAGE_NT_HEADERS *image=(IMAGE_NT_HEADERS *)(base+dos->e_lfanew);
+            fprintf(stderr, "  Native stack (return addresses in this executable):\n");
+            for (unsigned i = 0; i < bytes/sizeof sp[0] && sp[i]; i++) {
+                if (sp[i] >= base && sp[i] < base+image->OptionalHeader.SizeOfImage) {
                     fprintf(stderr, "    [%d] 0x%llX\n", i, (unsigned long long)sp[i]);
                 }
             }
@@ -412,6 +432,7 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                    LPSTR lpCmdLine, int nCmdShow)
 {
+    xbox_SetFatalErrorReporter(nine_error_log_fatal);
     void *xbe_data = NULL;
     size_t xbe_size = 0;
 
@@ -685,6 +706,7 @@ static BOOL load_xbe(const char *path, void **out_data, size_t *out_size)
 }
 
 /* Console entry point (for debugging -- lets you see printf output) */
+#include "error_log.h"
 typedef enum StartupMessage { STARTUP_ROOT,STARTUP_LOG_PATH,STARTUP_LOG_OPEN,STARTUP_ENV,STARTUP_FAILED } StartupMessage;
 static const wchar_t *startup_text(StartupMessage message)
 {
@@ -707,6 +729,7 @@ int main(int argc, char **argv)
     if(!nine_config_read(&s_display,config_error,256)) {
         MessageBoxW(NULL,config_error,L"NINE",MB_OK|MB_ICONERROR);return 1;
     }
+    if(!nine_error_log_init(nine_paths.root_w,error_game_context))return 1;
     int gui_startup=GetFileType(GetStdHandle(STD_ERROR_HANDLE))==FILE_TYPE_UNKNOWN;
     if(gui_startup) {
         wchar_t path[MAX_PATH];FILE *stream=NULL;
@@ -714,7 +737,7 @@ int main(int argc, char **argv)
             MessageBoxW(NULL,startup_text(STARTUP_LOG_PATH),L"NINE",MB_OK|MB_ICONERROR);return 1;
         }
         _set_doserrno(0);
-        errno_t log_error=_wfreopen_s(&stream,path,L"w",stderr);
+        errno_t log_error=_wfreopen_s(&stream,path,L"w+",stderr);
         if(log_error) {
             unsigned long system_error=0;wchar_t message[1024];
             _get_doserrno(&system_error);
@@ -740,7 +763,7 @@ int main(int argc, char **argv)
     (void)argc;
     (void)argv;
 #endif
-    int result=WinMain(GetModuleHandle(NULL), NULL, GetCommandLineA(), SW_SHOW);
+    int result=nine_error_log_finish(WinMain(GetModuleHandle(NULL), NULL, GetCommandLineA(), SW_SHOW));
     if(result && gui_startup)MessageBoxW(NULL,startup_text(STARTUP_FAILED),L"NINE",MB_OK|MB_ICONERROR);
     return result;
 }
