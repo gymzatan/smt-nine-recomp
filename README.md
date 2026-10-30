@@ -79,7 +79,9 @@ In Config, interface language and game language are independent. Japanese is bui
 
 ## Project status
 
-The current port has been exercised through startup, ordinary saving/loading, movies, street navigation, shops, story battles, RTS tutorials and chapter two entry. Display options include multiple aspect ratios, resolution scales, 30/60 Hz, and Vulkan/OpenGL/D3D12/D3D11 selection. Exact-executable instant checkpoints, pause and screenshots are supported. This initial source release is not a full-playthrough or stable-60-FPS guarantee; specific remaining coverage is listed in the status document.
+The project owner has successfully playtested the final battle through the ending, with no issues reported in that tested route. Intermediate chapters, scenes and routes have not yet been fully tested and are the main remaining gameplay coverage gap. Existing verification also covers startup, ordinary saving/loading, movies, street navigation, shops, story battles, RTS tutorials and chapter two entry.
+
+Display options include multiple aspect ratios, resolution scales, 30/60 Hz, and Vulkan/OpenGL/D3D12/D3D11 selection. Exact-executable instant checkpoints, pause and screenshots are supported. Testing of the final battle and ending does not establish complete coverage of every route or stable 60 FPS on every configuration; see the [current status](docs/STATUS.md).
 
 ## License and credits
 

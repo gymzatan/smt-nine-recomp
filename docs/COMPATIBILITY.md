@@ -1,6 +1,6 @@
 # Runtime compatibility
 
-The native port retains the game's original command producers, but several hardware and kernel consumers are incomplete. Import routing, accepting a register write and completing a scene do not establish semantic compatibility. The Windows port is approved for an early playable release with these documented limits; complete compatibility, a full playthrough and normal speed in every scene are not certified.
+The native port retains the game's original command producers, but several hardware and kernel consumers are incomplete. Import routing, accepting a register write and completing a scene do not establish semantic compatibility. The project owner has successfully playtested the final battle through the ending, with no issues reported in that route. Intermediate gameplay remains incompletely tested; the [current status](STATUS.md) separates that coverage gap from the completed ending test. Complete compatibility and normal speed in every scene and hardware configuration are not certified.
 
 ## Connected consumers and actual evidence
 
