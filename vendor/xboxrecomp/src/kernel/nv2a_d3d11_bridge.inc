@@ -1624,8 +1624,18 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
                 IDirect3DTexture8 *texture=(IDirect3DTexture8 *)entry->texture;
                 hw_check(texture->lpVtbl->LockRect(texture,0,&locked,NULL,0),"texture upload lock");
             }
-            if(asset) {
-                for(unsigned y=0;y<height;y++)memcpy((uint8_t *)locked.pBits+(size_t)y*locked.Pitch,(const uint8_t *)asset+(size_t)y*width*4,(size_t)width*4);
+            if(asset || (!float_texture && source->color==D3DFMT_LIN_A8R8G8B8)) {
+                const uint8_t *pixels=asset?(const uint8_t *)asset:raw+(size_t)face*stride;
+                size_t row=(size_t)width*4,input_pitch=asset?row:source->pitch;
+                if(input_pitch==row && (size_t)locked.Pitch==row)memcpy(locked.pBits,pixels,row*height);
+                else for(unsigned y=0;y<height;y++)memcpy((uint8_t *)locked.pBits+(size_t)y*locked.Pitch,pixels+(size_t)y*input_pitch,row);
+            } else if(!float_texture && source->color==D3DFMT_A8R8G8B8 && (size_t)locked.Pitch==(size_t)width*4) {
+                xbox_unswizzle_rect(locked.pBits,raw+(size_t)face*stride,width,height,4);
+            } else if(!float_texture && !(width&1) && (source->color==D3DFMT_YUY2 || source->color==D3DFMT_UYVY)) {
+                for(unsigned y=0;y<height;y++)
+                    d3d8_convert_linear_pixels((D3DFORMAT)source->color,width,1,
+                        raw+(size_t)face*stride+(size_t)y*source->pitch,
+                        (uint8_t *)locked.pBits+(size_t)y*locked.Pitch,0);
             } else if(!float_texture && d3d8_format_dxt_block_bytes(source->color)) {
                 unsigned block_bytes=d3d8_format_dxt_block_bytes(source->color);
                 unsigned blocks_per_row=(source->width+3)/4;

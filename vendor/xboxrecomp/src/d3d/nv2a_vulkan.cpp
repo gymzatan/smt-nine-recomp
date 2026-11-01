@@ -561,7 +561,8 @@ int nvk_image_read(NvkImage *image,void *pixels,size_t pitch) {
         VkBufferImageCopy copy{};copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,image->layers};copy.imageExtent={image->width,image->height,image->depth};
         vkCmdCopyImageToBuffer(begin().commands,image->image,image->layout,staging.buffer,1,&copy);
         wait_serial(submit());host_memory(staging,true);
-        for(size_t y=0;y<(size_t)image->height*image->layers*image->depth;y++)
+        if(pitch==row)std::memcpy(pixels,staging.mapped,bytes);
+        else for(size_t y=0;y<(size_t)image->height*image->layers*image->depth;y++)
             std::memcpy(static_cast<char *>(pixels)+pitch*y,static_cast<char *>(staging.mapped)+row*y,row);
         return 1;
     }catch(...){destroy(staging);throw;}

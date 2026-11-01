@@ -4010,6 +4010,59 @@ static void verify_polygon_offset(void) {
     fprintf(stderr,"[POLYGON OFFSET] original -4 factor, positive/negative bias, disable, independent mode flags, clipping range, both depth formats and vertex routes passed\n");
 }
 
+static void verify_bulk_texture_upload(int optimized) {
+    seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
+    const struct {unsigned format,width,height,pad,cube,levels,bulk;} cases[]={
+        {D3DFMT_A8R8G8B8,16,8,0,0,1,1},
+        {D3DFMT_A8R8G8B8,8,8,0,1,3,1},
+        {D3DFMT_LIN_A8R8G8B8,5,3,0,0,1,1},
+        {D3DFMT_LIN_A8R8G8B8,5,3,12,0,1,1},
+        {D3DFMT_YUY2,8,3,8,0,1,1},
+        {D3DFMT_UYVY,8,3,0,0,1,1},
+        {D3DFMT_LIN_X8R8G8B8,5,3,12,0,1,0},
+        {D3DFMT_YUY2,3,3,2,0,1,0}};
+    for(unsigned c=0;c<sizeof cases/sizeof *cases;c++) {
+        unsigned w=cases[c].width,h=cases[c].height,faces=cases[c].cube?6:1;
+        Texture texture={.offset=0x80200000u+c*0x40000u,.width=w,.height=h,
+            .pitch=w*(cases[c].format==D3DFMT_YUY2 || cases[c].format==D3DFMT_UYVY?2:4)+cases[c].pad,
+            .color=cases[c].format,.addr_u=1,.addr_v=2,.levels=cases[c].levels,.cube=cases[c].cube,.valid=1};
+        unsigned stride=tex_face_stride(&texture);size_t count=(size_t)w*h*faces;
+        uint8_t *raw=(uint8_t *)xbox_GetMemoryOffset()+texture.offset;
+        for(size_t i=0;i<(size_t)stride*faces;i++)raw[i]=(uint8_t)(i*73+(i>>3)*11+c*17);
+        uint32_t *expected=malloc(count*4),*actual=malloc(count*4);assert(expected&&actual);
+        for(unsigned face=0;face<faces;face++)for(unsigned y=0;y<h;y++)for(unsigned x=0;x<w;x++)
+            assert(sample_tex(&texture,face*stride,x,y,&expected[((size_t)face*h+y)*w+x]));
+        s_gpu.texs[0]=texture;s_gpu.rc.stage_program=1;cold_upload_samples=0;cold_upload_watch=1;
+        hw_texture_bind(0,hw_color(0));cold_upload_watch=0;
+        HwTexture *entry=s_hw_textures;assert(entry && entry->identity.offset==texture.offset && entry->content_valid);
+        if(entry->native)assert(nvk_image_read(entry->native,actual,w*4));
+        else {
+            ID3D11Resource *resource=NULL;ID3D11Texture2D *image=NULL,*staging=NULL;
+            ID3D11ShaderResourceView_GetResource(d3d8_base_srv(entry->texture),&resource);
+            assert(SUCCEEDED(ID3D11Resource_QueryInterface(resource,&IID_ID3D11Texture2D,(void **)&image)));
+            D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(image,&desc);
+            assert(desc.Width==w && desc.Height==h && desc.ArraySize==faces && desc.MipLevels==1);
+            desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;desc.MiscFlags=0;
+            assert(SUCCEEDED(ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&staging)));
+            ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
+            ID3D11DeviceContext_CopyResource(ctx,(ID3D11Resource *)staging,(ID3D11Resource *)image);
+            for(unsigned face=0;face<faces;face++) {
+                D3D11_MAPPED_SUBRESOURCE map;assert(SUCCEEDED(ID3D11DeviceContext_Map(ctx,(ID3D11Resource *)staging,face,D3D11_MAP_READ,0,&map)));
+                for(unsigned y=0;y<h;y++)memcpy(actual+((size_t)face*h+y)*w,(uint8_t *)map.pData+(size_t)y*map.RowPitch,w*4);
+                ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource *)staging,face);
+            }
+            ID3D11Texture2D_Release(staging);ID3D11Texture2D_Release(image);ID3D11Resource_Release(resource);
+        }
+        assert(!memcmp(actual,expected,count*4));
+        unsigned expected_samples=optimized && cases[c].bulk?0:(unsigned)count;
+        fprintf(stderr,"[BULK UPLOAD] format=%02X size=%ux%u faces=%u pixels=%zu scalar_samples=%u expected=%u\n",texture.color,w,h,faces,count,cold_upload_samples,expected_samples);
+        assert(cold_upload_samples==expected_samples);
+        uint64_t uploads=s_gpu.hardware_texture_uploads;cold_upload_samples=0;cold_upload_watch=1;
+        hw_texture_bind(0,hw_color(0));cold_upload_watch=0;
+        assert(!cold_upload_samples && uploads==s_gpu.hardware_texture_uploads);
+        free(expected);free(actual);
+    }
+}
 int main(int argc,char **argv) {
     assert(argc==6 || (argc==7 && !strncmp(argv[1],"fifo-worker",11) &&
         (!strcmp(argv[6],"partial") || !strcmp(argv[6],"complete"))));_putenv_s("RECOMP_GUEST_LOCK","1");_putenv_s("RECOMP_GPU_D3D11",argv[5]);
@@ -4024,6 +4077,7 @@ int main(int argc,char **argv) {
     assert(AddVectoredExceptionHandler(0,vertex_memory_fault_for_test));
     if(!strncmp(argv[1],"fifo-worker",11))assert(nv2a_fifo_start(gpu, 1));
     assert(xbox_CheckpointBootstrapBegin());
+    if(!strcmp(argv[1],"bulk-texture-upload")) {verify_bulk_texture_upload(1);fflush(NULL);ExitProcess(0);}
     if(!strncmp(argv[1],"fifo-worker",11)) {
         verify_fifo_worker_checkpoint(argc>6 && !strcmp(argv[6],"partial"),
             !strcmp(argv[1],"fifo-worker-program")?2:!strcmp(argv[1],"fifo-worker-index"));
@@ -5196,3 +5250,14 @@ def test_original_gpu_static_guest_transport(native_gpu,tmp_path):
     result=subprocess.run([str(executable),'direct-gpu-compare',str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'0'],capture_output=True,text=True,errors='replace')
     assert result.returncode==0,result.stdout+result.stderr
     assert 'DIRECT_GPU_RESULT ' in result.stdout
+
+
+@pytest.mark.parametrize('backend', ['D3D11', 'Vulkan', 'OpenGL', 'D3D12'])
+def test_bulk_texture_upload_matches_original_scalar_texels(native_gpu, tmp_path, backend):
+    executable, xbe = native_gpu
+    result = subprocess.run([str(executable), 'bulk-texture-upload', str(xbe), str(tmp_path/'gpu.state'),
+                             str(tmp_path/'memory.state'), '1'],
+        env={**os.environ, 'RECOMP_GPU_BACKEND': backend, 'RECOMP_RENDER_SCALE': '1'},
+        capture_output=True, text=True, errors='replace', timeout=90)
+    assert result.returncode == 0, result.stdout+result.stderr
+    assert result.stderr.count('[BULK UPLOAD]') == 8

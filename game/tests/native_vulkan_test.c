@@ -98,6 +98,10 @@ static void check_queued_image_upload(int tight) {
         memset(output,0xcc,(w+1)*h*4);ok(nvk_image_read(images[image],output,(w+1)*4));
         for(unsigned y=0;y<h;y++)for(unsigned x=0;x<=w;x++)
             assert(output[y*(w+1)+x]==(x<w?(0xff100000u|(image<<16)|(y<<8)|x):0xccccccccu));
+        memset(output,0xcc,(w+1)*h*4);ok(nvk_image_read(images[image],output,w*4));
+        for(unsigned y=0;y<h;y++)for(unsigned x=0;x<w;x++)
+            assert(output[y*w+x]==(0xff100000u|(image<<16)|(y<<8)|x));
+        for(size_t i=(size_t)w*h*4;i<(size_t)(w+1)*h*4;i++)assert(((unsigned char *)output)[i]==0xcc);
         free(output);nvk_image_destroy(images[image]);
     }
     uint32_t *large_output=resource(malloc(count*4));ok(nvk_image_read(large,large_output,2048*4));
