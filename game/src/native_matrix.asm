@@ -116,8 +116,9 @@ smt9_matrix_transpose_rows PROC
 smt9_matrix_transpose_rows ENDP
 
 ; Exact arithmetic status bits for the original completion comparison.
-smt9_cmp32_flags PROC
-    cmp ecx, edx
+SMT9_COMPARE_STATUS MACRO lhsReg, rhsReg
+    xor eax, eax
+    cmp lhsReg, rhsReg
     seto dl
     lahf
     movzx eax, ah
@@ -125,5 +126,13 @@ smt9_cmp32_flags PROC
     shl edx, 11
     or eax, edx
     ret
+ENDM
+
+smt9_cmp32_flags PROC
+    SMT9_COMPARE_STATUS ecx, edx
 smt9_cmp32_flags ENDP
+
+smt9_cmp8_flags PROC
+    SMT9_COMPARE_STATUS cl, dl
+smt9_cmp8_flags ENDP
 END

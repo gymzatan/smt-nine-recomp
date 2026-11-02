@@ -1061,7 +1061,8 @@ static void verify_semaphore_outputs(void) {
         method(NV097_CLEAR_REPORT_VALUE,0);assert(ldl_le_p(output)==0x13572468 && s_gpu.zpass_count==0);
         method(NV097_BACK_END_WRITE_SEMAPHORE_RELEASE,0x24681357);
         DWORD deadline=GetTickCount()+5000;
-        while(ldl_le_p(output)!=0x24681357 && (LONG)(GetTickCount()-deadline)<0) {nv2a_pb_progress();SwitchToThread();}
+        assert(nv2a_get_state() && !nv2a_get_state()->pfifo.thread.thread && ReadAcquire64(&s_hw_query_count)>0);
+        while(ReadAcquire64(&s_hw_query_count) && (LONG)(GetTickCount()-deadline)<0) {nv2a_pb_request_progress();SwitchToThread();}
         assert(ldl_le_p(output)==0x24681357 && !s_hw_query_count);
     } else assert(ldl_le_p(output)==0x12345678);
     method(NV097_SET_ZPASS_PIXEL_COUNT_ENABLE,0);seed();

@@ -4704,6 +4704,13 @@ int nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param, uint8_t
     return nv2a_pb_exec_active(subch,method,param,output);
 }
 
+#if defined(_WIN32)
+static NV_NOINLINE void nv2a_pb_request_progress_without_worker(void)
+{
+    if (hw_enabled()) hw_collect_queries(0);
+}
+#endif
+
 /* Both modes collect the same ordered completion queries. */
 void nv2a_pb_request_progress(void)
 {
@@ -4715,7 +4722,7 @@ void nv2a_pb_request_progress(void)
              * the next collection pass; running alone still needs a request.
              * Keep PUT publication on the unchanged generic kick path. */
             if (!(ReadAcquire(&d->pfifo.fifo_kick) & 1)) nv2a_fifo_kick(d);
-        } else if (hw_enabled()) hw_collect_queries(0);
+        } else nv2a_pb_request_progress_without_worker();
     }
 #endif
 }

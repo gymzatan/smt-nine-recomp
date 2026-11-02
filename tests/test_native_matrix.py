@@ -24,24 +24,29 @@ def test_native_completion_cmp_matches_original_lifter(tmp_path):
     compiler=shutil.which('cl');assembler=shutil.which('ml64')
     assert compiler and assembler,'requires the existing x64 MSVC environment'
     obj=tmp_path/'native_matrix.obj';exe=tmp_path/'native_completion_test.exe'
-    emitted=instruction('cmp',['eax','edx'])
     source=tmp_path/'native_completion_test.c'
-    source.write_text("#define RECOMP_GENERATED_CODE\n#include <assert.h>\n"+PRELUDE+"\nextern uint32_t smt9_cmp32_flags(uint32_t,uint32_t);\n"+r"""
-int main(void){
- const uint32_t edge[]={0,1,2,15,16,127,128,255,256,0x7fffffff,0x80000000,0xfffffffe,0xffffffff};
- for(unsigned i=0;i<13;i++)for(unsigned j=0;j<13;j++)for(unsigned k=0;k<4;k++){
-  uint32_t _fa=0,_fb=0;int32_t _fas=0,_fbs=0;int _cf=0;
-  uint32_t old=k&1?0xffffffffu:0x246fd7u;eax=edge[i];edx=edge[j];g_eflags=old;
-"""+emitted+r"""
-  uint32_t expected=g_eflags;
-  uint32_t actual=(old&~0x8d5u)|(smt9_cmp32_flags(edge[i],edge[j])&0x8d5u);
-  assert(actual==expected);
- }
- return 0;
-}
-""",encoding='utf8')
+    text='#define RECOMP_GENERATED_CODE\n#include <assert.h>\n#include <stdio.h>\n'+PRELUDE+'''
+    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t,uint32_t);
+    extern __declspec(noalias) uint32_t smt9_cmp8_flags(uint32_t,uint32_t);
+    '''
+    for width,ops in [('32',['eax','edx']),('8',['al','dl'])]:
+        text+='\nstatic void case'+width+'(uint32_t a,uint32_t b,uint32_t old){\n uint32_t _fa=0,_fb=0;int32_t _fas=0,_fbs=0;int _cf=0;\n eax=a;edx=b;g_eflags=old;\n'+instruction('cmp',ops)+'''\n uint32_t expected=g_eflags;
+     uint32_t actual=(old&~0x8d5u)|(smt9_cmp'''+width+'''_flags(a,b)&0x8d5u);
+     assert(actual==expected);assert(eax==a && edx==b);
+    }
+    '''
+    text+='''
+    int main(void){
+     const uint32_t edge[]={0,1,2,15,16,127,128,255,256,0x7fffffff,0x80000000,0xfffffffe,0xffffffff};
+     const uint32_t flags[]={0u,0xffffffffu,0x202u,0x246fd7u};
+     for(unsigned i=0;i<13;i++)for(unsigned j=0;j<13;j++)for(unsigned k=0;k<4;k++)case32(edge[i],edge[j],flags[k]);
+     for(unsigned i=0;i<256;i++)for(unsigned j=0;j<256;j++)for(unsigned k=0;k<4;k++)case8(i|0x42670000u,j|0x98e30000u,flags[k]);
+     puts("ORIGINAL_LIFTER_FLAGS_EQUAL cmp32=676 cmp8=262144 upper_byte_arguments=retained non_arithmetic_flags=retained");return 0;
+    }
+    '''
+    source.write_text(text,encoding='utf8')
     subprocess.run([assembler,'/nologo','/c','/Fo'+str(obj),str(ROOT/'game/src/native_matrix.asm')],
                    cwd=tmp_path,check=True,capture_output=True)
-    subprocess.run([compiler,'/nologo','/O2','/UNDEBUG','/I'+str(ROOT/'vendor/xboxrecomp/src'),
+    subprocess.run([compiler,'/nologo','/O2','/MD','/UNDEBUG','/I'+str(ROOT/'vendor/xboxrecomp/src'),
                    str(source),str(obj),'/Fe:'+str(exe)],cwd=tmp_path,check=True,capture_output=True)
     subprocess.run([str(exe)],cwd=tmp_path,check=True,capture_output=True)

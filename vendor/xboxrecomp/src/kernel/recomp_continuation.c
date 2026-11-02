@@ -4,8 +4,10 @@
 
 #ifdef _MSC_VER
 #define CONT_TLS __declspec(thread)
+#define CONT_NOINLINE __declspec(noinline)
 #else
 #define CONT_TLS __thread
+#define CONT_NOINLINE __attribute__((noinline))
 #endif
 
 typedef struct SavedLocal {
@@ -40,7 +42,7 @@ void recomp_cont_invalid(void) {
     fputs("[STOP] invalid generated guest continuation\n", stderr);
     exit(5);
 }
-static void discard_jumps(SavedJump *jump) {
+static CONT_NOINLINE void discard_jumps(SavedJump *jump) {
     while (jump) {
         SavedJump *next=jump->next;
         free(jump->locals); free(jump); jump=next;
@@ -52,38 +54,41 @@ static void discard_recovery(SavedFrame *frames, uint32_t count) {
     }
     free(frames);
 }
+static CONT_NOINLINE uint64_t restore_frame(RecompContFrame *f, uint32_t function,
+                                             const RecompContLocal *locals, size_t count) {
+    SavedFrame *saved=&recovery[recovery_next];
+    if (saved->function!=function || saved->count!=count)
+        recomp_cont_invalid();
+    for (size_t i=0; i<count; ++i) {
+        if (saved->locals[i].size!=locals[i].size ||
+            strcmp(saved->locals[i].name,locals[i].name))
+            recomp_cont_invalid();
+        memcpy(locals[i].address,saved->locals[i].data,locals[i].size);
+    }
+    f->site=saved->site;
+    f->jumps=saved->jumps; saved->jumps=0;
+    for (SavedJump *j=f->jumps; j; j=j->next) {
+        if (j->count!=count) recomp_cont_invalid();
+        for (size_t i=0; i<count; ++i)
+            if (j->locals[i].size!=locals[i].size ||
+                strcmp(j->locals[i].name,locals[i].name)) recomp_cont_invalid();
+    }
+    if (++recovery_next==recovery_count) {
+        discard_recovery(recovery,recovery_count);
+        recovery=0; recovery_next=recovery_count=0;
+    }
+    return f->site;
+}
 uint64_t recomp_cont_enter(RecompContFrame *f, uint32_t function,
                           const RecompContLocal *locals, size_t count) {
     f->function=function; f->site=0;
     f->locals=locals; f->local_count=count; f->parent=head; f->jumps=0; f->on_leave=0; f->on_unwind=0; f->retained=0; head=f;
-    if (recovery) {
-        SavedFrame *saved=&recovery[recovery_next];
-        if (saved->function!=function || saved->count!=count)
-            recomp_cont_invalid();
-        for (size_t i=0; i<count; ++i) {
-            if (saved->locals[i].size!=locals[i].size ||
-                strcmp(saved->locals[i].name,locals[i].name))
-                recomp_cont_invalid();
-            memcpy(locals[i].address,saved->locals[i].data,locals[i].size);
-        }
-        f->site=saved->site;
-        f->jumps=saved->jumps; saved->jumps=0;
-        for (SavedJump *j=f->jumps; j; j=j->next) {
-            if (j->count!=count) recomp_cont_invalid();
-            for (size_t i=0; i<count; ++i)
-                if (j->locals[i].size!=locals[i].size ||
-                    strcmp(j->locals[i].name,locals[i].name)) recomp_cont_invalid();
-        }
-        if (++recovery_next==recovery_count) {
-            discard_recovery(recovery,recovery_count);
-            recovery=0; recovery_next=recovery_count=0;
-        }
-    }
+    if (recovery) return restore_frame(f,function,locals,count);
     return f->site;
 }
 void recomp_cont_leave(RecompContFrame *f) {
     if (head!=f) recomp_cont_invalid();
-    discard_jumps(f->jumps); f->jumps=0;
+    if (f->jumps) discard_jumps(f->jumps); f->jumps=0;
     head=f->parent;
     if (f->on_leave) f->on_leave(f);
 }

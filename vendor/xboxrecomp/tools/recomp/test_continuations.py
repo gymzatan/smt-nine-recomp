@@ -74,8 +74,8 @@ def binaries(tmp_path_factory, request):
 #include <assert.h>
 void sub_00011000(void); void sub_00012000(void); void sub_00013000(void);
 ptrdiff_t g_xbox_mem_offset;
-RECOMP_TLS uint32_t g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp,g_seh_ebp;
-RECOMP_TLS uint32_t g_eflags=0x202u;
+RECOMP_TLS RecompGprState g_gpr={0,0,0,0,0,0,0,0x202u,0};
+RECOMP_TLS uint32_t g_ebp,g_seh_ebp;
 uint32_t g_xbox_code_lo=0x11000,g_xbox_code_hi=0x14000;
 volatile uint32_t g_icall_trace[ICALL_TRACE_SIZE],g_icall_trace_idx;
 volatile uint64_t g_icall_count;
@@ -87,6 +87,12 @@ void recomp_icall_not_code_log(uint32_t va) { recomp_icall_fail_log(va); }
 RECOMP_TLS double g_fp_stack[8];
 RECOMP_TLS int g_fp_top, g_fp_cmp;
 RECOMP_TLS uint16_t g_fp_control_word=0x027f, g_fp_cc;
+RECOMP_TLS uint16_t g_fp_status_word,g_fp_tag_word;
+RECOMP_TLS RecompFpMetadata g_fp_metadata;
+RECOMP_TLS uint32_t g_mxcsr;
+RECOMP_TLS uint8_t g_fp_raw[8][10],g_fp_alias_dirty;
+RECOMP_TLS RecompMmx g_mm0,g_mm1,g_mm2,g_mm3,g_mm4,g_mm5,g_mm6,g_mm7;
+RECOMP_TLS RecompXmm g_xmm0,g_xmm1,g_xmm2,g_xmm3,g_xmm4,g_xmm5,g_xmm6,g_xmm7;
 static const char *snapshot;
 static int saving;
 static unsigned char *ram;
@@ -210,7 +216,7 @@ int main(int argc,char **argv) {
                 assert '"_block_' not in generated
             source=work/(mode+'.c');source.write_text(prefix+generated+suffix,encoding='utf-8')
             result=subprocess.run([compiler,'/nologo','/O2','/utf-8','/D_CRT_SECURE_NO_WARNINGS',
-                '/I'+str(root/'src'),'/I'+str(root/'templates/runtime'),str(source),
+                '/I'+str(root/'src'),'/I'+str(root.parents[1]/'config'),str(source),
                 str(root/'src/kernel/recomp_continuation.c'),'/Fe:'+str(work/(mode+'.exe'))],
                 cwd=work,capture_output=True,text=True,errors='replace')
             assert result.returncode==0,result.stdout+result.stderr

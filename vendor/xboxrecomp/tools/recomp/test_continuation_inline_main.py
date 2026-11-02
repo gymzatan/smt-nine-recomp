@@ -97,7 +97,7 @@ int main(int argc,char **argv) {
             source=work/(mode+'.c');source.write_text(prefix+translate(monkeypatch,enabled,program)+suffix,encoding='utf-8')
             result=subprocess.run([compiler,'/nologo','/O2','/Gy','/MD','/utf-8',
                 '/DWIN32_LEAN_AND_MEAN','/DNOMINMAX','/D_CRT_SECURE_NO_WARNINGS',
-                '/I'+str(root/'src'),'/I'+str(root/'templates/runtime'),str(work/'memory.c'),
+                '/I'+str(root/'src'),'/I'+str(root.parents[1]/'config'),str(work/'memory.c'),
                 str(source),str(root/'src/kernel/kernel_hal.c'),str(root/'src/kernel/recomp_continuation.c'),
                 '/Fe:'+str(work/(mode+'.exe')),'/link','/OPT:REF',*[str(p) for p in libraries],
                 'kernel32.lib','user32.lib','gdi32.lib','advapi32.lib','ole32.lib','shell32.lib',
