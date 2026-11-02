@@ -1939,7 +1939,7 @@ static void hw_flush_batch(void)
     HwColor *color=hw_color(0);
     HwDepth *depth=(s_gpu.depth_test || (nv2a_get_state()->pgraph.regs[NV_PGRAPH_CONTROL_1]&NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE))?hw_depth():NULL;
     ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
-    NvkDraw native_draw={0};NV2ANativeGeometry geometry={0};NV2ANativeFixed fixed={0};
+    NvkDraw native_draw={0};NV2ANativeGeometry geometry={0};NV2ANativeFixed fixed;
     int constant_w=0;
     struct PGRAPHState *offset_pg=&nv2a_get_state()->pgraph;
     if(s_gpu.prim>=NV_PRIM_TRIANGLES && (offset_pg->regs[NV_PGRAPH_CONTROL_0]&NV_PGRAPH_CONTROL_0_Z_PERSPECTIVE_ENABLE)) {
@@ -2132,6 +2132,7 @@ static void hw_flush_batch(void)
             else hw_check(d3d8_vsh_bind_native(program,length,nv2a_vsh_constant(0),&geometry,s_hw_topology,&s_hw_program_inputs),"native vertex program binding");
         } else {
             struct PGRAPHState *pg=point_pg;
+            memset(&fixed,0,sizeof fixed);
             uint32_t c=pg->regs[NV_PGRAPH_CSV0_C],d=pg->regs[NV_PGRAPH_CSV0_D];
             fixed.flags[0]=(c&NV_PGRAPH_CSV0_C_LIGHTING)!=0;
             fixed.flags[1]=(c&NV_PGRAPH_CSV0_C_NORMALIZATION_ENABLE)!=0;

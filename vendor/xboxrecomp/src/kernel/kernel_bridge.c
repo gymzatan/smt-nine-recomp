@@ -1907,18 +1907,8 @@ static void ke_apc_delivery_leave(RecompContFrame *frame)
         recomp_cont_site(frame->parent,(2ULL<<32)|(uint32_t)frame->parent->site);
 }
 
-int xbox_DeliverThreadApcs(BOOLEAN user_apcs)
+static int ke_deliver_thread_apcs(BOOLEAN user_apcs,uint32_t thread)
 {
-    int recovering=recomp_cont_recovering(KERNEL_CONT_APC);
-    uint32_t thread=0;
-    if(!recovering) {
-        thread=ke_apc_enabled_thread();
-        if(!thread)return 0;
-        if(xbox_CurrentIrql()>=APC_LEVEL || !xbox_CpuInterruptFlag())return 0;
-        if(!guest_cpu_is_held())thread=ke_current_thread();
-        if(!thread || !BRIDGE_MEM8(thread+0x4b))return 0;
-        if(!BRIDGE_MEM8(thread+0x49) && (!user_apcs || BRIDGE_MEM32(thread+0x3c)==thread+0x3c))return 0;
-    }
     GuestApcDelivery state={0};state.thread=thread;state.user_apcs=user_apcs;
     state.held=guest_cpu_is_held();state.was_thread=t_guest_thread;
     const RecompContLocal locals[]={
@@ -1989,6 +1979,21 @@ normal_callback: ;
     if(tracked)recomp_cont_leave(&state.frame);
     if(!state.held){guest_cpu_part();t_guest_thread=state.was_thread;}
     return state.delivered;
+}
+
+int xbox_DeliverThreadApcs(BOOLEAN user_apcs)
+{
+    int recovering=recomp_cont_recovering(KERNEL_CONT_APC);
+    uint32_t thread=0;
+    if(!recovering) {
+        thread=ke_apc_enabled_thread();
+        if(!thread)return 0;
+        if(xbox_CurrentIrql()>=APC_LEVEL || !xbox_CpuInterruptFlag())return 0;
+        if(!guest_cpu_is_held())thread=ke_current_thread();
+        if(!thread || !BRIDGE_MEM8(thread+0x4b))return 0;
+        if(!BRIDGE_MEM8(thread+0x49) && (!user_apcs || BRIDGE_MEM32(thread+0x3c)==thread+0x3c))return 0;
+    }
+    return ke_deliver_thread_apcs(user_apcs,thread);
 }
 
 /* Xbox IRP and IO_STACK_LOCATION are guest structures, including every

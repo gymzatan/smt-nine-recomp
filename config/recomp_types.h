@@ -1045,7 +1045,7 @@ static inline uint16_t ROR16(uint16_t val, int n) {
  * a float comparison. Without a real parity here the branch was hardcoded and
  * every such comparison went one fixed direction.
  */
-static inline int recomp_parity8(uint32_t x) {
+static __forceinline int recomp_parity8(uint32_t x) {
     x ^= x >> 4;
     return (int)((0x9669u >> (x & 15u)) & 1u); /* 1 = even parity (PF set) */
 }

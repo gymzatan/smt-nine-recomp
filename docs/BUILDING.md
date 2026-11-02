@@ -1,5 +1,7 @@
 # Building from your Japanese disc
 
+The guest APC entry keeps its eligibility and empty-queue checks ahead of the existing delivery implementation, so ordinary empty checks do not allocate continuation/register-capture storage. The original parity helper is forced inline using the existing compiler portability definition; its arithmetic, architectural flags and continuation layouts are unchanged. Fixed-vertex uniform storage is cleared only in the fixed-vertex branch that consumes it; programmable draws retain the original fixed-state-free path.
+
 ## Requirements
 
 - Windows 10/11 x64 and sufficient free disk space for the extracted disc, generated C, native build, language packages and high-resolution font atlases. Keep at least 15 GB free; 16 GB RAM or more is recommended.
