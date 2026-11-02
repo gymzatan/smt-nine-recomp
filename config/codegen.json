@@ -101524,7 +101524,15 @@
       "address": 942064,
       "name": "sub_000E5FF0",
       "file": "recomp_0033.c",
-      "edits": []
+      "edits": [
+        [
+          12814,
+          "_remainder=_dividend%_divisor;",
+          "_remainder=_dividend-_quotient*_divisor;",
+          "or==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; ",
+          " _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n    if(_fault) {\n    _cont_fault_code_00"
+        ]
+      ]
     },
     {
       "address": 943056,
@@ -103062,6 +103070,27 @@
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
         ],
         [
+          6020,
+          "_remainder=_dividend%_divisor;",
+          "_remainder=_dividend-_quotient*_divisor;",
+          "or==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; ",
+          " _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n    if(_fault) {\n    _cont_fault_code_00"
+        ],
+        [
+          13479,
+          "_remainder=_dividend%_divisor;",
+          "_remainder=_dividend-_quotient*_divisor;",
+          "or==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; ",
+          " _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n    if(_fault) {\n    _cont_fault_code_00"
+        ],
+        [
+          24183,
+          "_remainder=_dividend%_divisor;",
+          "_remainder=_dividend-_quotient*_divisor;",
+          "or==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; ",
+          " _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n    if(_fault) {\n    _cont_fault_code_00"
+        ],
+        [
           32443,
           "",
           "\n#undef g_xbox_mem_offset\n",
@@ -103074,7 +103103,15 @@
       "address": 955728,
       "name": "sub_000E9550",
       "file": "recomp_0033.c",
-      "edits": []
+      "edits": [
+        [
+          4513,
+          "_remainder=_dividend%_divisor;",
+          "_remainder=_dividend-_quotient*_divisor;",
+          "or==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; ",
+          " _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n    if(_fault) {\n    _cont_fault_code_00"
+        ]
+      ]
     },
     {
       "address": 955872,
@@ -104091,7 +104128,15 @@
       "address": 963104,
       "name": "sub_000EB220",
       "file": "recomp_0033.c",
-      "edits": []
+      "edits": [
+        [
+          8537,
+          "    SET_LO16(eax, MEM16(esi + -4));\n    SET_LO16(edx, MEM16(esi));\n    SET_LO16(ecx, MEM16(esi + -2));\n    MEM16(esp + 0x5C) = LO16(edx);\n    eax = SX16(LO16(eax));\n    eax = eax + eax * 2;\n    eax = edi + eax * 8;\n    edx = eax;\n    ebx = MEM32(edx);\n    MEM32(esp + 0x28) = ebx;\n    ebx = MEM32(edx + 4);\n    ecx = SX16(LO16(ecx));\n    MEM32(esp + 0x2C) = ebx;\n    edx = MEM32(edx + 8);\n    MEM32(esp + 0x30) = edx;\n    ecx = ecx + ecx * 2;\n    edx = edi + ecx * 8;\n    ecx = MEM32(edx);\n    MEM32(esp + 0x34) = ecx;\n    ecx = MEM32(edx + 4);\n    MEM32(esp + 0x38) = ecx;\n    edx = MEM32(edx + 8);\n    ecx = (uint32_t)(int32_t)SMEM16(esp + 0x5C);\n    MEM32(esp + 0x3C) = edx;\n    ecx = ecx + ecx * 2;\n    edx = edi + ecx * 8;\n    ecx = MEM32(edx);\n    MEM32(esp + 0x40) = ecx;\n    ecx = MEM32(edx + 4);\n    MEM32(esp + 0x44) = ecx;\n    edx = MEM32(edx + 8);\n    _fb = (uint32_t)(0xC) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n    _cf = (int)((((uint64_t)(eax) + (uint64_t)(0xC)) >> 32) & 1);\n    eax = eax + 0xC;\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((((~(((_fa - _fb)) ^ (_fb)) & (((_fa - _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n    MEM32(esp + 0x48) = edx;\n    ecx = MEM32(eax);\n    MEM32(esp + 0x4C) = ecx;\n    edx = MEM32(eax + 4);\n    MEM32(esp + 0x50) = edx;\n    eax = MEM32(eax + 8);\n    ecx = esp + 0x60;\n    PUSH32(esp, ecx);\n    edx = esp + 0x2C;\n    MEM32(esp + 0x58) = eax;\n    PUSH32(esp, edx);\n    eax = esp + 0x30;\n    PUSH32(esp, eax);\n",
+          "    { uint32_t _triangle_eax = eax, _triangle_ebx = ebx, _triangle_ecx = ecx, _triangle_edx = edx, _triangle_esp = esp;\n    SET_LO16(_triangle_eax, MEM16(esi + -4));\n    SET_LO16(_triangle_edx, MEM16(esi));\n    SET_LO16(_triangle_ecx, MEM16(esi + -2));\n    MEM16(_triangle_esp + 0x5C) = LO16(_triangle_edx);\n    _triangle_eax = SX16(LO16(_triangle_eax));\n    _triangle_eax = _triangle_eax + _triangle_eax * 2;\n    _triangle_eax = edi + _triangle_eax * 8;\n    _triangle_edx = _triangle_eax;\n    _triangle_ebx = MEM32(_triangle_edx);\n    MEM32(_triangle_esp + 0x28) = _triangle_ebx;\n    _triangle_ebx = MEM32(_triangle_edx + 4);\n    _triangle_ecx = SX16(LO16(_triangle_ecx));\n    MEM32(_triangle_esp + 0x2C) = _triangle_ebx;\n    _triangle_edx = MEM32(_triangle_edx + 8);\n    MEM32(_triangle_esp + 0x30) = _triangle_edx;\n    _triangle_ecx = _triangle_ecx + _triangle_ecx * 2;\n    _triangle_edx = edi + _triangle_ecx * 8;\n    _triangle_ecx = MEM32(_triangle_edx);\n    MEM32(_triangle_esp + 0x34) = _triangle_ecx;\n    _triangle_ecx = MEM32(_triangle_edx + 4);\n    MEM32(_triangle_esp + 0x38) = _triangle_ecx;\n    _triangle_edx = MEM32(_triangle_edx + 8);\n    _triangle_ecx = (uint32_t)(int32_t)SMEM16(_triangle_esp + 0x5C);\n    MEM32(_triangle_esp + 0x3C) = _triangle_edx;\n    _triangle_ecx = _triangle_ecx + _triangle_ecx * 2;\n    _triangle_edx = edi + _triangle_ecx * 8;\n    _triangle_ecx = MEM32(_triangle_edx);\n    MEM32(_triangle_esp + 0x40) = _triangle_ecx;\n    _triangle_ecx = MEM32(_triangle_edx + 4);\n    MEM32(_triangle_esp + 0x44) = _triangle_ecx;\n    _triangle_edx = MEM32(_triangle_edx + 8);\n    _fb = (uint32_t)(0xC) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n    _cf = (int)((((uint64_t)(_triangle_eax) + (uint64_t)(0xC)) >> 32) & 1);\n    _triangle_eax = _triangle_eax + 0xC;\n    _fa = (uint32_t)(_triangle_eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((((~(((_fa - _fb)) ^ (_fb)) & (((_fa - _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n    MEM32(_triangle_esp + 0x48) = _triangle_edx;\n    _triangle_ecx = MEM32(_triangle_eax);\n    MEM32(_triangle_esp + 0x4C) = _triangle_ecx;\n    _triangle_edx = MEM32(_triangle_eax + 4);\n    MEM32(_triangle_esp + 0x50) = _triangle_edx;\n    _triangle_eax = MEM32(_triangle_eax + 8);\n    _triangle_ecx = _triangle_esp + 0x60;\n    PUSH32(_triangle_esp, _triangle_ecx);\n    _triangle_edx = _triangle_esp + 0x2C;\n    MEM32(_triangle_esp + 0x58) = _triangle_eax;\n    PUSH32(_triangle_esp, _triangle_edx);\n    _triangle_eax = _triangle_esp + 0x30;\n    PUSH32(_triangle_esp, _triangle_eax);\n    eax = _triangle_eax; ebx = _triangle_ebx; ecx = _triangle_ecx; edx = _triangle_edx; esp = _triangle_esp; }\n",
+          "800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n    MEM32(esp + 0x18) = ebx;\n\nloc_000EB2C2: ;\n",
+          "    g_ebp = ebp; /* frame stays current across calls */\n    g_seh_ebp = ebp;\n    PUSH32(esp, 0x0"
+        ]
+      ]
     },
     {
       "address": 963584,
@@ -144099,6 +144144,13 @@
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
         ],
         [
+          5207,
+          "_remainder=_dividend%_divisor;",
+          "_remainder=_dividend-_quotient*_divisor;",
+          "or==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; ",
+          " _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n    if(_fault) {\n    _cont_fault_code_00"
+        ],
+        [
           42174,
           "",
           "    { /* Fresh color path; original instruction resumes remain below. */\n        const uint32_t _material_record = MEM32(ebp + -8);\n        const uint32_t _material_palette = MEM32(ebp + -12);\n        eax = _material_record; ecx = _material_palette; edx = MEM32(ecx);\n        MEM32(eax + 0x14) = edx;\n        eax = _material_record; ecx = _material_palette; edx = MEM32(ecx + 0x4);\n        MEM32(eax + 0x18) = edx;\n        eax = _material_record; ecx = _material_palette; edx = MEM32(ecx + 0x8);\n        MEM32(eax + 0x1c) = edx;\n        eax = _material_record; ecx = _material_palette; edx = MEM32(ecx + 0xc);\n        MEM32(eax + 0x20) = edx;\n        eax = _material_record; ecx = _material_palette; edx = MEM32(ecx);\n        MEM32(eax + 0x24) = edx;\n        eax = _material_record; ecx = _material_palette; edx = MEM32(ecx + 0x4);\n        MEM32(eax + 0x28) = edx;\n        eax = _material_record; ecx = _material_palette; edx = MEM32(ecx + 0x8);\n        MEM32(eax + 0x2c) = edx;\n        goto loc_001A729B;\n    }\n",
@@ -175767,7 +175819,15 @@
       "address": 2228641,
       "name": "sub_002201A1",
       "file": "recomp_0056.c",
-      "edits": []
+      "edits": [
+        [
+          1486,
+          "    eax = MEM32(ebp + 0xC);\n    ecx = MEM32(ebp + 0x10);\n    xmm2 = XMM_SCALAR(MEMF(eax)); /* movss */\n    xmm2 = XMM_SHUFFLE(xmm2, xmm2, 0); /* shufps */\n    xmm2 = XMM_MUL(xmm2, XMM_MEM(ecx)); /* mulps */\n    xmm1 = XMM_SCALAR(MEMF(eax + 4)); /* movss */\n    xmm1 = XMM_SHUFFLE(xmm1, xmm1, 0); /* shufps */\n    xmm1 = XMM_MUL(xmm1, XMM_MEM(ecx + 0x10)); /* mulps */\n    xmm3 = XMM_SCALAR(MEMF(eax + 8)); /* movss */\n    xmm3 = XMM_SHUFFLE(xmm3, xmm3, 0); /* shufps */\n    xmm3 = XMM_MUL(xmm3, XMM_MEM(ecx + 0x20)); /* mulps */\n    xmm2 = XMM_ADD(xmm2, XMM_MEM(ecx + 0x30)); /* addps */\n    eax = MEM32(ebp + 8);\n    xmm2 = XMM_ADD(xmm2, xmm1); /* addps */\n    xmm2 = XMM_ADD(xmm2, xmm3); /* addps */\n    XMM_STORE_LOW(eax, xmm2); /* movlps */\n    xmm2 = XMM_SHUFFLE(xmm2, xmm2, 0xFE); /* shufps */\n    MEMF(eax + 8) = xmm2.f[0]; /* movss */\n    xmm2 = XMM_SHUFFLE(xmm2, xmm2, 0xFF); /* shufps */\n    MEMF(ebp + -4) = xmm2.f[0]; /* movss */\n",
+          "    { uint32_t _point_eax, _point_ecx;\n    RecompXmm _point_xmm1, _point_xmm2, _point_xmm3;\n    _point_eax = MEM32(ebp + 0xC);\n    _point_ecx = MEM32(ebp + 0x10);\n    _point_xmm2 = XMM_SCALAR(MEMF(_point_eax)); /* movss */\n    _point_xmm2 = XMM_SHUFFLE(_point_xmm2, _point_xmm2, 0); /* shufps */\n    _point_xmm2 = XMM_MUL(_point_xmm2, XMM_MEM(_point_ecx)); /* mulps */\n    _point_xmm1 = XMM_SCALAR(MEMF(_point_eax + 4)); /* movss */\n    _point_xmm1 = XMM_SHUFFLE(_point_xmm1, _point_xmm1, 0); /* shufps */\n    _point_xmm1 = XMM_MUL(_point_xmm1, XMM_MEM(_point_ecx + 0x10)); /* mulps */\n    _point_xmm3 = XMM_SCALAR(MEMF(_point_eax + 8)); /* movss */\n    _point_xmm3 = XMM_SHUFFLE(_point_xmm3, _point_xmm3, 0); /* shufps */\n    _point_xmm3 = XMM_MUL(_point_xmm3, XMM_MEM(_point_ecx + 0x20)); /* mulps */\n    _point_xmm2 = XMM_ADD(_point_xmm2, XMM_MEM(_point_ecx + 0x30)); /* addps */\n    _point_eax = MEM32(ebp + 8);\n    _point_xmm2 = XMM_ADD(_point_xmm2, _point_xmm1); /* addps */\n    _point_xmm2 = XMM_ADD(_point_xmm2, _point_xmm3); /* addps */\n    XMM_STORE_LOW(_point_eax, _point_xmm2); /* movlps */\n    _point_xmm2 = XMM_SHUFFLE(_point_xmm2, _point_xmm2, 0xFE); /* shufps */\n    MEMF(_point_eax + 8) = _point_xmm2.f[0]; /* movss */\n    _point_xmm2 = XMM_SHUFFLE(_point_xmm2, _point_xmm2, 0xFF); /* shufps */\n    MEMF(ebp + -4) = _point_xmm2.f[0]; /* movss */\n    eax = _point_eax; ecx = _point_ecx;\n    xmm1 = _point_xmm1; xmm2 = _point_xmm2; xmm3 = _point_xmm3; }\n",
+          "ebp = ebp; /* publish frame for frameless callees */\n    g_seh_ebp = ebp;\n    PUSH32(esp, ecx);\n",
+          "    g_fp_instruction_pointer = 0x002201F2u; g_fp_opcode = 0x1E8u; g_fp_code_selector = 8;\n    fp"
+        ]
+      ]
     },
     {
       "address": 2228767,
@@ -231779,7 +231839,22 @@
       "address": 3108416,
       "name": "sub_002F6E40",
       "file": "recomp_0087.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    extern uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_002F6E40(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int "
+        ],
+        [
+          14708,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags(_fa, _fb) & 0x8D5u);",
+          "int32_t)(int32_t)(_fb); /* cmp eax, edi (32-bit) */\n    _cf = (int)(_fa < _fb);\n",
+          "\n    if (((g_eflags & 0x1u) != 0)) { recomp_cont_site(&_cont_frame, 0x2002F6F33U"
+        ]
+      ]
     },
     {
       "address": 3108720,

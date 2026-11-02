@@ -114,4 +114,16 @@ smt9_matrix_transpose_rows PROC
     movups XMMWORD PTR [rdx + 80], xmm5
     ret
 smt9_matrix_transpose_rows ENDP
+
+; Exact arithmetic status bits for the original completion comparison.
+smt9_cmp32_flags PROC
+    cmp ecx, edx
+    seto dl
+    lahf
+    movzx eax, ah
+    movzx edx, dl
+    shl edx, 11
+    or eax, edx
+    ret
+smt9_cmp32_flags ENDP
 END

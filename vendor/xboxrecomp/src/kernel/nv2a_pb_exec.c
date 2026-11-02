@@ -3053,7 +3053,10 @@ static void raster_software_polygon(uint32_t a,uint32_t b,uint32_t c,uint32_t d,
 static void raster_program_triangle(uint32_t a,uint32_t b,uint32_t c,uint32_t p)
 {
 #if defined(_WIN32)
-    if(s_hw_program_active) { hw_program_triangle(a,b,c,p);return; }
+    if(s_hw_program_active) {
+        if(hw_polygon_modes_active())s_hw_polygon_info[s_hw_count/6]=primitive_polygon_info(a,b,c,0,3);
+        hw_program_triangle(a,b,c,p);return;
+    }
 #endif
     if(nv2a_get_state()->pgraph.regs[NV_PGRAPH_SETUPRASTER]&(NV_PGRAPH_SETUPRASTER_FRONTFACEMODE|NV_PGRAPH_SETUPRASTER_BACKFACEMODE)){raster_software_polygon(a,b,c,0,3,p);return;}
     raster_xf_clipped(&s_xf[a],&s_xf[b],&s_xf[c],&s_xf[p]);

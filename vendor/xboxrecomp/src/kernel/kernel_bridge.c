@@ -1981,7 +1981,7 @@ normal_callback: ;
     return state.delivered;
 }
 
-int xbox_DeliverThreadApcs(BOOLEAN user_apcs)
+__forceinline int xbox_DeliverThreadApcs(BOOLEAN user_apcs)
 {
     int recovering=recomp_cont_recovering(KERNEL_CONT_APC);
     uint32_t thread=0;

@@ -1,6 +1,16 @@
 # Building from your Japanese disc
 
-The guest APC entry keeps its eligibility and empty-queue checks ahead of the existing delivery implementation, so ordinary empty checks do not allocate continuation/register-capture storage. The original parity helper is forced inline using the existing compiler portability definition; its arithmetic, architectural flags and continuation layouts are unchanged. Fixed-vertex uniform storage is cleared only in the fixed-vertex branch that consumes it; programmable draws retain the original fixed-state-free path.
+The guest APC eligibility entry is forced inline while retaining its original guard order and empty-queue checks. Actual delivery stays in the existing separate body, so empty checks do not allocate continuation/register-capture storage. The original parity helper uses the existing forced-inline portability definition; its arithmetic, architectural flags and continuation layouts are unchanged. Fixed-vertex uniform storage is cleared only in the branch that consumes it; programmable draws retain the original fixed-state-free path.
+
+Selected observed geometry and material helpers derive the signed remainder from their already computed quotient. The existing signed-division guards, input capture, result-width checks, exception callbacks and continuation layout are unchanged. The project generator applies these six expression edits to the same four original functions; no second arithmetic engine or runtime choice is added.
+
+The selected point-transform function keeps EAX, ECX and XMM1 through XMM3 in ordinary native locals within its first call-free block. It publishes the same architectural values before the original x87 preparation and guest calls. Ordered SSE helpers, floating-point behavior, volatile memory operations and canonical continuation locals remain on their original paths.
+
+Triangle assembly keeps EAX, EBX, ECX, EDX and ESP in ordinary native locals within the selected call-free inner-loop block. It initializes partial-register values from the architectural state and publishes the same five final values before the original frame and guest-call preparation. The original vertex reads, stack writes, flags, call sites and continuation locals are retained; no collision or geometry result is cached or skipped.
+
+The observed GPU-completion poll uses native 32-bit CMP status bits from the existing Windows x64 assembly module. Its caller retains the original non-arithmetic flags, canonical comparison locals, volatile completion-word load and continuation/yield path. No waiting policy, cache or global translation rule is changed.
+
+Hardware triangle batches prepare polygon boundary data only when the existing front/back mode consumer uses it. The same index assembler is shared with quads, which calculate their final four-vertex metadata once. Original edge/point masks, primitive order, provoking vertices and synchronous draw/flush ownership remain unchanged.
 
 ## Requirements
 
@@ -82,6 +92,8 @@ Colour data stays on the GPU until the existing memory-ownership rules require C
 A fully dirty ARGB swizzled color surface occupying complete memory pages can be sampled through its existing guest-resolution GPU image. Reuse requires the original size, format and address, no pending output, no physical feedback or other dirty overlapping owner, and no candidate from the existing asset provider. The original resolve retains normalized coordinates and raw color channels. Partial or clean surfaces retain the existing RAM texture path. Every native color upload preserves dirty owners of its input pages through the existing preservation helper after query completion and before changing protection or reading RAM, including later linear aliases and display uploads. The asset provider uses its existing shape checks for a side-effect-free eligibility query; ordinary byte matching and replacement remain unchanged.
 
 Pure GPU completion pages reuse the existing per-view CPU-write guards after their real results are published. Repeated outputs can retain those guards instead of repeatedly changing every alias to writable and back. Actual CPU writes, native host writes and memory-view release use the same ownership and fault paths to restore write access. Pending GPU results still complete in order; color and depth pages retain their stronger publication rules. GPU output writes invalidate the original texture and vertex caches even while their guards remain.
+
+The completion writer reuses the colour-overlap result from its existing upload-marking walk. It resolves the same output pages and then refreshes pending query protections through the original helper, without a second colour-existence traversal. Other protection callers retain their existing path.
 
 Chinese high-resolution font atlases use read-only file mappings. The existing texture cache reads the original pixels when a page is needed, without allocating a private copy of every atlas at startup. Keep `runtime/fonts` beside the executable when Chinese is included. Japanese and imported English use their own original font assets. This changes source memory use, not glyphs, layout, resolution or GPU texture sizes.
 
