@@ -103065,7 +103065,7 @@
         [
           26,
           "",
-          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
           "void sub_000E9190(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
         ],
@@ -103084,11 +103084,32 @@
           " _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n    if(_fault) {\n    _cont_fault_code_00"
         ],
         [
+          21751,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebp, ecx (32-bit) */\n",
+          "\n    cpu_resume_000E91F7: ;\n    if ((!((g_eflags & 0x40u) != 0) && ((g_eflags & "
+        ],
+        [
+          23023,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebp, ecx (32-bit) */\n",
+          "\n    cpu_resume_000E9213: ;\n    if ((!((g_eflags & 0x40u) != 0) && ((g_eflags & "
+        ],
+        [
           24183,
           "_remainder=_dividend%_divisor;",
           "_remainder=_dividend-_quotient*_divisor;",
           "or==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; ",
           " _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n    if(_fault) {\n    _cont_fault_code_00"
+        ],
+        [
+          31459,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp esi, 3 (32-bit) */\n",
+          "\n    cpu_resume_000E9243: ;\n    if ((((g_eflags & 0x80u) != 0) != ((g_eflags & 0"
         ],
         [
           32443,
@@ -103105,11 +103126,25 @@
       "file": "recomp_0033.c",
       "edits": [
         [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_000E9550(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int "
+        ],
+        [
           4513,
           "_remainder=_dividend%_divisor;",
           "_remainder=_dividend-_quotient*_divisor;",
           "or==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; ",
           " _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n    if(_fault) {\n    _cont_fault_code_00"
+        ],
+        [
+          15795,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp esi, ebp (32-bit) */\n",
+          "\n    cpu_resume_000E95C5: ;\n    if ((((g_eflags & 0x80u) != 0) != ((g_eflags & 0"
         ]
       ]
     },
@@ -103743,9 +103778,16 @@
         [
           26,
           "",
-          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
           "void sub_000E9D70(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          5192,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x28), 6 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_000E9DED; /* jne: not equal / not "
         ],
         [
           11366,
@@ -103781,6 +103823,13 @@
           "",
           "fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    if (((g_eflags & 0x40u) != 0)) goto loc_000E9F22; /* je: equal / zero */\n\nlo"
+        ],
+        [
+          18132,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ecx (32-bit) */\n",
+          "\n    MEM32(esp + 0x18) = eax;\n    MEM32(esp + 0x10) = edx;\n    if (((g_eflags & "
         ],
         [
           19044,
@@ -104160,9 +104209,16 @@
         [
           26,
           "",
-          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
           "void sub_000EB220(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          4567,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x28), 6 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_000EB291; /* jne: not equal / not "
         ],
         [
           8537,
@@ -104170,6 +104226,13 @@
           "    { uint32_t _triangle_eax = eax, _triangle_ebx = ebx, _triangle_ecx = ecx, _triangle_edx = edx, _triangle_esp = esp;\n    SET_LO16(_triangle_eax, MEM16(esi + -4));\n    SET_LO16(_triangle_edx, MEM16(esi));\n    SET_LO16(_triangle_ecx, MEM16(esi + -2));\n    MEM16(_triangle_esp + 0x5C) = LO16(_triangle_edx);\n    _triangle_eax = SX16(LO16(_triangle_eax));\n    _triangle_eax = _triangle_eax + _triangle_eax * 2;\n    _triangle_eax = edi + _triangle_eax * 8;\n    _triangle_edx = _triangle_eax;\n    _triangle_ebx = MEM32(_triangle_edx);\n    MEM32(_triangle_esp + 0x28) = _triangle_ebx;\n    _triangle_ebx = MEM32(_triangle_edx + 4);\n    _triangle_ecx = SX16(LO16(_triangle_ecx));\n    MEM32(_triangle_esp + 0x2C) = _triangle_ebx;\n    _triangle_edx = MEM32(_triangle_edx + 8);\n    MEM32(_triangle_esp + 0x30) = _triangle_edx;\n    _triangle_ecx = _triangle_ecx + _triangle_ecx * 2;\n    _triangle_edx = edi + _triangle_ecx * 8;\n    _triangle_ecx = MEM32(_triangle_edx);\n    MEM32(_triangle_esp + 0x34) = _triangle_ecx;\n    _triangle_ecx = MEM32(_triangle_edx + 4);\n    MEM32(_triangle_esp + 0x38) = _triangle_ecx;\n    _triangle_edx = MEM32(_triangle_edx + 8);\n    _triangle_ecx = (uint32_t)(int32_t)SMEM16(_triangle_esp + 0x5C);\n    MEM32(_triangle_esp + 0x3C) = _triangle_edx;\n    _triangle_ecx = _triangle_ecx + _triangle_ecx * 2;\n    _triangle_edx = edi + _triangle_ecx * 8;\n    _triangle_ecx = MEM32(_triangle_edx);\n    MEM32(_triangle_esp + 0x40) = _triangle_ecx;\n    _triangle_ecx = MEM32(_triangle_edx + 4);\n    MEM32(_triangle_esp + 0x44) = _triangle_ecx;\n    _triangle_edx = MEM32(_triangle_edx + 8);\n    _fb = (uint32_t)(0xC) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n    _cf = (int)((((uint64_t)(_triangle_eax) + (uint64_t)(0xC)) >> 32) & 1);\n    _triangle_eax = _triangle_eax + 0xC;\n    _fa = (uint32_t)(_triangle_eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((((~(((_fa - _fb)) ^ (_fb)) & (((_fa - _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n    MEM32(_triangle_esp + 0x48) = _triangle_edx;\n    _triangle_ecx = MEM32(_triangle_eax);\n    MEM32(_triangle_esp + 0x4C) = _triangle_ecx;\n    _triangle_edx = MEM32(_triangle_eax + 4);\n    MEM32(_triangle_esp + 0x50) = _triangle_edx;\n    _triangle_eax = MEM32(_triangle_eax + 8);\n    _triangle_ecx = _triangle_esp + 0x60;\n    PUSH32(_triangle_esp, _triangle_ecx);\n    _triangle_edx = _triangle_esp + 0x2C;\n    MEM32(_triangle_esp + 0x58) = _triangle_eax;\n    PUSH32(_triangle_esp, _triangle_edx);\n    _triangle_eax = _triangle_esp + 0x30;\n    PUSH32(_triangle_esp, _triangle_eax);\n    eax = _triangle_eax; ebx = _triangle_ebx; ecx = _triangle_ecx; edx = _triangle_edx; esp = _triangle_esp; }\n",
           "800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n    MEM32(esp + 0x18) = ebx;\n\nloc_000EB2C2: ;\n",
           "    g_ebp = ebp; /* frame stays current across calls */\n    g_seh_ebp = ebp;\n    PUSH32(esp, 0x0"
+        ],
+        [
+          14637,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ecx (32-bit) */\n",
+          "\n    MEM32(esp + 0x1C) = eax;\n    MEM32(esp + 0x14) = edx;\n    if (((g_eflags & "
         ],
         [
           15459,
@@ -109181,7 +109244,22 @@
       "address": 1040304,
       "name": "sub_000FDFB0",
       "file": "recomp_0035.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000FDFB0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          47029,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 1042069,
@@ -128462,9 +128540,93 @@
         [
           26,
           "",
-          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    extern __declspec(noalias) uint32_t smt9_cmp8_flags(uint32_t, uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
           "void sub_0014E162(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          2952,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(eax), 0x73 (8-bit) */\n",
+          "\n    ecx = esi;\n    if ((!((g_eflags & 0x1u) != 0) && !((g_eflags & 0x40u) != 0)"
+        ],
+        [
+          4155,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(ecx + 0x194), ebx (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E32B; /* je: equal / zero */\n\nl"
+        ],
+        [
+          4835,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, edx (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014E1C0; /* jne: not equal / not "
+        ],
+        [
+          5515,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(ecx), ebx (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E32B; /* je: equal / zero */\n\nl"
+        ],
+        [
+          6171,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ebx (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) { recomp_cont_site(&_cont_frame, 0x20014E16"
+        ],
+        [
+          7224,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(eax), ebx (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E32B; /* je: equal / zero */\n\nl"
+        ],
+        [
+          8809,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 0xFFFFFFFFu (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E20F; /* je: equal / zero */\n\nl"
+        ],
+        [
+          10056,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 0xFFFFFFFFu (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E238; /* je: equal / zero */\n\nl"
+        ],
+        [
+          11303,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 0xFFFFFFFFu (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E261; /* je: equal / zero */\n\nl"
+        ],
+        [
+          12534,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ebx (32-bit) */\n",
+          "\n    if ((((g_eflags & 0x80u) != 0) != ((g_eflags & 0x800u) != 0))) goto loc_001"
+        ],
+        [
+          13642,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "a); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(eax + 0x206C), ebx (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E32B; /* je: equal / zero */\n\nl"
+        ],
+        [
+          15901,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "a); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(eax + 0x1C5C), ebx (32-bit) */\n",
+          "\n    POP32(esp, ebp);\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014E32B; /* "
         ],
         [
           17491,
@@ -128489,9 +128651,331 @@
         [
           26,
           "",
-          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    extern __declspec(noalias) uint32_t smt9_cmp8_flags(uint32_t, uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
           "void sub_0014E3C7(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          3819,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, ebx (32-bit) */\n",
+          "\n    cpu_resume_0014E3D9: ;\n    PUSH32(esp, edi);\n    cpu_resume_0014E3DA: ;\n   "
+        ],
+        [
+          4678,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, ebx (32-bit) */\n",
+          "\n    cpu_resume_0014E3EA: ;\n    if ((((g_eflags & 0x40u) != 0) || ((g_eflags & 0"
+        ],
+        [
+          7161,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ebx (32-bit) */\n",
+          "\n    cpu_resume_0014E40E: ;\n    MEM32(esi + 0x141C) = edx;\n    cpu_resume_0014E4"
+        ],
+        [
+          9609,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          " _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(eax + ecx + 0x1308), 0xD (8-bit) */\n",
+          "\n    cpu_resume_0014E43C: ;\n    if (!((g_eflags & 0x40u) != 0)) { recomp_cont_si"
+        ],
+        [
+          11286,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, edx (32-bit) */\n",
+          "\n    cpu_resume_0014E44B: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E452"
+        ],
+        [
+          11992,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 2 (32-bit) */\n",
+          "\n    cpu_resume_0014E450: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014E45"
+        ],
+        [
+          18449,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ebx (32-bit) */\n",
+          "\n    cpu_resume_0014E4C8: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E515"
+        ],
+        [
+          19187,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(eax + 0xEC), ebx (32-bit) */\n",
+          "\n    cpu_resume_0014E4D0: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014EAA4"
+        ],
+        [
+          23972,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 1 (32-bit) */\n",
+          "\n    cpu_resume_0014E52E: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E535"
+        ],
+        [
+          24678,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 3 (32-bit) */\n",
+          "\n    cpu_resume_0014E533: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014E56"
+        ],
+        [
+          25430,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "a); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x1934), ebx (32-bit) */\n",
+          "\n    cpu_resume_0014E53B: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E563"
+        ],
+        [
+          28842,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, ebx (32-bit) */\n",
+          "\n    cpu_resume_0014E565: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014EAA4"
+        ],
+        [
+          30118,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(eax + 1), 0x1E (8-bit) */\n",
+          "\n    cpu_resume_0014E589: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014EAA"
+        ],
+        [
+          30985,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "a); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x140C), ebx (32-bit) */\n",
+          "\n    cpu_resume_0014E5A0: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E67F"
+        ],
+        [
+          33763,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          " = (int32_t)(int8_t)(_fb); /* cmp MEM8(ecx + edi + 0x3268), LO8(ebx) (8-bit) */\n",
+          "\n    cpu_resume_0014E5CD: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014E5D"
+        ],
+        [
+          35077,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ecx (32-bit) */\n",
+          "\n    cpu_resume_0014E5DD: ;\n    if ((((g_eflags & 0x40u) != 0) || ((g_eflags & 0"
+        ],
+        [
+          37560,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 1 (32-bit) */\n",
+          "\n    cpu_resume_0014E5FD: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014E60"
+        ],
+        [
+          44485,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, eax (32-bit) */\n",
+          "\n    cpu_resume_0014E652: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014EAA4"
+        ],
+        [
+          45375,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(ecx + 1), 0x1E (8-bit) */\n",
+          "\n    cpu_resume_0014E66E: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014EAA4"
+        ],
+        [
+          46616,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ebx (32-bit) */\n",
+          "\n    cpu_resume_0014E68A: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E7AF"
+        ],
+        [
+          47322,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 2 (32-bit) */\n",
+          "\n    cpu_resume_0014E693: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E7AF"
+        ],
+        [
+          48028,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 3 (32-bit) */\n",
+          "\n    cpu_resume_0014E69C: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E7AF"
+        ],
+        [
+          48854,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, ecx (32-bit) */\n",
+          "\n    cpu_resume_0014E6B0: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E6E3"
+        ],
+        [
+          49560,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 7 (32-bit) */\n",
+          "\n    cpu_resume_0014E6B5: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014E6E"
+        ],
+        [
+          89649,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, eax (32-bit) */\n",
+          "\n    cpu_resume_0014E6CE: ;\n    MEM32(edi + 0x43A4) = ecx;\n    cpu_resume_0014E6"
+        ],
+        [
+          91229,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 8 (32-bit) */\n",
+          "\n    cpu_resume_0014E6EC: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E737"
+        ],
+        [
+          91935,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 5 (32-bit) */\n",
+          "\n    cpu_resume_0014E6F1: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E737"
+        ],
+        [
+          92641,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 6 (32-bit) */\n",
+          "\n    cpu_resume_0014E6F6: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E737"
+        ],
+        [
+          93347,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 7 (32-bit) */\n",
+          "\n    cpu_resume_0014E6FB: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E737"
+        ],
+        [
+          94719,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(eax), ecx (32-bit) */\n",
+          "\n    cpu_resume_0014E70D: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E71D"
+        ],
+        [
+          95461,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "a); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x1104), ebx (32-bit) */\n",
+          "\n    cpu_resume_0014E715: ;\n    if ((((g_eflags & 0x80u) != 0) == ((g_eflags & 0"
+        ],
+        [
+          99976,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 6 (32-bit) */\n",
+          "\n    cpu_resume_0014E75E: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E765"
+        ],
+        [
+          100682,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 7 (32-bit) */\n",
+          "\n    cpu_resume_0014E763: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014E77"
+        ],
+        [
+          102163,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(edi), 0x57 (8-bit) */\n",
+          "\n    cpu_resume_0014E77B: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014E78"
+        ],
+        [
+          104092,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(eax + 1), 0x1E (8-bit) */\n",
+          "\n    cpu_resume_0014E79A: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E7A3"
+        ],
+        [
+          110780,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x1BC), eax (32-bit) */\n",
+          "\n    cpu_resume_0014E80D: ;\n    if ((((g_eflags & 0x40u) != 0) || ((g_eflags & 0"
+        ],
+        [
+          112901,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, MEM32(esi + 0x1BC) (32-bit) */\n",
+          "\n    cpu_resume_0014E82C: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014E839"
+        ],
+        [
+          122661,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ebx (32-bit) */\n",
+          "\n    cpu_resume_0014E902: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014E91"
+        ],
+        [
+          123500,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 2 (32-bit) */\n",
+          "\n    cpu_resume_0014E913: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014E93"
+        ],
+        [
+          124816,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 3 (32-bit) */\n",
+          "\n    cpu_resume_0014E933: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014EAA"
+        ],
+        [
+          131742,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, eax (32-bit) */\n",
+          "\n    cpu_resume_0014E9C9: ;\n    if ((((g_eflags & 0x80u) != 0) != ((g_eflags & 0"
+        ],
+        [
+          133752,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, ebx (32-bit) */\n",
+          "\n    cpu_resume_0014E9F7: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014EA1"
+        ],
+        [
+          134526,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, eax (32-bit) */\n",
+          "\n    cpu_resume_0014EA01: ;\n    if ((((g_eflags & 0x80u) != 0) != ((g_eflags & 0"
+        ],
+        [
+          136470,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 2 (32-bit) */\n",
+          "\n    cpu_resume_0014EA21: ;\n    if (!((g_eflags & 0x40u) != 0)) { recomp_cont_si"
+        ],
+        [
+          137779,
+          "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags(_fa, _fb) & 0x8D5u);",
+          "2(edi + 0x43A8), 0 (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
+          "\n    cpu_resume_0014EA3B: ;\n    ebx = eax;\n    cpu_resume_0014EA3D: ;\n    if ((("
+        ],
+        [
+          138930,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "a); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, MEM32(edi + 0x439C) (32-bit) */\n",
+          "\n    cpu_resume_0014EA46: ;\n    if ((((g_eflags & 0x80u) != 0) != ((g_eflags & 0"
         ],
         [
           143580,
@@ -128550,6 +129034,27 @@
       "file": "recomp_0042.c",
       "edits": [
         [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    extern __declspec(noalias) uint32_t smt9_cmp8_flags(uint32_t, uint32_t);\n",
+          "void sub_0014F4B5(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int "
+        ],
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0014F4B5(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          7791,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(edx), 1 (8-bit) */\n",
+          "\n    MEM32(eax) = ecx;\n    MEM8(ebp + -13) = LO8(edx);\n    if (!((g_eflags & 0x4"
+        ],
+        [
           8327,
           "    uint32_t _block_0014F576_eax = eax;\n    uint32_t _block_0014F576_ecx = ecx;\n    _block_0014F576_eax = MEM32(esi + 0x1269C);\n    _block_0014F576_eax = MEM32(_block_0014F576_eax + 0x194);\n    _fb = (uint32_t)(0x108) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n    _cf = (int)((((uint64_t)(_block_0014F576_eax) + (uint64_t)(0x108)) >> 32) & 1);\n    _block_0014F576_eax = _block_0014F576_eax + 0x108;\n    _fa = (uint32_t)(_block_0014F576_eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n    _block_0014F576_ecx = MEM32(_block_0014F576_eax);\n    g_fp_instruction_pointer = 0x0014F589u; g_fp_opcode = 0x101u; g_fp_code_selector = 8; g_fp_data_pointer = _block_0014F576_ecx; g_fp_data_selector = 0x10;\n    fp_push(MEMF(_block_0014F576_ecx)); /* fld float */\n    _fb = (uint32_t)(4) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n    _cf = (int)((((uint64_t)(_block_0014F576_ecx) + (uint64_t)(4)) >> 32) & 1);\n    _block_0014F576_ecx = _block_0014F576_ecx + 4;\n    _fa = (uint32_t)(_block_0014F576_ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((((~(((_fa - _fb)) ^ (_fb)) & (((_fa - _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n",
           "    eax = MEM32(esi + 0x1269C);\n    eax = MEM32(eax + 0x194);\n    _fb = (uint32_t)(0x108) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n    _cf = (int)((((uint64_t)(eax) + (uint64_t)(0x108)) >> 32) & 1);\n    eax = eax + 0x108;\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n    ecx = MEM32(eax);\n    g_fp_instruction_pointer = 0x0014F589u; g_fp_opcode = 0x101u; g_fp_code_selector = 8; g_fp_data_pointer = ecx; g_fp_data_selector = 0x10;\n    fp_push(MEMF(ecx)); /* fld float */\n    _fb = (uint32_t)(4) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n    _cf = (int)((((uint64_t)(ecx) + (uint64_t)(4)) >> 32) & 1);\n    ecx = ecx + 4;\n    _fa = (uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((((~(((_fa - _fb)) ^ (_fb)) & (((_fa - _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n",
@@ -128562,6 +129067,181 @@
           "    MEM32(eax) = ecx;\n    goto loc_0014F643;\n",
           "_fp_data_selector = 0x10;\n    MEMF(ebp + edi * 4 + -28) = (float)fp_top(); fp_pop(); /* fstp */\n",
           "\nloc_0014F599: ;\n    _fa = (uint32_t)(LO8(edx)) & 0xFFu; _fb = (uint32_t)(LO8(edx)) & 0xFFu;\n   "
+        ],
+        [
+          12308,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(ebp + -13), 2 (8-bit) */\n",
+          "\n    edi = ebp + edi * 4 + -84;\n    MEM32(edi) = ebx;\n    MEM32(eax) = ecx;\n    "
+        ],
+        [
+          13594,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(ebp + -13), 3 (8-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F62C; /* jne: not equal / not "
+        ],
+        [
+          15176,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(ebp + -13), 4 (8-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F640; /* jne: not equal / not "
+        ],
+        [
+          17379,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edi, 2 (32-bit) */\n",
+          "\n    MEM32(eax) = ecx;\n    MEM32(ebp + -44) = edi;\n    if ((((g_eflags & 0x80u) "
+        ],
+        [
+          19317,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 7 (8-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F6B1; /* jne: not equal / not "
+        ],
+        [
+          21382,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 8 (8-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F6CF; /* jne: not equal / not "
+        ],
+        [
+          23657,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 9 (8-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F6EA; /* jne: not equal / not "
+        ],
+        [
+          25736,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 0xA (8-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F707; /* jne: not equal / not "
+        ],
+        [
+          27876,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 0xB (8-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F728; /* jne: not equal / not "
+        ],
+        [
+          29379,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0x63 (32-bit) */\n",
+          "\n    if ((((g_eflags & 0x80u) != 0) != ((g_eflags & 0x800u) != 0))) goto loc_001"
+        ],
+        [
+          30108,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 0xC (8-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F744; /* jne: not equal / not "
+        ],
+        [
+          31116,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x5A766C), eax (32-bit) */\n",
+          "\n    if ((((g_eflags & 0x80u) != 0) != ((g_eflags & 0x800u) != 0))) goto loc_001"
+        ],
+        [
+          32580,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(eax), 1 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F856; /* je: equal / zero */\n\nl"
+        ],
+        [
+          33217,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp HI8(eax), 1 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F856; /* je: equal / zero */\n\nl"
+        ],
+        [
+          33854,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(eax), 3 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F856; /* je: equal / zero */\n\nl"
+        ],
+        [
+          34491,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp HI8(eax), 3 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F856; /* je: equal / zero */\n\nl"
+        ],
+        [
+          35128,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(eax), 2 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F78D; /* je: equal / zero */\n\nl"
+        ],
+        [
+          35765,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp HI8(eax), 2 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F78D; /* je: equal / zero */\n\nl"
+        ],
+        [
+          36402,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(eax), 4 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F78D; /* je: equal / zero */\n\nl"
+        ],
+        [
+          37039,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp HI8(eax), 4 (8-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F907; /* jne: not equal / not "
+        ],
+        [
+          38703,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 1 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F8C6; /* je: equal / zero */\n\nl"
+        ],
+        [
+          40310,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 2 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F8C6; /* je: equal / zero */\n\nl"
+        ],
+        [
+          41992,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 3 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F8C6; /* je: equal / zero */\n\nl"
+        ],
+        [
+          43648,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 4 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F8C6; /* je: equal / zero */\n\nl"
+        ],
+        [
+          45290,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 5 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F8C6; /* je: equal / zero */\n\nl"
         ],
         [
           46840,
@@ -128585,6 +129265,13 @@
           "\nloc_0014F867: ;\n    _fa = (uint32_t)(LO8(ebx)) & 0xFFu; _fb = (uint32_t)(1) & 0xFFu;\n    _fas ="
         ],
         [
+          48472,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 1 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F8C6; /* je: equal / zero */\n\nl"
+        ],
+        [
           48944,
           "    uint32_t _block_0014F86C_eax = eax;\n    int _block_0014F86C_g_fp_top = g_fp_top;\n    #define g_fp_top _block_0014F86C_g_fp_top\n    g_fp_instruction_pointer = 0x0014F86Cu; g_fp_opcode = 0x145u; g_fp_code_selector = 8; g_fp_data_pointer = ebp + -28; g_fp_data_selector = 0x10;\n",
           "    g_fp_instruction_pointer = 0x0014F86Cu; g_fp_opcode = 0x145u; g_fp_code_selector = 8; g_fp_data_pointer = ebp + -28; g_fp_data_selector = 0x10;\n",
@@ -128604,6 +129291,13 @@
           "    if (!((g_eflags & 0x4u) != 0)) goto loc_0014F87E; /* jnp: not parity */\n",
           " ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "\nloc_0014F879: ;\n    _fa = (uint32_t)(LO8(ebx)) & 0xFFu; _fb = (uint32_t)(2) & 0xFFu;\n    _fas ="
+        ],
+        [
+          50545,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 2 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F8C6; /* je: equal / zero */\n\nl"
         ],
         [
           51017,
@@ -128627,6 +129321,13 @@
           "\nloc_0014F88B: ;\n    _fa = (uint32_t)(LO8(ebx)) & 0xFFu; _fb = (uint32_t)(3) & 0xFFu;\n    _fas ="
         ],
         [
+          52629,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 3 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F8C6; /* je: equal / zero */\n\nl"
+        ],
+        [
           53101,
           "    uint32_t _block_0014F890_eax = eax;\n    int _block_0014F890_g_fp_top = g_fp_top;\n    #define g_fp_top _block_0014F890_g_fp_top\n    g_fp_instruction_pointer = 0x0014F890u; g_fp_opcode = 0x145u; g_fp_code_selector = 8; g_fp_data_pointer = ebp + -28; g_fp_data_selector = 0x10;\n",
           "    g_fp_instruction_pointer = 0x0014F890u; g_fp_opcode = 0x145u; g_fp_code_selector = 8; g_fp_data_pointer = ebp + -28; g_fp_data_selector = 0x10;\n",
@@ -128646,6 +129347,13 @@
           "    if (((g_eflags & 0x4u) != 0)) goto loc_0014F8A2; /* jp: parity */\n",
           " ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "\nloc_0014F89D: ;\n    _fa = (uint32_t)(LO8(ebx)) & 0xFFu; _fb = (uint32_t)(4) & 0xFFu;\n    _fas ="
+        ],
+        [
+          54690,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 4 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F8C6; /* je: equal / zero */\n\nl"
         ],
         [
           55162,
@@ -128669,6 +129377,13 @@
           "\nloc_0014F8AF: ;\n    _fa = (uint32_t)(LO8(ebx)) & 0xFFu; _fb = (uint32_t)(5) & 0xFFu;\n    _fas ="
         ],
         [
+          56768,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 5 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F8C6; /* je: equal / zero */\n\nl"
+        ],
+        [
           57240,
           "    uint32_t _block_0014F8B4_eax = eax;\n    int _block_0014F8B4_g_fp_top = g_fp_top;\n    #define g_fp_top _block_0014F8B4_g_fp_top\n    g_fp_instruction_pointer = 0x0014F8B4u; g_fp_opcode = 0x145u; g_fp_code_selector = 8; g_fp_data_pointer = ebp + -28; g_fp_data_selector = 0x10;\n",
           "    g_fp_instruction_pointer = 0x0014F8B4u; g_fp_opcode = 0x145u; g_fp_code_selector = 8; g_fp_data_pointer = ebp + -28; g_fp_data_selector = 0x10;\n",
@@ -128688,6 +129403,62 @@
           "    if (((g_eflags & 0x4u) != 0)) goto loc_0014F8CD; /* jp: parity */\n",
           " ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "\nloc_0014F8C1: ;\n    _fa = (uint32_t)(LO8(ebx)) & 0xFFu; _fb = (uint32_t)(6) & 0xFFu;\n    _fas ="
+        ],
+        [
+          58835,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ebx), 6 (8-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F8CD; /* jne: not equal / not "
+        ],
+        [
+          59556,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(ebp + -52), 2 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F8DB; /* jne: not equal / not "
+        ],
+        [
+          60679,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(ebp + -52), 3 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F8E9; /* jne: not equal / not "
+        ],
+        [
+          61801,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(ebp + -52), 1 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F8F5; /* jne: not equal / not "
+        ],
+        [
+          62531,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp HI8(ebx), 1 (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014F91B; /* je: equal / zero */\n\nl"
+        ],
+        [
+          64706,
+          "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags(_fa, _fb) & 0x8D5u);",
+          "EM32(ebp + -36), 0 (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F961; /* jne: not equal / not "
+        ],
+        [
+          66504,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(ecx), 0x16 (8-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0014F961; /* jne: not equal / not "
+        ],
+        [
+          68322,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -128819,9 +129590,16 @@
         [
           26,
           "",
-          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
           "void sub_00150647(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          3977,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x2C), 3 (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00150980; /* je: equal / zero */\n\nl"
         ],
         [
           4522,
@@ -128887,6 +129665,20 @@
           "    if (((g_eflags & 0x4u) != 0)) goto loc_001506E0; /* jp: parity */\n\nloc_00150"
         ],
         [
+          13996,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, 2 (32-bit) */\n",
+          "\n    if ((((g_eflags & 0x80u) != 0) != ((g_eflags & 0x800u) != 0))) { recomp_con"
+        ],
+        [
+          14933,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x553950), edi (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0015097F; /* jne: not equal / not "
+        ],
+        [
           15425,
           "    uint32_t _block_0015070B_eax = eax;\n    int _block_0015070B_g_fp_top = g_fp_top;\n    #define g_fp_top _block_0015070B_g_fp_top\n",
           "",
@@ -128908,6 +129700,90 @@
           "    if (!((g_eflags & 0x40u) != 0)) goto loc_00150749; /* jne: not equal / not z"
         ],
         [
+          17728,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 3 (32-bit) */\n",
+          "\n    g_fp_instruction_pointer = 0x00150733u; g_fp_opcode = 0x19Eu; g_fp_code_sel"
+        ],
+        [
+          18594,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 4 (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00150749; /* je: equal / zero */\n\nl"
+        ],
+        [
+          19684,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x55394C), edi (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0015097F; /* jne: not equal / not "
+        ],
+        [
+          20374,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x553954), edi (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0015097F; /* jne: not equal / not "
+        ],
+        [
+          21064,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x553A30), edi (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0015097F; /* jne: not equal / not "
+        ],
+        [
+          21754,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x5548A4), edi (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0015097F; /* je: equal / zero */\n\nl"
+        ],
+        [
+          22434,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x5548A8), edi (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0015097F; /* je: equal / zero */\n\nl"
+        ],
+        [
+          23110,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x679C50), 5 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0015079A; /* jne: not equal / not "
+        ],
+        [
+          23800,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x553770), edi (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0015097F; /* je: equal / zero */\n\nl"
+        ],
+        [
+          24480,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x5548AC), edi (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_001507A6; /* je: equal / zero */\n\nl"
+        ],
+        [
+          25558,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x2C), edi (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00150857; /* jne: not equal / not "
+        ],
+        [
+          26611,
+          "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags(_fa, _fb) & 0x8D5u);",
+          " cmp MEM32(edi), 0 (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_001507DA; /* je: equal / zero */\n\nl"
+        ],
+        [
           30013,
           "    int _block_00150816_g_fp_top = g_fp_top;\n    #define g_fp_top _block_00150816_g_fp_top\n",
           "",
@@ -128920,6 +129796,188 @@
           "",
           "selector = 0x10;\n    MEMF(esi + 0x4384) = (float)fp_top(); fp_pop(); /* fstp */\n",
           "    goto loc_0015097F;\n\nloc_0015082A: ;\n    _fa = (uint32_t)(MEM32(0x679C50)) & "
+        ],
+        [
+          31086,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x679C50), 3 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00150851; /* jne: not equal / not "
+        ],
+        [
+          33697,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ecx (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0015095D; /* jne: not equal / not "
+        ],
+        [
+          34391,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x28), edi (32-bit) */\n",
+          "\n    ebx = ecx;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_001508C1; /* jne: n"
+        ],
+        [
+          35092,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x679C50), 3 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00150885; /* jne: not equal / not "
+        ],
+        [
+          35790,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "a); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x46AC), edi (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00150890; /* je: equal / zero */\n\nl"
+        ],
+        [
+          36478,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "a); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0xB6A4), edi (32-bit) */\n",
+          "\n    goto loc_0015088B;\n\nloc_00150885: ;\n    _fa = (uint32_t)(MEM32(esi + 0x46AC"
+        ],
+        [
+          37112,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "a); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x46AC), edi (32-bit) */\n",
+          "\n\nloc_0015088B: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_00150890; /* je: e"
+        ],
+        [
+          37859,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x28), edi (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_001508B9; /* je: equal / zero */\n\nl"
+        ],
+        [
+          38539,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x5548A0), ecx (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_001508A2; /* jne: not equal / not "
+        ],
+        [
+          39607,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x28), edi (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_001508B9; /* je: equal / zero */\n\nl"
+        ],
+        [
+          41507,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, edi (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0015097F; /* je: equal / zero */\n\nl"
+        ],
+        [
+          42197,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x126A4), edi (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_001508D9; /* jne: not equal / not "
+        ],
+        [
+          42883,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x679C50), 4 (32-bit) */\n",
+          "\n    MEM32(ebp + -4) = 2;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_001508DC;"
+        ],
+        [
+          43642,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(ebp + -4), edi (32-bit) */\n",
+          "\n    MEM32(ebp + 8) = edi;\n    if ((((g_eflags & 0x40u) != 0) || ((g_eflags & 0x"
+        ],
+        [
+          44507,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x679C50), 3 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00150920; /* jne: not equal / not "
+        ],
+        [
+          45173,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edi, ebx (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00150911; /* jne: not equal / not "
+        ],
+        [
+          45898,
+          "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags(_fa, _fb) & 0x8D5u);",
+          " cmp MEM32(edi), 0 (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00150911; /* je: equal / zero */\n\nl"
+        ],
+        [
+          46599,
+          "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags(_fa, _fb) & 0x8D5u);",
+          "2(esi + 0xB6A4), 0 (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0015094A; /* je: equal / zero */\n\nl"
+        ],
+        [
+          47247,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edi, eax (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00150920; /* jne: not equal / not "
+        ],
+        [
+          47972,
+          "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags(_fa, _fb) & 0x8D5u);",
+          " cmp MEM32(ebx), 0 (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0015094A; /* je: equal / zero */\n\nl"
+        ],
+        [
+          48620,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x5548A0), ecx (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00150932; /* jne: not equal / not "
+        ],
+        [
+          49314,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x2C), ecx (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00150932; /* jne: not equal / not "
+        ],
+        [
+          50039,
+          "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags(_fa, _fb) & 0x8D5u);",
+          " cmp MEM32(edi), 0 (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0015094A; /* jne: not equal / not "
+        ],
+        [
+          51453,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x2C), 1 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0015097F; /* jne: not equal / not "
+        ],
+        [
+          53235,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, MEM32(ebp + -4) (32-bit) */\n",
+          "\n    if ((((g_eflags & 0x80u) != 0) != ((g_eflags & 0x800u) != 0))) { recomp_con"
+        ],
+        [
+          54033,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 2 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0015097F; /* jne: not equal / not "
         ],
         [
           55645,
@@ -149086,7 +150144,22 @@
       "address": 1801221,
       "name": "sub_001B7C05",
       "file": "recomp_0049.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_001B7C05(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          12016,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 1801472,
@@ -174317,7 +175390,162 @@
       "address": 2213715,
       "name": "sub_0021C753",
       "file": "recomp_0056.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    extern __declspec(noalias) uint32_t smt9_cmp8_flags(uint32_t, uint32_t);\n",
+          "void sub_0021C753(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int "
+        ],
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0021C753(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          7577,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edi, 0x80 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x1u) != 0)) goto loc_0021C921; /* jae: above or equal (u"
+        ],
+        [
+          8325,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(eax), eax (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0021C838; /* je: equal / zero */\n\nl"
+        ],
+        [
+          9523,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, edi (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0021C814; /* jne: not equal / not "
+        ],
+        [
+          22629,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, edx (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0021C999; /* jne: not equal / not "
+        ],
+        [
+          25269,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edi, MEM32(esi + 0x1C) (32-bit) */\n",
+          "\n    if ((!((g_eflags & 0x1u) != 0) && !((g_eflags & 0x40u) != 0))) goto loc_002"
+        ],
+        [
+          26069,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, eax (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0021C974; /* je: equal / zero */\n\nl"
+        ],
+        [
+          27116,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, MEM32(ebp + -40) (32-bit) */\n",
+          "\n    if (((g_eflags & 0x1u) != 0)) goto loc_0021C974; /* jb: below (unsigned <) "
+        ],
+        [
+          27845,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, ecx (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0021C974; /* je: equal / zero */\n\nl"
+        ],
+        [
+          28603,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp esi, MEM32(ebp + -40) (32-bit) */\n",
+          "\n    if (((g_eflags & 0x1u) != 0)) goto loc_0021C970; /* jb: below (unsigned <) "
+        ],
+        [
+          32669,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, 1 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0021C9ED; /* jne: not equal / not "
+        ],
+        [
+          37087,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(edi), edi (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0021CA7D; /* jne: not equal / not "
+        ],
+        [
+          39852,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, eax (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0021CABB; /* je: equal / zero */\n\nl"
+        ],
+        [
+          44691,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(edi), edi (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0021CB5E; /* jne: not equal / not "
+        ],
+        [
+          47456,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, eax (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0021CB9C; /* je: equal / zero */\n\nl"
+        ],
+        [
+          49396,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, edi (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0021CC14; /* jne: not equal / not "
+        ],
+        [
+          53326,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, 0xFF00 (32-bit) */\n",
+          "\n    if ((!((g_eflags & 0x1u) != 0) && !((g_eflags & 0x40u) != 0))) goto loc_002"
+        ],
+        [
+          56280,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(edi), edi (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0021CCA3; /* jne: not equal / not "
+        ],
+        [
+          59250,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, eax (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0021CCEE; /* je: equal / zero */\n\nl"
+        ],
+        [
+          63625,
+          "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp8_flags(_fa, _fb) & 0x8D5u);",
+          " MEM8(ebp + -29), 0 (8-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0021CD59; /* je: equal / zero */\n\nl"
+        ],
+        [
+          77421,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "+= 16; recomp_cont_leave(&_cont_frame); return; /* ret 12 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2215662,
@@ -185963,7 +187191,50 @@
       "address": 2374277,
       "name": "sub_00243A85",
       "file": "recomp_0060.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    extern __declspec(noalias) uint32_t smt9_cmp8_flags(uint32_t, uint32_t);\n",
+          "void sub_00243A85(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    i"
+        ],
+        [
+          1138,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, 0xFFFFFFFFu (32-bit) */\n",
+          "\n    PUSH32(esp, esi);\n    if (((g_eflags & 0x40u) != 0)) goto loc_00243AD1; /* "
+        ],
+        [
+          3555,
+          "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags(_fa, _fb) & 0x8D5u);",
+          " MEM32(esi + 8), 0 (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00243AB0; /* jne: not equal / not "
+        ],
+        [
+          4523,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, MEM32(esi + 8) (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00243AC0; /* jne: not equal / not "
+        ],
+        [
+          5256,
+          "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags(_fa, _fb) & 0x8D5u);",
+          " MEM32(esi + 4), 0 (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00243AD1; /* jne: not equal / not "
+        ],
+        [
+          7111,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(eax), LO8(ebx) (8-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00243AD9; /* je: equal / zero */\n\nl"
+        ]
+      ]
     },
     {
       "address": 2374444,
@@ -229346,7 +230617,36 @@
       "address": 3061440,
       "name": "sub_002EB6C0",
       "file": "recomp_0087.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_002EB6C0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int "
+        ],
+        [
+          1947,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ecx (32-bit) */\n",
+          "\n    MEM32(esp + 0x14) = edx;\n    MEM32(esp + 0x18) = ebx;\n    if (((g_eflags & "
+        ],
+        [
+          4276,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, 0x30000 (32-bit) */\n",
+          "\n    MEM32(esp + 0x18) = edi;\n    if ((!((g_eflags & 0x1u) != 0) && !((g_eflags "
+        ],
+        [
+          5101,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, 0x10000 (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_002EB741; /* je: equal / zero */\n\nl"
+        ]
+      ]
     },
     {
       "address": 3061712,
@@ -229449,9 +230749,16 @@
         [
           26,
           "    int _flags = 0; /* fallback flag var */\n",
-          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n    int _flags = 0; /* fallback flag var */\n",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n    int _flags = 0; /* fallback flag var */\n",
           "void sub_002EBB20(void)\n{\n",
           "    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fbs = 0;\n    (void)_fa; (void)_fb; (void)_"
+        ],
+        [
+          4877,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x30C144), eax (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_002EBBEE; /* jne: not equal / not "
         ],
         [
           9617,
@@ -229522,6 +230829,20 @@
           "    if (!((g_eflags & 0x80u) != 0)) goto loc_002EBC89; /* jns: not sign (positive) */\n",
           "C)); recomp_fp_commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fadd dword ptr [esi + 0xaac] */\n",
           "\nloc_002EBC71: ;\n    _fa = (uint32_t)(MEM32(0x30C168)) & 0xFFFFFFFFu; _fb = (uint32_t)(eax) & 0x"
+        ],
+        [
+          14594,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x30C168), eax (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_002EBC89; /* je: equal / zero */\n\nl"
+        ],
+        [
+          17914,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x30C144), 2 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_002EBCD9; /* jne: not equal / not "
         ],
         [
           18406,
@@ -230247,9 +231568,37 @@
         [
           26,
           "",
-          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
           "void sub_002F0570(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          3130,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, edx (32-bit) */\n",
+          "\n    MEM32(esi + 8) = ebx;\n    if (((g_eflags & 0x1u) != 0)) goto loc_002F05D5; "
+        ],
+        [
+          4105,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0xA28 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x1u) != 0)) goto loc_002F05C1; /* jae: above or equal (u"
+        ],
+        [
+          4816,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 0xA28 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x1u) != 0)) goto loc_002F05CE; /* jae: above or equal (u"
+        ],
+        [
+          6586,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, ecx (32-bit) */\n",
+          "\n    PUSH32(esp, edi);\n    MEM32(ebp + 8) = ebx;\n    if (((g_eflags & 0x1u) != 0"
         ],
         [
           8402,
@@ -230259,11 +231608,46 @@
           "    esi = MEM32(ebp + 0x10);\n    edi = MEM32(ebp + 8);\n    _fb = (uint32_t)(4) &"
         ],
         [
+          12174,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, 0x3E (32-bit) */\n",
+          "\n    if (((g_eflags & 0x1u) != 0)) goto loc_002F066F; /* jb: below (unsigned <) "
+        ],
+        [
           14348,
           "    MEM32(ebx) = eax;\n",
           "    MEM32(ebx) = (eax & 0x1FFC0000u) | 0x60000007u;\n",
           "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n",
           "    esi = MEM32(ebp + 0x10);\n    edi = MEM32(ebp + 8);\n    ecx = MEM32(ebp + -4)"
+        ],
+        [
+          20982,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, edx (32-bit) */\n",
+          "\n    MEM32(eax) = ebx;\n    if (!((g_eflags & 0x1u) != 0)) goto loc_002F077B; /* "
+        ],
+        [
+          22020,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0xA14 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x1u) != 0)) goto loc_002F0790; /* jae: above or equal (u"
+        ],
+        [
+          22731,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 0xA14 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x1u) != 0)) goto loc_002F079D; /* jae: above or equal (u"
+        ],
+        [
+          23836,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0x3FE (32-bit) */\n",
+          "\n    edx = 0x1FF;\n    MEM32(ebp + 8) = ebx;\n    MEM32(ebp + -4) = edx;\n    if (!"
         ],
         [
           25400,
@@ -230303,7 +231687,29 @@
       "address": 3084096,
       "name": "sub_002F0F40",
       "file": "recomp_0087.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_002F0F40(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int "
+        ],
+        [
+          3251,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, 1 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_002F0F83; /* jne: not equal / not "
+        ],
+        [
+          4680,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 0xB00 (32-bit) */\n",
+          "\n    ecx = ebx;\n    esi = eax;\n    ebp = ecx;\n    if (!((g_eflags & 0x40u) != 0)"
+        ]
+      ]
     },
     {
       "address": 3084256,
@@ -230440,6 +231846,20 @@
       "name": "sub_002F1C10",
       "file": "recomp_0087.c",
       "edits": [
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_002F1C10(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    i"
+        ],
+        [
+          1452,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, MEM32(0x30C4C4) (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x1u) != 0)) goto loc_002F1C64; /* jae: above or equal (u"
+        ],
         [
           2879,
           "",
@@ -233438,9 +234858,79 @@
         [
           26,
           "",
-          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
           "void sub_002FB320(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          6995,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, 3 (32-bit) */\n",
+          "\n    ecx = MEM32(esi + 8);\n    MEM32(esp + 0x10) = 0x2000;\n    if (!((g_eflags &"
+        ],
+        [
+          7722,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 3 (32-bit) */\n",
+          "\n    if (((g_eflags & 0x1u) != 0)) goto loc_002FB412; /* jb: below (unsigned <) "
+        ],
+        [
+          8379,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, 3 (32-bit) */\n",
+          "\n\nloc_002FB3C3: ;\n    if ((!((g_eflags & 0x1u) != 0) && !((g_eflags & 0x40u) != "
+        ],
+        [
+          9086,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 3 (32-bit) */\n",
+          "\n    if ((!((g_eflags & 0x1u) != 0) && !((g_eflags & 0x40u) != 0))) goto loc_002"
+        ],
+        [
+          12299,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, 5 (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_002FB3F8; /* je: equal / zero */\n\nl"
+        ],
+        [
+          12951,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 5 (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_002FB400; /* jne: not equal / not "
+        ],
+        [
+          16077,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0xFFFFF000u (32-bit) */\n",
+          "\n    if ((((g_eflags & 0x80u) != 0) == ((g_eflags & 0x800u) != 0))) goto loc_002"
+        ],
+        [
+          16849,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0xFFF (32-bit) */\n",
+          "\n    if ((((g_eflags & 0x40u) != 0) || ((g_eflags & 0x80u) != 0) != ((g_eflags &"
+        ],
+        [
+          17644,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x2C), 0x19 (32-bit) */\n",
+          "\n    ebx = 0xC0000000u;\n    if (!((g_eflags & 0x1u) != 0)) goto loc_002FB46D; /*"
+        ],
+        [
+          19868,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ecx (32-bit) */\n",
+          "\n    if (((g_eflags & 0x1u) != 0)) goto loc_002FB4AB; /* jb: below (unsigned <) "
         ],
         [
           24708,
@@ -234051,9 +235541,65 @@
         [
           26,
           "",
-          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
           "void sub_002FCAF0(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          4076,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(ecx + 0x20), edi (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_002FCC89; /* je: equal / zero */\n\nl"
+        ],
+        [
+          5396,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, edx (32-bit) */\n",
+          "\n    PUSH32(esp, esi);\n    if (((g_eflags & 0x1u) != 0)) goto loc_002FCB6A; /* j"
+        ],
+        [
+          9477,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, 0x10 (32-bit) */\n",
+          "\n    if (((g_eflags & 0x1u) != 0)) { recomp_cont_site(&_cont_frame, 0x2002FCB80U"
+        ],
+        [
+          10360,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edi, ebx (32-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_002FCC18; /* jne: not equal / not "
+        ],
+        [
+          11689,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(edx + 0x1C), 2 (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_002FCBFC; /* je: equal / zero */\n\nl"
+        ],
+        [
+          14743,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edi, 0x41760 (32-bit) */\n",
+          "\n    if (((g_eflags & 0x1u) != 0)) { recomp_cont_site(&_cont_frame, 0x2002FCBC0U"
+        ],
+        [
+          16706,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x1C), 2 (32-bit) */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_002FCC6D; /* je: equal / zero */\n\nl"
+        ],
+        [
+          20195,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, 0x41760 (32-bit) */\n",
+          "\n    MEM32(esp + 0x14) = esi;\n    if (((g_eflags & 0x1u) != 0)) { recomp_cont_si"
         ],
         [
           21609,
