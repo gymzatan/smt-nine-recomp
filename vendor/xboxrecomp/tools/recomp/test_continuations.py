@@ -273,3 +273,80 @@ def test_unresolved_callee_retains_original_strict_entry(monkeypatch):
     assert 'RECOMP_ABI_CALL(0x00012000u, sub_00012000)' in code
     assert 'cont_call_00011000:' in code
     assert t.lifter.referenced_calls[0x12000]=='sub_00012000'
+
+
+def test_half_xmm_memory_mapping_and_lane_boundaries(tmp_path):
+    """Execute the canonical helpers at actual caller mapping and wrap boundaries."""
+    root=Path(__file__).resolve().parents[4]
+    compiler=shutil.which('cl');assert compiler,'requires existing MSVC environment'
+    source=tmp_path/'half-memory.c'
+    prefix='#include <windows.h>\n#include "'+(root/'config/recomp_types.h').as_posix()+'"\n'
+    body=r'''
+#include <assert.h>
+#include <stdlib.h>
+ptrdiff_t g_xbox_mem_offset;
+static void moves(uint32_t address) {
+    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;
+#define g_xbox_mem_offset _recomp_memory_offset
+    RecompXmm vectors[2]; unsigned dst_calls=0,src_calls=0,addr_calls=0;
+    vectors[0].u[0]=0x11111111u; vectors[0].u[1]=0x22222222u;
+    vectors[0].u[2]=0x33333333u; vectors[0].u[3]=0x44444444u;
+    MEM32(address-4)=0xaabbccddu;MEM32(address)=0x12345678u;
+    MEM32(address+4)=0x89abcdefu;MEM32(address+8)=0x55667788u;
+    XMM_LOAD_LOW(vectors[dst_calls++], (addr_calls++,address));
+    assert(dst_calls==1&&addr_calls==1);
+    assert(vectors[0].u[0]==0x12345678u&&vectors[0].u[1]==0x89abcdefu);
+    assert(vectors[0].u[2]==0x33333333u&&vectors[0].u[3]==0x44444444u);
+    XMM_LOAD_HIGH(vectors[1],address);
+    assert(vectors[1].u[2]==0x12345678u&&vectors[1].u[3]==0x89abcdefu);
+    XMM_STORE_HIGH((addr_calls++,address), vectors[src_calls++]);
+    assert(src_calls==1&&addr_calls==2);
+    assert(MEM32(address)==0x33333333u&&MEM32(address+4)==0x44444444u);
+    XMM_STORE_LOW(address,vectors[0]);
+    assert(MEM32(address)==0x12345678u&&MEM32(address+4)==0x89abcdefu);
+    assert(MEM32(address-4)==0xaabbccddu&&MEM32(address+8)==0x55667788u);
+#undef g_xbox_mem_offset
+}
+static void alias_order(void) {
+    RecompXmm *v=(RecompXmm*)XBOX_PTR(0x110u);
+    MEM32(0x10c)=0x13579bdfu;MEM32(0x110)=0x2468ace0u;
+    XMM_LOAD_LOW(*v,0x10cu);
+    assert(v->u[0]==0x13579bdfu&&v->u[1]==0x13579bdfu);
+    MEM32(0x114)=0x10203040u;MEM32(0x118)=0x50607080u;
+    XMM_LOAD_HIGH(*v,0x114u);
+    assert(v->u[2]==0x10203040u&&v->u[3]==0x10203040u);
+}
+int main(void) {
+    unsigned char *first=calloc(1,4096),*second=calloc(1,4096);
+    assert(first&&second&&first!=second);
+    g_xbox_mem_offset=(ptrdiff_t)first;moves(0x100);moves(0x101);alias_order();
+    g_xbox_mem_offset=(ptrdiff_t)second;moves(0x100);moves(0x101);alias_order();
+    free(first);free(second);
+    unsigned char *low=VirtualAlloc((void*)0x10000,4096,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
+    assert(low==(void*)0x10000);g_xbox_mem_offset=0;moves(0x10100);moves(0x10101);
+    assert(VirtualFree(low,0,MEM_RELEASE));
+    const SIZE_T span=(SIZE_T)0x100000000ULL;
+    unsigned char *wrapped=VirtualAlloc(0,span,MEM_RESERVE,PAGE_NOACCESS);assert(wrapped);
+    assert(VirtualAlloc(wrapped,4096,MEM_COMMIT,PAGE_READWRITE)==wrapped);
+    assert(VirtualAlloc(wrapped+span-4096,4096,MEM_COMMIT,PAGE_READWRITE)==wrapped+span-4096);
+    g_xbox_mem_offset=(ptrdiff_t)wrapped;
+    MEM32(0xfffffff8u)=0xaaaabbbbu;MEM32(0xfffffffcu)=0xabcdef01u;
+    MEM32(0)=0x12345678u;MEM32(4)=0xccccddddu;
+    RecompXmm v;v.u[0]=7;v.u[1]=8;v.u[2]=9;v.u[3]=10;
+    XMM_LOAD_HIGH(v,0xfffffffcu);
+    assert(v.u[0]==7&&v.u[1]==8&&v.u[2]==0xabcdef01u&&v.u[3]==0x12345678u);
+    XMM_STORE_LOW(0xfffffffcu,v);assert(MEM32(0xfffffffcu)==7&&MEM32(0)==8);
+    XMM_LOAD_LOW(v,0xfffffffcu);XMM_STORE_HIGH(0xfffffffcu,v);
+    assert(MEM32(0xfffffffcu)==0xabcdef01u&&MEM32(0)==0x12345678u);
+    assert(MEM32(0xfffffff8u)==0xaaaabbbbu&&MEM32(4)==0xccccddddu);
+    assert(VirtualFree(wrapped,0,MEM_RELEASE));return 0;
+}
+'''
+    source.write_text(prefix+body,encoding='utf-8')
+    executable=tmp_path/'half-memory.exe'
+    built=subprocess.run([compiler,'/nologo','/O2','/utf-8','/D_CRT_SECURE_NO_WARNINGS',
+                          '/I'+str(root/'vendor/xboxrecomp/src'),str(source),'/Fe:'+str(executable)],
+                         cwd=tmp_path,capture_output=True,text=True)
+    assert built.returncode==0,built.stdout+built.stderr
+    result=subprocess.run([str(executable)],cwd=tmp_path,capture_output=True,text=True)
+    assert result.returncode==0,result.stdout+result.stderr

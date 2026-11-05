@@ -295,7 +295,7 @@ static int hw_pending_output(HwMemory *memory,size_t offset,size_t bytes)
 }
 static void hw_guard_cpu_write_range(HwMemory *memory,size_t offset,size_t bytes);
 enum HwOutputProtection { HW_OUTPUT_REFRESH, HW_OUTPUT_APPEND, HW_OUTPUT_COMPLETE };
-static void hw_output_page_protection(HwQuery *query, enum HwOutputProtection transition)
+static void hw_output_page_protection(HwQuery *query, enum HwOutputProtection transition, int surface_empty)
 {
     size_t lo=query->offset&~(size_t)4095,hi=(query->offset+4+4095)&~(size_t)4095;
     for(size_t page=lo;page<hi;page+=4096) {
@@ -310,23 +310,30 @@ static void hw_output_page_protection(HwQuery *query, enum HwOutputProtection tr
             }
             if(protected) continue;
         }
-        int pending=hw_pending_output(query->memory,page,4096),colour=0;
-        DWORD protection=pending?PAGE_READONLY:PAGE_READWRITE;
-        for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==query->memory && hw_ranges_overlap(page,4096,c->memory_offset,hw_color_bytes(c))) {
-            colour=1;
-            if(c->dirty) {protection=PAGE_NOACCESS;break;}
-            if(!c->upload_needed) protection=PAGE_READONLY;
+        int colour=0;
+        DWORD protection=PAGE_READWRITE;
+        if(!surface_empty) {
+            for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==query->memory && hw_ranges_overlap(page,4096,c->memory_offset,hw_color_bytes(c))) {
+                colour=1;
+                if(c->dirty) {protection=PAGE_NOACCESS;break;}
+                if(!c->upload_needed) protection=PAGE_READONLY;
+            }
+            for(HwDepth *d=s_hw_depths;d;d=d->next) if(d->memory==query->memory && hw_ranges_overlap(page,4096,d->memory_offset,hw_depth_bytes(d))) {
+                colour=1;if(d->dirty){protection=PAGE_NOACCESS;break;}if(!d->upload_needed)protection=PAGE_READONLY;
+            }
         }
-        for(HwDepth *d=s_hw_depths;d;d=d->next) if(d->memory==query->memory && hw_ranges_overlap(page,4096,d->memory_offset,hw_depth_bytes(d))) {
-            colour=1;if(d->dirty){protection=PAGE_NOACCESS;break;}if(!d->upload_needed)protection=PAGE_READONLY;
+        /* Completion without a surface keeps the existing guard regardless
+         * of pending outputs. An appended output is already pending itself. */
+        if(transition==HW_OUTPUT_COMPLETE && !colour) {
+            hw_invalidate_texture_range(query->memory,page,4096);continue;
         }
+        if(protection==PAGE_READWRITE &&
+           (transition==HW_OUTPUT_APPEND || hw_pending_output(query->memory,page,4096)))
+            protection=PAGE_READONLY;
         /* Other pending outputs still own this already read-only page. */
         if(!colour) {
             /* Keep the existing owned write guard until an actual CPU write.
              * The host view publishes completion without making aliases writable. */
-            if(transition==HW_OUTPUT_COMPLETE) {
-                hw_invalidate_texture_range(query->memory,page,4096);continue;
-            }
             if(protection==PAGE_READONLY) {
                 DWORD *permissions=query->memory->write_guard_protections+
                     (page/4096)*query->memory->views.view_count;
@@ -349,7 +356,7 @@ static void hw_protect(HwMemory *memory,size_t offset,size_t bytes,DWORD protect
     for(size_t i=0;i<(size_t)s_hw_query_count;i++) {
         HwQuery *q=&s_hw_queries[i];
         if(q->memory==memory && q->pending && (completion || hw_ranges_overlap(lo,hi-lo,q->offset,4)))
-            hw_output_page_protection(q,HW_OUTPUT_REFRESH);
+            hw_output_page_protection(q,HW_OUTPUT_REFRESH,0);
     }
 }
 static void hw_append_query(HwQuery query)
@@ -382,18 +389,20 @@ static void hw_defer_output(uint8_t *output,uint32_t value)
     }
     ID3D11DeviceContext_End(d3d8_GetD3D11Context(),(ID3D11Asynchronous *)query.query);
     }
-    hw_append_query(query);hw_output_page_protection(&s_hw_queries[s_hw_query_count-1],HW_OUTPUT_APPEND);
+    hw_append_query(query);hw_output_page_protection(&s_hw_queries[s_hw_query_count-1],HW_OUTPUT_APPEND,0);
     gpu_timing_finish(start,&s_gpu.hardware_gpu_completion_ticks);
     hw_leave();
 }
-static void hw_mark_cpu_write(HwMemory *memory,size_t offset,size_t bytes,HwQuery *completed)
+static void hw_mark_cpu_write(HwMemory *memory,size_t offset,size_t bytes,HwQuery *completed,int surface_empty)
 {
     size_t lo=offset&~(size_t)4095,hi=(offset+bytes+4095)&~(size_t)4095;
-    int colour=0;
-    for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==memory && hw_ranges_overlap(lo,hi-lo,c->memory_offset,hw_color_bytes(c))) {c->upload_needed=1;colour=1;}
-    for(HwDepth *d=s_hw_depths;d;d=d->next) if(d->memory==memory && hw_ranges_overlap(lo,hi-lo,d->memory_offset,hw_depth_bytes(d))) d->upload_needed=1;
+    int colour=0,depth=0;
+    if(!surface_empty) {
+        for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==memory && hw_ranges_overlap(lo,hi-lo,c->memory_offset,hw_color_bytes(c))) {c->upload_needed=1;colour=1;}
+        for(HwDepth *d=s_hw_depths;d;d=d->next) if(d->memory==memory && hw_ranges_overlap(lo,hi-lo,d->memory_offset,hw_depth_bytes(d))) {d->upload_needed=1;depth=1;}
+    }
     if(completed) {
-        hw_output_page_protection(completed,HW_OUTPUT_COMPLETE);
+        hw_output_page_protection(completed,HW_OUTPUT_COMPLETE,!colour && !depth);
         if(!colour)return;
     }
     hw_protect(memory,offset,bytes,PAGE_READWRITE,completed!=NULL);
@@ -426,7 +435,7 @@ static void hw_guard_cpu_write_range(HwMemory *memory,size_t offset,size_t bytes
         }
     }
 }
-static void hw_release_cpu_write_range(HwMemory *memory,size_t offset,size_t bytes)
+static void hw_release_cpu_write_range(HwMemory *memory,size_t offset,size_t bytes,int output_free)
 {
     hw_invalidate_texture_range(memory,offset,bytes);
     size_t lo=offset&~(size_t)4095,hi=(offset+bytes+4095)&~(size_t)4095;
@@ -434,14 +443,20 @@ static void hw_release_cpu_write_range(HwMemory *memory,size_t offset,size_t byt
         DWORD *permissions=memory->write_guard_protections+(page/4096)*memory->views.view_count;
         int owned=0;for(unsigned i=0;i<memory->views.view_count;i++) if(permissions[i]){owned=1;break;}
         if(!owned) continue;
-        int output=hw_pending_output(memory,page,4096);
-        DWORD protection=output?PAGE_READONLY:0;
-        for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==memory && hw_ranges_overlap(page,4096,c->memory_offset,hw_color_bytes(c))) {
-            if(c->dirty) {protection=PAGE_NOACCESS;break;}
-            if(!c->upload_needed) protection=PAGE_READONLY;
-        }
-        for(HwDepth *d=s_hw_depths;d;d=d->next) if(d->memory==memory && hw_ranges_overlap(page,4096,d->memory_offset,hw_depth_bytes(d))) {
-            if(d->dirty){protection=PAGE_NOACCESS;break;}if(!d->upload_needed)protection=PAGE_READONLY;
+        int output=0;DWORD protection=0;
+        /* The fault classifier already excludes every colour, depth and
+         * output page while holding this same lock. Other callers retain
+         * the original ownership calculation. */
+        if(!output_free) {
+            output=hw_pending_output(memory,page,4096);
+            protection=output?PAGE_READONLY:0;
+            for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==memory && hw_ranges_overlap(page,4096,c->memory_offset,hw_color_bytes(c))) {
+                if(c->dirty) {protection=PAGE_NOACCESS;break;}
+                if(!c->upload_needed) protection=PAGE_READONLY;
+            }
+            for(HwDepth *d=s_hw_depths;d;d=d->next) if(d->memory==memory && hw_ranges_overlap(page,4096,d->memory_offset,hw_depth_bytes(d))) {
+                if(d->dirty){protection=PAGE_NOACCESS;break;}if(!d->upload_needed)protection=PAGE_READONLY;
+            }
         }
         for(unsigned i=0;i<memory->views.view_count;i++) if(permissions[i]) {
             DWORD previous;
@@ -456,7 +471,7 @@ static void hw_vertex_batch_discard(HwVertexBatch *entry)
 {
     entry->valid=0;
     for(unsigned i=0;i<entry->range_count;i++)
-        hw_release_cpu_write_range(entry->ranges[i].memory,entry->ranges[i].offset,entry->ranges[i].bytes);
+        hw_release_cpu_write_range(entry->ranges[i].memory,entry->ranges[i].offset,entry->ranges[i].bytes,0);
     free(entry->data);memset(entry,0,sizeof *entry);
 }
 static void hw_free_vertex_batches(void)
@@ -580,8 +595,8 @@ static void hw_vertex_batch_end(HwVertexBatch *entry,unsigned attribute_count)
 
 static void hw_disarm_texture(HwTexture *texture)
 {
-    if(texture->memory) hw_release_cpu_write_range(texture->memory,texture->memory_offset,texture->raw_size);
-    if(texture->palette_memory) hw_release_cpu_write_range(texture->palette_memory,texture->palette_offset,sizeof texture->palette);
+    if(texture->memory) hw_release_cpu_write_range(texture->memory,texture->memory_offset,texture->raw_size,0);
+    if(texture->palette_memory) hw_release_cpu_write_range(texture->palette_memory,texture->palette_offset,sizeof texture->palette,0);
 }
 static void hw_free_textures(void)
 {
@@ -780,7 +795,7 @@ static void hw_cpu_write_begin(uint32_t address,size_t bytes,int overwrite)
         if(p>=b && p-b<m->views.view_size && bytes<=m->views.view_size-(p-b)) {
             size_t offset=p-b;
             hw_preserve_cpu_write(m,offset,bytes,overwrite);
-            hw_mark_cpu_write(m,offset,bytes,NULL);hw_leave();return;
+            hw_mark_cpu_write(m,offset,bytes,NULL,0);hw_leave();return;
         }
     }
     hw_leave();
@@ -798,13 +813,13 @@ int nv2a_pb_host_write_begin(void *address,size_t bytes)
             /* Host reads may be short or fail: preserve every dirty owner on
              * pages made writable, without publishing unrelated surfaces. */
             hw_preserve_cpu_write(m,p-b,bytes,0);
-            hw_release_cpu_write_range(m,p-b,bytes);
+            hw_release_cpu_write_range(m,p-b,bytes,0);
             for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==m && hw_ranges_overlap(lo,hi-lo,c->memory_offset,hw_color_bytes(c))) {
                 size_t color_lo=c->memory_offset&~(size_t)4095,color_hi=(c->memory_offset+hw_color_bytes(c)+4095)&~(size_t)4095;
                 size_t begin=lo>color_lo?lo:color_lo,end=hi<color_hi?hi:color_hi;
-                hw_mark_cpu_write(m,begin,end-begin,NULL);
+                hw_mark_cpu_write(m,begin,end-begin,NULL,0);
             }
-            for(HwDepth *d=s_hw_depths;d;d=d->next) if(d->memory==m && hw_ranges_overlap(lo,hi-lo,d->memory_offset,hw_depth_bytes(d)))hw_mark_cpu_write(m,lo,hi-lo,NULL);
+            for(HwDepth *d=s_hw_depths;d;d=d->next) if(d->memory==m && hw_ranges_overlap(lo,hi-lo,d->memory_offset,hw_depth_bytes(d)))hw_mark_cpu_write(m,lo,hi-lo,NULL,0);
             return 1;
         }
     }
@@ -878,8 +893,8 @@ int nv2a_pb_handle_memory_fault(uintptr_t address,int is_write)
         } else hw_publish_all();
     } else if(!texture_fault) hw_collect_queries(1);
     if(is_write) {
-        if(texture_fault) hw_release_cpu_write_range(memory,offset&~(size_t)4095,4096);
-        else hw_mark_cpu_write(memory,write_offset,write_bytes,NULL);
+        if(texture_fault) hw_release_cpu_write_range(memory,offset&~(size_t)4095,4096,1);
+        else hw_mark_cpu_write(memory,write_offset,write_bytes,NULL,0);
         ++s_gpu.hardware_cpu_write_faults;
     } else ++s_gpu.hardware_cpu_read_faults;
     gpu_timing_finish(started,&s_gpu.hardware_cpu_access_ticks);hw_leave();return 1;
@@ -901,7 +916,7 @@ void nv2a_pb_release_memory_views(void)
     for(HwDepth *d=s_hw_depths;d;d=d->next){d->dirty=0;d->upload_needed=1;hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_READWRITE,0);}
     hw_free_depths(s_hw_depths);s_hw_depths=NULL;
     for(HwMemory *m=s_hw_memories;m;) { HwMemory *next=m->next;
-        hw_release_cpu_write_range(m,0,m->views.view_size);
+        hw_release_cpu_write_range(m,0,m->views.view_size,0);
         UnmapViewOfFile(m->host_view);free(m->write_guard_protections);free(m);m=next;
     }
     s_hw_memories=NULL;
@@ -1563,7 +1578,7 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
         entry->hash_next=s_hw_texture_buckets[bucket];s_hw_texture_buckets[bucket]=entry;
     }
     if(palette && (!entry->palette_memory || entry->identity.palette!=source->palette)) {
-        if(entry->palette_memory) hw_release_cpu_write_range(entry->palette_memory,entry->palette_offset,sizeof entry->palette);
+        if(entry->palette_memory) hw_release_cpu_write_range(entry->palette_memory,entry->palette_offset,sizeof entry->palette,0);
         XboxSharedMemoryViews views;
         if(!xbox_GetSharedMemoryViews(palette,sizeof entry->palette,&views)) hw_check(E_INVALIDARG,"palette shared memory identity");
         entry->palette_memory=hw_memory(&views);entry->palette_offset=views.offset;
@@ -1714,11 +1729,18 @@ static void hw_collect_queries(int wait)
         q->query=NULL;q->pending=0;
         if(q->memory) {
             ++s_gpu.hardware_gpu_completions;
-            for(HwColor *c=s_hw_colors;c;c=c->next)
-                if(c->memory==q->memory && hw_ranges_overlap(c->memory_offset,hw_color_bytes(c),q->offset,4)) hw_copy_color_to_memory(c);
-            for(HwDepth *d=s_hw_depths;d;d=d->next)if(d->memory==q->memory && hw_ranges_overlap(d->memory_offset,hw_depth_bytes(d),q->offset,4))hw_copy_depth_to_memory(d);
+            size_t lo=q->offset&~(size_t)4095,hi=(q->offset+4+4095)&~(size_t)4095;
+            int surface_empty=1;
+            for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==q->memory) {
+                if(surface_empty && hw_ranges_overlap(lo,hi-lo,c->memory_offset,hw_color_bytes(c)))surface_empty=0;
+                if(hw_ranges_overlap(c->memory_offset,hw_color_bytes(c),q->offset,4)) hw_copy_color_to_memory(c);
+            }
+            for(HwDepth *d=s_hw_depths;d;d=d->next)if(d->memory==q->memory) {
+                if(surface_empty && hw_ranges_overlap(lo,hi-lo,d->memory_offset,hw_depth_bytes(d)))surface_empty=0;
+                if(hw_ranges_overlap(d->memory_offset,hw_depth_bytes(d),q->offset,4))hw_copy_depth_to_memory(d);
+            }
             memcpy(q->memory->host_view+q->offset,&q->value,4);
-            hw_mark_cpu_write(q->memory,q->offset,4,q);
+            hw_mark_cpu_write(q->memory,q->offset,4,q,surface_empty);
         } else s_gpu.zpass_count+=(uint32_t)pixels;
     }
     if(consumed) {

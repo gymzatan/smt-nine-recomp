@@ -1184,7 +1184,7 @@ static void verify_colour_protection_work(void) {
     assert(!protection_test_calls && !protection_test_identical);
     protection_test_inspect=1;
     HwColor *color=s_hw_colors;assert(color->width==640 && color->height==480 && !color->upload_needed);
-    hw_mark_cpu_write(color->memory,color->memory_offset+4096,4,NULL);
+    hw_mark_cpu_write(color->memory,color->memory_offset+4096,4,NULL,0);
     assert(!color->dirty && color->upload_needed);
     unsigned previous_calls=protection_test_calls;hw_publish_all();assert(protection_test_calls>previous_calls);
     protection_pages_for_test(color->memory,color->memory_offset,(unsigned)((hw_color_bytes(color)+4095)/4096),PAGE_READWRITE);

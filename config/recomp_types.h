@@ -716,21 +716,21 @@ static inline void recomp_xmm_store_at(uint32_t addr, RecompXmm v, ptrdiff_t mem
 
 /* movlps/movhps move 8 bytes into or out of one half, leaving the
  * other half alone. */
-#define XMM_LOAD_LOW(dst, addr)   recomp_xmm_load_half(&(dst), (addr), 0)
-#define XMM_LOAD_HIGH(dst, addr)  recomp_xmm_load_half(&(dst), (addr), 1)
-#define XMM_STORE_LOW(addr, src)  recomp_xmm_store_half((addr), (src), 0)
-#define XMM_STORE_HIGH(addr, src) recomp_xmm_store_half((addr), (src), 1)
+#define XMM_LOAD_LOW(dst, addr)   recomp_xmm_load_half(&(dst), (addr), 0, g_xbox_mem_offset)
+#define XMM_LOAD_HIGH(dst, addr)  recomp_xmm_load_half(&(dst), (addr), 1, g_xbox_mem_offset)
+#define XMM_STORE_LOW(addr, src)  recomp_xmm_store_half((addr), (src), 0, g_xbox_mem_offset)
+#define XMM_STORE_HIGH(addr, src) recomp_xmm_store_half((addr), (src), 1, g_xbox_mem_offset)
 
 static inline void recomp_xmm_load_half(RecompXmm *dst, uint32_t addr,
-                                        int high) {
-    dst->u[high * 2]     = MEM32(addr);
-    dst->u[high * 2 + 1] = MEM32(addr + 4);
+                                        int high, ptrdiff_t memory_offset) {
+    dst->u[high * 2]     = MEM32_AT(addr, memory_offset);
+    dst->u[high * 2 + 1] = MEM32_AT(addr + 4, memory_offset);
 }
 
 static inline void recomp_xmm_store_half(uint32_t addr, RecompXmm src,
-                                         int high) {
-    MEM32(addr)     = src.u[high * 2];
-    MEM32(addr + 4) = src.u[high * 2 + 1];
+                                         int high, ptrdiff_t memory_offset) {
+    MEM32_AT(addr, memory_offset)     = src.u[high * 2];
+    MEM32_AT(addr + 4, memory_offset) = src.u[high * 2 + 1];
 }
 
 /** movlhps: dst high = src low. */
