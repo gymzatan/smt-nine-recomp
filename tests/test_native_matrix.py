@@ -38,6 +38,22 @@ def test_native_completion_cmp_matches_original_lifter(tmp_path):
      assert(actual==expected);assert(eax==a && edx==b);
     }
     '''
+    import json
+    rows=json.loads((ROOT/'config/codegen.json').read_text(encoding='utf-8'))['functions']
+    selected_sub=next(line for row in rows for edit in row['edits'] for line in edit[2].splitlines()
+                      if 'smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb)' in line)
+    original_sub=next(line for line in instruction('sub',['eax','edx']).splitlines()
+                      if line.strip().startswith('g_eflags ='))
+    text+='''
+    static void case_sub_snapshot(uint32_t result,uint32_t source,uint32_t old,int carry){
+     uint32_t _fa=result,_fb=source;int32_t _fas=(int32_t)result;int _cf=carry;
+     g_eflags=old;
+    '''+original_sub+'''
+     uint32_t expected=g_eflags;g_eflags=old;
+    '''+selected_sub+'''
+     assert(g_eflags==expected && _cf==carry && _fa==result && _fb==source);
+    }
+    '''
     text+='static void case_zero8(uint32_t value,uint32_t old){uint32_t _fa=0,_fb=0;int32_t _fas=0,_fbs=0;int _cf=0;eax=value;edx=0x98e36745u;g_eflags=old;\n_fa = (uint32_t)(LO8(eax)) & 0xFFu; _fb = (uint32_t)(0) & 0xFFu;\n_fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(eax), 0 (8-bit) */\n_cf = (int)(_fa < _fb);\ng_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\nuint32_t expected=g_eflags;uint32_t actual=(old&~0x8D5u)|(smt9_cmp8_zero_flags(value)&0x8D5u);\nassert(actual==expected && _cf==0 && eax==value && edx==0x98e36745u);}\nstatic void case_zero32(uint32_t value,uint32_t old){uint32_t _fa=0,_fb=0;int32_t _fas=0,_fbs=0;int _cf=0;eax=value;edx=0x98e36745u;g_eflags=old;\n_fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(0) & 0xFFFFFFFFu;\n_fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0 (32-bit) */\n_cf = (int)(_fa < _fb);\ng_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\nuint32_t expected=g_eflags;uint32_t actual=(old&~0x8D5u)|(smt9_cmp32_zero_flags(value)&0x8D5u);\nassert(actual==expected && _cf==0 && eax==value && edx==0x98e36745u);}\n'
     text+='''
     int main(void){
@@ -53,6 +69,11 @@ def test_native_completion_cmp_matches_original_lifter(tmp_path):
      for(unsigned i=0;i<256;i++)for(unsigned f=0;f<4;f++)case_zero8(i|0x42670000u,flags[f]);
      for(unsigned i=0;i<13;i++)for(unsigned f=0;f<4;f++)case_zero32(edge[i],flags[f]);
      for(unsigned i=0;i<65536;i++)for(unsigned h=0;h<4;h++)for(unsigned f=0;f<4;f++)case_zero32(i|high[h],flags[f]);
+     for(unsigned i=0;i<13;i++)for(unsigned j=0;j<13;j++)for(unsigned f=0;f<4;f++)
+     for(int carry=-1;carry<=1;carry++)case_sub_snapshot(edge[i],edge[j],flags[f],carry);
+     for(unsigned i=0;i<65536;i++)for(unsigned h=0;h<4;h++)for(unsigned f=0;f<4;f++)
+      case_sub_snapshot(i|high[h],edge[(i>>8)%13],flags[f],(int)(i%3)-1);
+     puts("ORIGINAL_SUB_SNAPSHOTS_EQUAL cases=1050604 independent_CF=retained");
      puts("ORIGINAL_LIFTER_FLAGS_EQUAL cmp32=676 cmp16=6291456 cmp8=262144 zero8=1024 zero32=1048628 upper_byte_arguments=retained non_arithmetic_flags=retained");return 0;
     }
     '''

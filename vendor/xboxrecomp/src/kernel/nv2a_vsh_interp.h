@@ -30,12 +30,15 @@
 typedef struct Nv2aVshSource {
     uint8_t neg, mux, reg, swizzle[4];
 } Nv2aVshSource;
+#pragma pack(push,1)
 typedef struct Nv2aVshInstruction {
     Nv2aVshSource source[3];
     uint8_t mac, ilu, constant, input, relative;
     uint8_t mac_mask, ilu_mask, temp, out_mask, out_address;
     uint8_t out_to_register, out_from_ilu, final, sources_used;
+    uint32_t inputs_read;
 } Nv2aVshInstruction;
+#pragma pack(pop)
 
 void nv2a_vsh_decode_instruction(const uint32_t words[4], Nv2aVshInstruction *instruction);
 

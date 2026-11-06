@@ -2320,7 +2320,22 @@
       "address": 75189,
       "name": "sub_000125B5",
       "file": "recomp_0000.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000125B5(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          37218,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 75536,
@@ -5182,6 +5197,13 @@
           "\n    ebx = 4;\n    if (((g_eflags & 0x40u) != 0)) goto loc_00015754; /* je: equal"
         ],
         [
+          34891,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00015892; /* je: equal / zero */\n\nl"
+        ],
+        [
           38922,
           "",
           "\n#undef g_xbox_mem_offset\n",
@@ -5194,7 +5216,22 @@
       "address": 88320,
       "name": "sub_00015900",
       "file": "recomp_0000.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00015900(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          5621,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 88480,
@@ -5236,7 +5273,22 @@
       "address": 90432,
       "name": "sub_00016140",
       "file": "recomp_0000.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00016140(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          5102,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 90512,
@@ -5339,6 +5391,20 @@
       "name": "sub_00016750",
       "file": "recomp_0000.c",
       "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00016750(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          26,
+          "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_00016750(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
         [
           26,
           "",
@@ -6094,6 +6160,20 @@
           "",
           "or = 0x10;\n    recomp_fp_push_integer(&g_fp_top, SMEM32(_block_0001682A_esp + 0x14)); /* fild */",
           "\n    if ((((g_eflags & 0x80u) != 0) == ((g_eflags & 0x800u) != 0))) goto loc_00016850; /* jge: g"
+        ],
+        [
+          22853,
+          "",
+          "\n#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ],
+        [
+          22853,
+          "",
+          "#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -11759,9 +11839,23 @@
         [
           26,
           "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00017750(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          26,
+          "",
           "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
           "void sub_00017750(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          2164,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    ecx = MEM32(0x54636C);\n    PUSH32(esp, ebx);\n    PUSH32(esp, esi);\n    PUSH"
         ],
         [
           12960,
@@ -11769,6 +11863,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp esi, eax (32-bit) */\n",
           "\n    if (((g_eflags & 0x1u) != 0)) { recomp_cont_site(&_cont_frame, 0x200017870U"
+        ],
+        [
+          14084,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -11788,7 +11889,22 @@
       "address": 96880,
       "name": "sub_00017A70",
       "file": "recomp_0000.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00017A70(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          2836,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 96944,
@@ -11806,7 +11922,22 @@
       "address": 97072,
       "name": "sub_00017B30",
       "file": "recomp_0000.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00017B30(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          1804,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 97088,
@@ -11852,7 +11983,22 @@
       "address": 97392,
       "name": "sub_00017C70",
       "file": "recomp_0000.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00017C70(void)\n{\n",
+          "    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fbs = 0;\n    (void)_fa; (void)_fb; (void)_fas;"
+        ],
+        [
+          2251,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 97472,
@@ -11964,7 +12110,7 @@
         [
           26,
           "",
-          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    extern __declspec(noalias) uint32_t smt9_cmp32_zero_flags(uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
           "void sub_000182E0(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
         ],
@@ -11985,7 +12131,7 @@
         [
           18705,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
-          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "    _cf = (int)smt9_cmp32_zero_flags(_fa);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, edi (32-bit) */\n",
           "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00018463; /* je: equal / zero */\n\nl"
         ],
@@ -12031,6 +12177,13 @@
       "name": "sub_00018590",
       "file": "recomp_0000.c",
       "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00018590(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
         [
           26,
           "",
@@ -12093,6 +12246,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, edx (32-bit) */\n",
           "\n    MEM32(esp + 0xC) = eax;\n    if (((g_eflags & 0x1u) != 0)) { recomp_cont_sit"
+        ],
+        [
+          17566,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -16919,9 +17079,30 @@
         [
           26,
           "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000215FF(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          26,
+          "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_000215FF(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          26,
+          "",
           "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    extern __declspec(noalias) uint32_t smt9_cmp32_zero_flags(uint32_t);\n",
           "void sub_000215FF(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          3857,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    g_fp_instruction_pointer = 0x0002160Bu; g_fp_opcode = 0x1EEu; g_fp_code_sel"
         ],
         [
           21103,
@@ -16964,6 +17145,20 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, MEM32(esp + 0x1C) (32-bit) */\n",
           "\n    if (!((g_eflags & 0x40u) != 0)) { recomp_cont_site(&_cont_frame, 0x2000218D"
+        ],
+        [
+          32975,
+          "",
+          "\n#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ],
+        [
+          32975,
+          "",
+          "#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -27114,7 +27309,43 @@
       "address": 240201,
       "name": "sub_0003AA49",
       "file": "recomp_0008.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_0003AA49(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    uint32_t _fa = 0, _f"
+        ],
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_0003AA49(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          2209,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    PUSH32(esp, esi);\n    PUSH32(esp, edi);\n    eax = esp + 0x10;\n    PUSH32(es"
+        ],
+        [
+          7046,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    g_fp_instruction_pointer = 0x0003AAA5u; g_fp_opcode = 0x15Cu; g_fp_code_sel"
+        ],
+        [
+          10778,
+          "",
+          "\n#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 240383,
@@ -101943,7 +102174,36 @@
       "address": 943056,
       "name": "sub_000E63D0",
       "file": "recomp_0033.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000E63D0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_000E63D0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          8214,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    cpu_resume_000E63DC: ;\n    PUSH32(esp, ebx);\n    cpu_resume_000E63DD: ;\n   "
+        ],
+        [
+          235906,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 946240,
@@ -101985,6 +102245,13 @@
       "file": "recomp_0033.c",
       "edits": [
         [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000E7350(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
           22260,
           "    int _block_000E7535_g_fp_top = g_fp_top;\n    #define g_fp_top _block_000E7535_g_fp_top\n",
           "",
@@ -102011,6 +102278,13 @@
           "",
           "commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fmul dword ptr [edi + 0x10] */\n",
           "\nloc_000E757D: ;\n    PUSH32(esp, ecx);\n    g_fp_instruction_pointer = 0x000E757E"
+        ],
+        [
+          32492,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -102019,6 +102293,20 @@
       "name": "sub_000E75D0",
       "file": "recomp_0033.c",
       "edits": [
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_000E75D0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int "
+        ],
+        [
+          2334,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    PUSH32(esp, ebx);\n    ebx = ecx;\n    eax = MEM32(ebx + 0x3C);\n    PUSH32(es"
+        ],
         [
           11224,
           "    uint32_t _block_000E7670_eax = eax;\n    uint32_t _block_000E7670_esp = esp;\n    int _block_000E7670_g_fp_top = g_fp_top;\n    #define g_fp_top _block_000E7670_g_fp_top\n    _block_000E7670_eax = MEM32(ebx + 0x134);\n",
@@ -103469,6 +103757,13 @@
       "file": "recomp_0033.c",
       "edits": [
         [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000E8E90(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    i"
+        ],
+        [
           2938,
           "    uint32_t _block_000E8EB7_eax = eax;\n    uint32_t _block_000E8EB7_ecx = ecx;\n    int _block_000E8EB7_g_fp_top = g_fp_top;\n    #define g_fp_top _block_000E8EB7_g_fp_top\n    _block_000E8EB7_ecx = _block_000E8EB7_eax;\n    { uint32_t _v=(uint32_t)(_block_000E8EB7_ecx), _c=(uint32_t)(4) & 31u; if(_c) {\n",
           "    ecx = eax;\n    { uint32_t _v=(uint32_t)(ecx), _c=(uint32_t)(4) & 31u; if(_c) {\n",
@@ -103530,6 +103825,13 @@
           "    eax = (eax & 0xFFFF0000u) | (uint32_t)(uint16_t)(((g_fp_top & 7u) << 11) | g_fp_cc | (g_fp_status_word & ~0x7f00u)); /* fnstsw ax <- fpu status */\n",
           "fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    if (!((g_eflags & 0x40u) != 0)) goto loc_000E8F13; /* jne: not equal / not z"
+        ],
+        [
+          10681,
+          "",
+          "\n#undef g_xbox_mem_offset",
+          "fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -103538,6 +103840,13 @@
       "name": "sub_000E9190",
       "file": "recomp_0033.c",
       "edits": [
+        [
+          26,
+          "",
+          "    extern int __cdecl _div64(__int64, int, int *);\n",
+          "void sub_000E9190(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
         [
           26,
           "",
@@ -103553,11 +103862,11 @@
           "\n    cpu_resume_000E91B8: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_000E91D"
         ],
         [
-          6020,
-          "_remainder=_dividend%_divisor;",
-          "_remainder=_dividend-_quotient*_divisor;",
-          "or==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; ",
-          " _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n    if(_fault) {\n    _cont_fault_code_00"
+          5864,
+          "    int _fault=(!_divisor || (_dividend==INT64_MIN && _divisor==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; _remainder=_dividend%_divisor; _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n",
+          "    uint64_t _dividend_magnitude=(uint64_t)_dividend;\n    if(_dividend<0) _dividend_magnitude=0-_dividend_magnitude;\n    uint64_t _divisor_magnitude=(uint64_t)_divisor;\n    if(_divisor<0) _divisor_magnitude=0-_divisor_magnitude;\n    uint64_t _quotient_limit=((_dividend<0)!=(_divisor<0))?UINT64_C(0x80000001):UINT64_C(0x80000000);\n    int _fault=(!_divisor || _dividend_magnitude>=_divisor_magnitude*_quotient_limit);\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { int _remainder32; _quotient=_div64(_dividend,(int)_divisor,&_remainder32); _remainder=_remainder32; }\n",
+          " ;\n    { int64_t _dividend=(int64_t)(((uint64_t)edx<<32)|eax);\n    int64_t _divisor=(int32_t)(ebp);\n",
+          "    if(_fault) {\n    _cont_fault_code_000E91C3=0xC0000094u; _cont_fault_address_000E91C3=0x000E91C3u"
         ],
         [
           12524,
@@ -103567,11 +103876,11 @@
           "\n    cpu_resume_000E91CE: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_000E91FB"
         ],
         [
-          13479,
-          "_remainder=_dividend%_divisor;",
-          "_remainder=_dividend-_quotient*_divisor;",
-          "or==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; ",
-          " _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n    if(_fault) {\n    _cont_fault_code_00"
+          13323,
+          "    int _fault=(!_divisor || (_dividend==INT64_MIN && _divisor==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; _remainder=_dividend%_divisor; _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n",
+          "    uint64_t _dividend_magnitude=(uint64_t)_dividend;\n    if(_dividend<0) _dividend_magnitude=0-_dividend_magnitude;\n    uint64_t _divisor_magnitude=(uint64_t)_divisor;\n    if(_divisor<0) _divisor_magnitude=0-_divisor_magnitude;\n    uint64_t _quotient_limit=((_dividend<0)!=(_divisor<0))?UINT64_C(0x80000001):UINT64_C(0x80000000);\n    int _fault=(!_divisor || _dividend_magnitude>=_divisor_magnitude*_quotient_limit);\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { int _remainder32; _quotient=_div64(_dividend,(int)_divisor,&_remainder32); _remainder=_remainder32; }\n",
+          " ;\n    { int64_t _dividend=(int64_t)(((uint64_t)edx<<32)|eax);\n    int64_t _divisor=(int32_t)(ebp);\n",
+          "    if(_fault) {\n    _cont_fault_code_000E91D9=0xC0000094u; _cont_fault_address_000E91D9=0x000E91D9u"
         ],
         [
           19979,
@@ -103602,11 +103911,11 @@
           "\n    cpu_resume_000E9213: ;\n    if ((!((g_eflags & 0x40u) != 0) && ((g_eflags & "
         ],
         [
-          24183,
-          "_remainder=_dividend%_divisor;",
-          "_remainder=_dividend-_quotient*_divisor;",
-          "or==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; ",
-          " _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n    if(_fault) {\n    _cont_fault_code_00"
+          24027,
+          "    int _fault=(!_divisor || (_dividend==INT64_MIN && _divisor==-1));\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; _remainder=_dividend%_divisor; _fault=(_quotient<INT32_MIN || _quotient>INT32_MAX); }\n",
+          "    uint64_t _dividend_magnitude=(uint64_t)_dividend;\n    if(_dividend<0) _dividend_magnitude=0-_dividend_magnitude;\n    uint64_t _divisor_magnitude=(uint64_t)_divisor;\n    if(_divisor<0) _divisor_magnitude=0-_divisor_magnitude;\n    uint64_t _quotient_limit=((_dividend<0)!=(_divisor<0))?UINT64_C(0x80000001):UINT64_C(0x80000000);\n    int _fault=(!_divisor || _dividend_magnitude>=_divisor_magnitude*_quotient_limit);\n    int64_t _quotient=0,_remainder=0;\n    if(!_fault) { int _remainder32; _quotient=_div64(_dividend,(int)_divisor,&_remainder32); _remainder=_remainder32; }\n",
+          " ;\n    { int64_t _dividend=(int64_t)(((uint64_t)edx<<32)|eax);\n    int64_t _divisor=(int32_t)(ecx);\n",
+          "    if(_fault) {\n    _cont_fault_code_000E9226=0xC0000094u; _cont_fault_address_000E9226=0x000E9226u"
         ],
         [
           31459,
@@ -104308,6 +104617,20 @@
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_000E9DED; /* jne: not equal / not "
         ],
         [
+          5971,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(ebx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    goto loc_000E9DF8;\n\nloc_000E9DED: ;\n    eax = 0xAAAAAAABu;\n    { uint64_t _"
+        ],
+        [
+          9889,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    g_fp_instruction_pointer = 0x000E9E5Cu; g_fp_opcode = 0x60u; g_fp_code_sele"
+        ],
+        [
           11366,
           "    uint32_t _block_000E9E6F_eax = eax;\n    uint32_t _block_000E9E6F_esp = esp;\n    int _block_000E9E6F_g_fp_top = g_fp_top;\n    #define g_fp_top _block_000E9E6F_g_fp_top\n    g_fp_instruction_pointer = 0x000E9E6Fu; g_fp_opcode = 0x15Cu; g_fp_code_selector = 8; g_fp_data_pointer = _block_000E9E6F_esp + 0x14; g_fp_data_selector = 0x10;\n    MEMF(_block_000E9E6F_esp + 0x14) = (float)fp_top(); fp_pop(); /* fstp */\n",
           "    g_fp_instruction_pointer = 0x000E9E6Fu; g_fp_opcode = 0x15Cu; g_fp_code_selector = 8; g_fp_data_pointer = esp + 0x14; g_fp_data_selector = 0x10;\n    MEMF(esp + 0x14) = (float)fp_top(); fp_pop(); /* fstp */\n",
@@ -104374,13 +104697,42 @@
       "address": 959168,
       "name": "sub_000EA2C0",
       "file": "recomp_0033.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000EA2C0(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          3656,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 959536,
       "name": "sub_000EA430",
       "file": "recomp_0033.c",
       "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000EA430(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          26,
+          "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_000EA430(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
         [
           3465,
           "    uint32_t _block_000EA460_eax = eax;\n    int _block_000EA460_g_fp_top = g_fp_top;\n    #define g_fp_top _block_000EA460_g_fp_top\n",
@@ -104401,6 +104753,20 @@
           "",
           "fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    if (((g_eflags & 0x4u) != 0)) goto loc_000EA477; /* jp: parity */\n\nloc_000EA"
+        ],
+        [
+          7260,
+          "",
+          "\n#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ],
+        [
+          7260,
+          "",
+          "#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -104409,6 +104775,13 @@
       "name": "sub_000EA490",
       "file": "recomp_0033.c",
       "edits": [
+        [
+          26,
+          "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_000EA490(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
         [
           26,
           "",
@@ -104492,6 +104865,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp esi, ecx (32-bit) */\n",
           "\n    if (!((g_eflags & 0x40u) != 0)) { recomp_cont_site(&_cont_frame, 0x2000EA4D"
+        ],
+        [
+          17196,
+          "",
+          "\n#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -104541,7 +104921,22 @@
       "address": 960064,
       "name": "sub_000EA640",
       "file": "recomp_0033.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_000EA640(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          1754,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    PUSH32(esp, ebx);\n    PUSH32(esp, esi);\n    PUSH32(esp, edi);\n    eax = esp"
+        ]
+      ]
     },
     {
       "address": 960256,
@@ -104758,6 +105153,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x28), 6 (32-bit) */\n",
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_000EB291; /* jne: not equal / not "
+        ],
+        [
+          5346,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(ebx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    goto loc_000EB29C;\n\nloc_000EB291: ;\n    eax = 0xAAAAAAABu;\n    { uint64_t _"
         ],
         [
           8537,
@@ -105928,9 +106330,16 @@
         [
           26,
           "",
-          "    extern __declspec(noalias) uint32_t smt9_cmp8_flags(uint32_t, uint32_t);\n",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    extern __declspec(noalias) uint32_t smt9_cmp8_flags(uint32_t, uint32_t);\n",
           "void sub_000EE1E0(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          2600,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    PUSH32(esp, ebx);\n    PUSH32(esp, esi);\n    esi = ecx;\n    eax = MEM32(esi "
         ],
         [
           4556,
@@ -106001,6 +106410,13 @@
           "    g_fp_instruction_pointer = 0x000EE2A9u; g_fp_opcode = 0x15Cu; g_fp_code_selector = 8; g_fp_data_pointer = esp + 0x38; g_fp_data_selector = 0x10;\n    MEMF(esp + 0x38) = (float)fp_top(); fp_pop(); /* fstp */\n",
           "commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fadd dword ptr [esi + 0x20] */\n",
           "    if (((g_eflags & 0x40u) != 0)) goto loc_000EE306; /* je: equal / zero */\n\nlo"
+        ],
+        [
+          11655,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    g_fp_instruction_pointer = 0x000EE2B8u; g_fp_opcode = 0xA6u; g_fp_code_sele"
         ],
         [
           13141,
@@ -106239,7 +106655,29 @@
       "address": 976352,
       "name": "sub_000EE5E0",
       "file": "recomp_0034.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_000EE5E0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          2447,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    PUSH32(esp, ebx);\n    PUSH32(esp, esi);\n    esi = ecx;\n    eax = MEM32(esi "
+        ],
+        [
+          14201,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    ecx = esp + 0x3C;\n    g_fp_instruction_pointer = 0x000EE771u; g_fp_opcode ="
+        ]
+      ]
     },
     {
       "address": 977008,
@@ -106295,6 +106733,27 @@
       "name": "sub_000EEBB0",
       "file": "recomp_0034.c",
       "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000EEBB0(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_000EEBB0(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    i"
+        ],
+        [
+          1567,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    PUSH32(esp, esi);\n    MEM32(esp + 8) = ecx;\n    edx = MEM32(ecx + 0xB0);\n  "
+        ],
         [
           3248,
           "    uint32_t _block_000EEC20_eax = eax;\n    int _block_000EEC20_g_fp_top = g_fp_top;\n    #define g_fp_top _block_000EEC20_g_fp_top\n",
@@ -106490,6 +106949,13 @@
           "    eax = edi;\n",
           "fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    if (((g_eflags & 0x40u) != 0)) goto loc_000EEDA2; /* je: equal / zero */\n\nlo"
+        ],
+        [
+          29056,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -106539,7 +107005,50 @@
       "address": 979376,
       "name": "sub_000EF1B0",
       "file": "recomp_0034.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_000EF1B0(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_000EF1B0(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    i"
+        ],
+        [
+          1660,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    PUSH32(esp, esi);\n    esi = ecx;\n    edx = 1;\n    ecx = 0x40304;\n    PUSH32"
+        ],
+        [
+          3902,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_000EF372; /* jne: not equal / not "
+        ],
+        [
+          13669,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    eax = MEM32(esi + 0x24);\n    ecx = MEM32(esi + 0x58);\n    g_fp_instruction_"
+        ],
+        [
+          19105,
+          "",
+          "\n#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 979840,
@@ -107881,6 +108390,13 @@
         [
           26,
           "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000F46F0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          26,
+          "",
           "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
           "void sub_000F46F0(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int "
@@ -108024,6 +108540,13 @@
           "    g_fp_instruction_pointer = 0x000F4844u; g_fp_opcode = 0x159u; g_fp_code_selector = 8; g_fp_data_pointer = ecx + -12; g_fp_data_selector = 0x10;\n    MEMF(ecx + -12) = (float)fp_top(); fp_pop(); /* fstp */\n    if ((((g_eflags & 0x80u) != 0) != ((g_eflags & 0x800u) != 0))) { recomp_cont_site(&_cont_frame, 0x2000F4774ULL); guest_cpu_yield(); goto loc_000F4774; } /* jl: less (signed <) */\n",
           "a) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n",
           "\nloc_000F484D: ;\n    PUSH32(esp, 0x1B02);\n    PUSH32(esp, 0x000F4857u);\n    recomp_cont_site(&_c"
+        ],
+        [
+          32025,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -108446,7 +108969,22 @@
       "address": 1004976,
       "name": "sub_000F55B0",
       "file": "recomp_0035.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_000F55B0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int "
+        ],
+        [
+          2342,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    cpu_resume_000F55B3: ;\n    g_fp_instruction_pointer = 0x000F55B3u; g_fp_opc"
+        ]
+      ]
     },
     {
       "address": 1005200,
@@ -108707,7 +109245,22 @@
       "address": 1011280,
       "name": "sub_000F6E50",
       "file": "recomp_0035.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000F6E50(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    uint32_t _fa = 0, _f"
+        ],
+        [
+          9158,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 1011616,
@@ -109676,7 +110229,22 @@
       "address": 1023088,
       "name": "sub_000F9C70",
       "file": "recomp_0035.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000F9C70(void)\n{\n",
+          "    int _cf = (int)(g_eflags & 1u); /* carry flag */\n\n    RecompContFrame _cont_frame;\n    const Rec"
+        ],
+        [
+          903,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 1023120,
@@ -110003,7 +110571,36 @@
       "address": 1030192,
       "name": "sub_000FB830",
       "file": "recomp_0035.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000FB830(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_000FB830(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    i"
+        ],
+        [
+          2117,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "MEM32(esi + 8)) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n\nloc_000FB847: ;\n    eax = MEM32(esp + 0x14);\n    edx = MEM32(eax + 4);\n    ecx"
+        ],
+        [
+          2958,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "+= 24; recomp_cont_leave(&_cont_frame); return; /* ret 20 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 1030272,
@@ -110021,7 +110618,22 @@
       "address": 1031424,
       "name": "sub_000FBD00",
       "file": "recomp_0035.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_000FBD00(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          43044,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 1032192,
@@ -111778,6 +112390,13 @@
         [
           26,
           "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_001013E0(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          26,
+          "",
           "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
           "void sub_001013E0(void)\n{\n",
           "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    i"
@@ -111832,6 +112451,13 @@
           "    if (((g_eflags & 0x4u) != 0)) goto loc_00101442; /* jp: parity */\n\nloc_00101"
         ],
         [
+          10241,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    g_fp_instruction_pointer = 0x001014A7u; g_fp_opcode = 0x67u; g_fp_code_sele"
+        ],
+        [
           11641,
           "    uint32_t _block_001014BA_eax = eax;\n    uint32_t _block_001014BA_esp = esp;\n    int _block_001014BA_g_fp_top = g_fp_top;\n    #define g_fp_top _block_001014BA_g_fp_top\n    g_fp_instruction_pointer = 0x001014BAu; g_fp_opcode = 0x15Cu; g_fp_code_selector = 8; g_fp_data_pointer = _block_001014BA_esp + 0x3C; g_fp_data_selector = 0x10;\n    MEMF(_block_001014BA_esp + 0x3C) = (float)fp_top(); fp_pop(); /* fstp */\n",
           "    g_fp_instruction_pointer = 0x001014BAu; g_fp_opcode = 0x15Cu; g_fp_code_selector = 8; g_fp_data_pointer = esp + 0x3C; g_fp_data_selector = 0x10;\n    MEMF(esp + 0x3C) = (float)fp_top(); fp_pop(); /* fstp */\n",
@@ -111865,6 +112491,13 @@
           "",
           "fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    if (!((g_eflags & 0x4u) != 0)) goto loc_0010155A; /* jnp: not parity */\n\nloc"
+        ],
+        [
+          16732,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    g_fp_instruction_pointer = 0x0010152Fu; g_fp_opcode = 0x67u; g_fp_code_sele"
         ],
         [
           18132,
@@ -111907,6 +112540,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(edx + 0x70), 9 (32-bit) */\n",
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00101572; /* jne: not equal / not "
+        ],
+        [
+          22800,
+          "",
+          "\n#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -128193,7 +128833,22 @@
       "address": 1345864,
       "name": "sub_00148948",
       "file": "recomp_0042.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00148948(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          6934,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          " += 12; recomp_cont_leave(&_cont_frame); return; /* ret 8 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 1346007,
@@ -128375,7 +129030,36 @@
       "address": 1348089,
       "name": "sub_001491F9",
       "file": "recomp_0042.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_001491F9(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_001491F9(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          11636,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(edx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    MEM32(eax + 0x108) = edx;\n\nloc_00149322: ;\n    _cf = 0; /* xor clears CF */"
+        ],
+        [
+          12816,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 1348393,
@@ -129222,7 +129906,36 @@
       "address": 1357426,
       "name": "sub_0014B672",
       "file": "recomp_0042.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0014B672(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          26,
+          "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_0014B672(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          62722,
+          "",
+          "\n#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ],
+        [
+          62722,
+          "",
+          "#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 1358113,
@@ -129264,7 +129977,22 @@
       "address": 1358503,
       "name": "sub_0014BAA7",
       "file": "recomp_0042.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0014BAA7(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          62589,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 1359269,
@@ -129325,6 +130053,13 @@
         [
           26,
           "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0014C6D5(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          26,
+          "",
           "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    extern __declspec(noalias) uint32_t smt9_cmp32_zero_flags(uint32_t);\n    extern __declspec(noalias) uint32_t smt9_cmp8_zero_flags(uint32_t);\n",
           "void sub_0014C6D5(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int "
@@ -129342,6 +130077,20 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, eax (32-bit) */\n",
           "\n    cpu_resume_0014C6F3: ;\n    if ((((g_eflags & 0x80u) != 0) != ((g_eflags & 0"
+        ],
+        [
+          5854,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(edx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    cpu_resume_0014C6FA: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014C73B"
+        ],
+        [
+          7567,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(edx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    cpu_resume_0014C705: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014C714"
         ],
         [
           11989,
@@ -129372,6 +130121,20 @@
           "\n    cpu_resume_0014C77D: ;\n    if ((!((g_eflags & 0x40u) != 0) && ((g_eflags & "
         ],
         [
+          16747,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    cpu_resume_0014C78C: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014C7A2"
+        ],
+        [
+          51509,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(edx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    cpu_resume_0014C7F9: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014C819"
+        ],
+        [
           53446,
           "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_zero_flags(_fa) & 0x8D5u);",
@@ -129393,11 +130156,39 @@
           "\n    cpu_resume_0014C862: ;\n    if ((!((g_eflags & 0x40u) != 0) && ((g_eflags & "
         ],
         [
+          58249,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    cpu_resume_0014C86B: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014C8A5"
+        ],
+        [
+          58950,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    cpu_resume_0014C870: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014C88C"
+        ],
+        [
           62096,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "a); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x4374), ebx (32-bit) */\n",
           "\n    cpu_resume_0014C8B4: ;\n    SET_LO8(eax, (((g_eflags & 0x40u) != 0)) ? 1 : 0"
+        ],
+        [
+          62987,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    cpu_resume_0014C8BE: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0014C8DF"
+        ],
+        [
+          65983,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -131236,7 +132027,22 @@
       "address": 1380085,
       "name": "sub_00150EF5",
       "file": "recomp_0042.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00150EF5(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          4169,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "+= 20; recomp_cont_leave(&_cont_frame); return; /* ret 16 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 1380156,
@@ -131318,11 +132124,25 @@
       "file": "recomp_0042.c",
       "edits": [
         [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00151032(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
           5763,
           "",
           "    /* The original initialized font directories are ordered by their key DWORD. */\n    if ((MEM32(ebp + 4)==0x001515F5u || MEM32(ebp + 4)==0x0015161Au ||\n         MEM32(ebp + 4)==0x0015164Au) && MEM32(ebp - 4)==0x00679CA8u &&\n        (int32_t)MEM32(ebp + 0xC)>0) {\n        uint32_t _font_directory=MEM32(0x00679CACu);\n        uint32_t _font_count=MEM32(ebp + 0xC),_font_table=MEM32(ebp + 8);\n        if ((MEM32(_font_directory)==_font_count && MEM32(_font_directory + 4)==_font_table) ||\n            (MEM32(_font_directory + 8)==_font_count && MEM32(_font_directory + 12)==_font_table)) {\n            eax=_font_count;\n            edi=_font_table + (_font_count << 4);\n            goto loc_0015107A;\n        }\n    }\n",
           "ne: not equal / not zero */\n\nloc_0015106F: ;\n    eax = esi;\n    goto loc_0015108A;\n\nloc_00151073: ;\n",
           "    _cf = 0; /* xor clears CF */\n    eax = 0; /* xor self */\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu"
+        ],
+        [
+          9114,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "+= 16; recomp_cont_leave(&_cont_frame); return; /* ret 12 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -150725,6 +151545,27 @@
       "file": "recomp_0049.c",
       "edits": [
         [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_001B447F(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_001B447F(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          4193,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "EM32(ebp + -4)) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    MEM32(ebp + -8) = 0x67968A;\n    esi = ebx + 0xDC;\n    MEM32(ebp + -16) = 4;"
+        ],
+        [
           18513,
           "    uint32_t _block_001B45E9_eax = eax;\n    int _block_001B45E9_g_fp_top = g_fp_top;\n    #define g_fp_top _block_001B45E9_g_fp_top\n    g_fp_instruction_pointer = 0x001B45E9u; g_fp_opcode = 0x186u; g_fp_code_selector = 8; g_fp_data_pointer = esi + -200; g_fp_data_selector = 0x10;\n",
           "    g_fp_instruction_pointer = 0x001B45E9u; g_fp_opcode = 0x186u; g_fp_code_selector = 8; g_fp_data_pointer = esi + -200; g_fp_data_selector = 0x10;\n",
@@ -150807,6 +151648,13 @@
           "    if (!((g_eflags & 0x40u) != 0)) goto loc_001B4751; /* jne: not equal / not zero */\n",
           " ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "\nloc_001B474C: ;\n    _cf = 0; /* logical op clears CF */\n    edi = edi | 1;\n    _fa = (uint32_t)"
+        ],
+        [
+          48937,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -151754,7 +152602,22 @@
       "address": 1799154,
       "name": "sub_001B73F2",
       "file": "recomp_0049.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_001B73F2(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          45496,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "nt_leave(&_cont_frame); return; /* fallthrough 0x001B7798 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 1800088,
@@ -153154,7 +154017,22 @@
       "address": 1825753,
       "name": "sub_001BDBD9",
       "file": "recomp_0050.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_001BDBD9(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    uint32_t _fa = 0, _f"
+        ],
+        [
+          3670,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 1825818,
@@ -177289,6 +178167,13 @@
           "\n    if ((((g_eflags & 0x1u) != 0) || ((g_eflags & 0x40u) != 0))) goto loc_0021B"
         ],
         [
+          11469,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n\nloc_0021B5B6: ;\n    { _cont_esp_0021B5C0 = g_esp;\n    PUSH32(esp, 0xFEEEFEEEu)"
+        ],
+        [
           13295,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
@@ -177308,6 +178193,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 4 (32-bit) */\n",
           "\n    if ((((g_eflags & 0x1u) != 0) || ((g_eflags & 0x40u) != 0))) goto loc_0021B"
+        ],
+        [
+          18766,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n\nloc_0021B625: ;\n    { _cont_esp_0021B62F = g_esp;\n    PUSH32(esp, 0xFEEEFEEEu)"
         ],
         [
           24696,
@@ -177345,6 +178237,20 @@
           "\n    if ((((g_eflags & 0x1u) != 0) || ((g_eflags & 0x40u) != 0))) goto loc_0021B"
         ],
         [
+          31585,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n\nloc_0021B702: ;\n    { _cont_esp_0021B70C = g_esp;\n    PUSH32(esp, 0xFEEEFEEEu)"
+        ],
+        [
+          32734,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "32(ebx + 0x30)) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n\nloc_0021B71B: ;\n    SET_LO8(ecx, MEM8(esi + 5));\n    _cf = 0; /* logical op cl"
+        ],
+        [
           34138,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
@@ -177364,6 +178270,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 4 (32-bit) */\n",
           "\n    if ((((g_eflags & 0x1u) != 0) || ((g_eflags & 0x40u) != 0))) goto loc_0021B"
+        ],
+        [
+          39609,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n\nloc_0021B786: ;\n    { _cont_esp_0021B790 = g_esp;\n    PUSH32(esp, 0xFEEEFEEEu)"
         ]
       ]
     },
@@ -177479,6 +178392,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, edi (32-bit) */\n",
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0021C814; /* jne: not equal / not "
+        ],
+        [
+          15431,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(edx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0021C876; /* je: equal / zero */\n\nl"
         ],
         [
           22629,
@@ -178125,6 +179045,13 @@
       "file": "recomp_0056.c",
       "edits": [
         [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0021F94B(void)\n{\n",
+          "    int _cf = (int)(g_eflags & 1u); /* carry flag */\n    #define fp_push(v) do { double _fp_value = "
+        ],
+        [
           473,
           "    RecompContFrame _cont_frame;\n    const RecompContLocal _cont_locals[] = {\n        {\"_cf\", &_cf, sizeof _cf},\n    };\n    uint64_t _cont_resume = recomp_cont_enter(&_cont_frame, 0x0021F94Bu, _cont_locals, 1);\n    switch (_cont_resume) {\n    case 0: break;\n    default: recomp_cont_invalid();\n    }\n",
           "",
@@ -178144,6 +179071,13 @@
           "",
           " fp_push\n    #undef fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n",
           "}"
+        ],
+        [
+          1670,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -178157,7 +179091,36 @@
       "address": 2226616,
       "name": "sub_0021F9B8",
       "file": "recomp_0056.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0021F9B8(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    uint32_t _fa = 0, _f"
+        ],
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_0021F9B8(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          1547,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    ecx = MEM32(ebp + 0x10);\n    eax = MEM32(ebp + 0xC);\n    g_fp_instruction_p"
+        ],
+        [
+          6677,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2226694,
@@ -178860,6 +179823,13 @@
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
         ],
         [
+          1892,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    PUSH32(esp, esi);\n    esi = MEM32(ebp + 0xC);\n    PUSH32(esp, edi);\n    PUS"
+        ],
+        [
           4586,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
@@ -179288,6 +180258,13 @@
       "file": "recomp_0056.c",
       "edits": [
         [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0022021F(void)\n{\n",
+          "    int _cf = (int)(g_eflags & 1u); /* carry flag */\n\n    uint32_t _leaf_eax = g_eax;\n    uint32_t _"
+        ],
+        [
           80,
           "    uint32_t _leaf_eax = g_eax;\n    uint32_t _leaf_ecx = g_ecx;\n    uint32_t _leaf_esp = g_esp;\n    RecompXmm _leaf_xmm1 = g_xmm1;\n    RecompXmm _leaf_xmm2 = g_xmm2;\n    RecompXmm _leaf_xmm3 = g_xmm3;\n",
           "",
@@ -179608,6 +180585,13 @@
           "",
           "_xmm2); /* movhlps */\n    MEMF(_leaf_eax + 8) = _leaf_xmm2.f[0]; /* movss */\n    _leaf_esp += 16",
           "; return; /* ret 12 */\n\n}"
+        ],
+        [
+          1504,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          " = _leaf_esp; g_xmm1 = _leaf_xmm1; g_xmm2 = _leaf_xmm2; g_xmm3 = _leaf_xmm3; return; /* ret 12 */\n\n}",
+          ""
         ]
       ]
     },
@@ -179616,6 +180600,20 @@
       "name": "sub_00220264",
       "file": "recomp_0056.c",
       "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00220264(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          26,
+          "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_00220264(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
         [
           9611,
           "    uint32_t _block_002202F9_eax = eax;\n    uint32_t _block_002202F9_ecx = ecx;\n    int _block_002202F9_g_fp_top = g_fp_top;\n    #define g_fp_top _block_002202F9_g_fp_top\n    g_fp_instruction_pointer = 0x002202F9u; g_fp_opcode = 0x106u; g_fp_code_selector = 8; g_fp_data_pointer = esi; g_fp_data_selector = 0x10;\n",
@@ -179706,6 +180704,20 @@
           "\n",
           "= esi + 8; g_fp_data_selector = 0x10;\n    MEMF(esi + 8) = (float)fp_top(); fp_pop(); /* fstp */\n",
           "loc_0022036C: ;\n    POP32(esp, edi);\n    eax = esi;\n    POP32(esp, esi);\n    POP32(esp, ebx);\n  "
+        ],
+        [
+          19981,
+          "",
+          "\n#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ],
+        [
+          19981,
+          "",
+          "#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -180165,6 +181177,13 @@
       "file": "recomp_0056.c",
       "edits": [
         [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0022099F(void)\n{\n",
+          "    int _cf = (int)(g_eflags & 1u); /* carry flag */\n\n    uint32_t _leaf_eax = g_eax;\n    uint32_t _"
+        ],
+        [
           484,
           "",
           "extern uint32",
@@ -180310,6 +181329,13 @@
           "",
           "mulps */\n    _leaf_ecx = MEM32(_leaf_esp + 4);\n    _leaf_xmm5 = XMM_ADD(_leaf_xmm5, _leaf_xmm0);",
           "\n    XMM_STORE(_leaf_ecx, _leaf_xmm2); /* movaps */\n    XMM_STORE(_leaf_ecx + 0x10, _leaf_xmm3);"
+        ],
+        [
+          4996,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "= _leaf_xmm2; g_xmm3 = _leaf_xmm3; g_xmm4 = _leaf_xmm4; g_xmm5 = _leaf_xmm5; return; /* ret 12 */\n\n}",
+          ""
         ]
       ]
     },
@@ -180318,6 +181344,13 @@
       "name": "sub_00220A9D",
       "file": "recomp_0056.c",
       "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00220A9D(void)\n{\n",
+          "    int _cf = (int)(g_eflags & 1u); /* carry flag */\n\n    uint32_t _leaf_eax = g_eax;\n    uint32_t _"
+        ],
         [
           80,
           "    uint32_t _leaf_eax = g_eax;\n    uint32_t _leaf_ecx = g_ecx;\n    uint32_t _leaf_esp = g_esp;\n    RecompXmm _leaf_xmm0 = g_xmm0;\n    RecompXmm _leaf_xmm1 = g_xmm1;\n    RecompXmm _leaf_xmm2 = g_xmm2;\n    RecompXmm _leaf_xmm3 = g_xmm3;\n    RecompXmm _leaf_xmm4 = g_xmm4;\n    RecompXmm _leaf_xmm5 = g_xmm5;\n",
@@ -180688,6 +181721,13 @@
           "",
           " /* movhps */\n    XMM_STORE_HIGH(_leaf_eax + 0x38, _leaf_xmm4); /* movhps */\n    _leaf_esp += 12",
           "; return; /* ret 8 */\n\n}"
+        ],
+        [
+          1789,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          " = _leaf_xmm2; g_xmm3 = _leaf_xmm3; g_xmm4 = _leaf_xmm4; g_xmm5 = _leaf_xmm5; return; /* ret 8 */\n\n}",
+          ""
         ]
       ]
     },
@@ -180874,10 +181914,24 @@
       "edits": [
         [
           26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_002211A0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          26,
           "    uint32_t ebp = 0;\n",
           "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n    uint32_t ebp = 0;\n",
           "void sub_002211A0(void)\n{\n",
           "    ebp = g_ebp;  /* prologue saves caller's frame */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t"
+        ],
+        [
+          1550,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    eax = MEM32(ebp + 0xC);\n    g_fp_instruction_pointer = 0x002211A9u; g_fp_op"
         ],
         [
           18252,
@@ -180892,7 +181946,22 @@
       "address": 2232962,
       "name": "sub_00221282",
       "file": "recomp_0056.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00221282(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    uint32_t _fa = 0, _f"
+        ],
+        [
+          4404,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2233019,
@@ -181061,7 +182130,36 @@
       "address": 2234576,
       "name": "sub_002218D0",
       "file": "recomp_0056.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_002218D0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    uint32_t _fa = 0, _f"
+        ],
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_002218D0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          1550,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    g_fp_instruction_pointer = 0x002218D6u; g_fp_opcode = 0x145u; g_fp_code_sel"
+        ],
+        [
+          10712,
+          "",
+          "\n#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2234724,
@@ -183996,6 +185094,13 @@
       "file": "recomp_0058.c",
       "edits": [
         [
+          26,
+          "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_0023981D(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
           6783,
           "    uint32_t _block_00239876_ecx = ecx;\n    _cf = 0; /* logical op clears CF */\n    _block_00239876_ecx = _block_00239876_ecx & 0x80000000u;\n    _fa = (uint32_t)(_block_00239876_ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* and result */\n    g_eflags = (g_eflags & ~0x8C5u) | ((0) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    _cf = 0; /* logical op clears CF */\n    ecx = ecx & 0x80000000u;\n    _fa = (uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* and result */\n    g_eflags = (g_eflags & ~0x8C5u) | ((0) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
@@ -184008,6 +185113,13 @@
           "    if (((g_eflags & 0x40u) != 0)) { recomp_cont_site(&_cont_frame, 0x200239846ULL); guest_cpu_yield(); goto loc_00239846; } /* je: equal / zero */\n",
           "ector = 0x10;\n    recomp_fp_push_raw(&g_fp_top, (void *)XBOX_PTR(0x53445A)); /* fld extended */\n",
           "\nloc_00239886: ;\n    g_fp_instruction_pointer = 0x00239886u; g_fp_opcode = 0x1E0u; g_fp_code_sel"
+        ],
+        [
+          11407,
+          "",
+          "\n#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -184389,7 +185501,36 @@
       "address": 2337455,
       "name": "sub_0023AAAF",
       "file": "recomp_0058.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0023AAAF(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_0023AAAF(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          6000,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    g_fp_instruction_pointer = 0x0023AAFCu; g_fp_opcode = 0x55Cu; g_fp_code_sel"
+        ],
+        [
+          11706,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2337632,
@@ -184525,7 +185666,22 @@
       "address": 2338999,
       "name": "sub_0023B0B7",
       "file": "recomp_0058.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0023B0B7(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          3800,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2339038,
@@ -184579,7 +185735,22 @@
       "address": 2339587,
       "name": "sub_0023B303",
       "file": "recomp_0059.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0023B303(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _cf = (int)(g_eflags"
+        ],
+        [
+          897,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2339616,
@@ -185443,7 +186614,22 @@
       "address": 2347401,
       "name": "sub_0023D189",
       "file": "recomp_0059.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0023D189(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    uint32_t _fa = 0, _f"
+        ],
+        [
+          2513,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2347437,
@@ -185996,7 +187182,141 @@
       "address": 2352962,
       "name": "sub_0023E742",
       "file": "recomp_0059.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0023E742(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_0023E742(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          11331,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0023E816; /* je: equal / zero */\n\nl"
+        ],
+        [
+          11978,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0023E80D; /* je: equal / zero */\n\nl"
+        ],
+        [
+          12625,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0023E804; /* je: equal / zero */\n\nl"
+        ],
+        [
+          13874,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0023EE94; /* jne: not equal / not "
+        ],
+        [
+          38458,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0023EA20; /* je: equal / zero */\n\nl"
+        ],
+        [
+          40315,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0023ED92; /* jne: not equal / not "
+        ],
+        [
+          49119,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0023EABB; /* je: equal / zero */\n\nl"
+        ],
+        [
+          49766,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) { recomp_cont_site(&_cont_frame, 0x20023EA2C"
+        ],
+        [
+          55087,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    { uint32_t _v=(uint32_t)(eax), _c=(uint32_t)(1) & 31u; if(_c) {\n    _cf=(in"
+        ],
+        [
+          68626,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    goto loc_0023ED8F;\n\nloc_0023EBCA: ;\n    _fb = (uint32_t)(0x69) & 0xFFFFFFFF"
+        ],
+        [
+          69228,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) { recomp_cont_site(&_cont_frame, 0x20023EA6F"
+        ],
+        [
+          69946,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0023EC90; /* je: equal / zero */\n\nl"
+        ],
+        [
+          71491,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (((g_eflags & 0x40u) != 0)) { recomp_cont_site(&_cont_frame, 0x20023E9B3"
+        ],
+        [
+          72882,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0023ED92; /* jne: not equal / not "
+        ],
+        [
+          75616,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    { uint32_t _v=(uint32_t)(eax), _c=(uint32_t)(1) & 31u; if(_c) {\n    _cf=(in"
+        ],
+        [
+          79176,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    goto loc_0023ED8F;\n\nloc_0023EC43: ;\n    MEM32(ebp + -8) = 8;\n\nloc_0023EC4A:"
+        ],
+        [
+          116697,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2354889,
@@ -186230,7 +187550,22 @@
       "address": 2357664,
       "name": "sub_0023F9A0",
       "file": "recomp_0059.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0023F9A0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          8198,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2357742,
@@ -186407,7 +187742,22 @@
       "address": 2359055,
       "name": "sub_0023FF0F",
       "file": "recomp_0059.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0023FF0F(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    uint32_t _fa = 0, _f"
+        ],
+        [
+          5135,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2359127,
@@ -188914,7 +190264,22 @@
       "address": 2368368,
       "name": "sub_00242370",
       "file": "recomp_0060.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00242370(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          31371,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "+= 20; recomp_cont_leave(&_cont_frame); return; /* ret 16 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2368517,
@@ -226676,7 +228041,22 @@
       "address": 2744614,
       "name": "sub_0029E126",
       "file": "recomp_0083.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_0029E126(void)\n{\n",
+          "    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fbs = 0;\n    (void)_fa; (void)_fb; (void)_fas;"
+        ],
+        [
+          2241,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "p += 8; recomp_cont_leave(&_cont_frame); return; /* ret 4 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2744694,
@@ -227828,7 +229208,22 @@
       "address": 2759726,
       "name": "sub_002A1C2E",
       "file": "recomp_0084.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002A1C2E(void)\n{\n",
+          "    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fbs = 0;\n    (void)_fa; (void)_fb; (void)_fas;"
+        ],
+        [
+          3215,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2759762,
@@ -227840,7 +229235,22 @@
       "address": 2759798,
       "name": "sub_002A1C76",
       "file": "recomp_0084.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002A1C76(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    uint32_t _fa = 0, _f"
+        ],
+        [
+          5810,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2759872,
@@ -227852,7 +229262,22 @@
       "address": 2759925,
       "name": "sub_002A1CF5",
       "file": "recomp_0084.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002A1CF5(void)\n{\n",
+          "    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fbs = 0;\n    (void)_fa; (void)_fb; (void)_fas;"
+        ],
+        [
+          3215,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2759961,
@@ -229243,7 +230668,22 @@
       "address": 2773477,
       "name": "sub_002A51E5",
       "file": "recomp_0085.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002A51E5(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          2644,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2773500,
@@ -230708,7 +232148,22 @@
       "address": 2790996,
       "name": "sub_002A9654",
       "file": "recomp_0085.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002A9654(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          2794,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 2791036,
@@ -232692,7 +234147,22 @@
       "address": 3058640,
       "name": "sub_002EABD0",
       "file": "recomp_0087.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002EABD0(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          4082,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "p += 8; recomp_cont_leave(&_cont_frame); return; /* ret 4 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 3058736,
@@ -233063,6 +234533,13 @@
       "edits": [
         [
           26,
+          "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_002EBB20(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          26,
           "    int _flags = 0; /* fallback flag var */\n",
           "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n    int _flags = 0; /* fallback flag var */\n",
           "void sub_002EBB20(void)\n{\n",
@@ -233192,6 +234669,13 @@
           "}",
           "}\n#undef g_xbox_mem_offset\n",
           "p_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n",
+          ""
+        ],
+        [
+          22867,
+          "",
+          "#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
           ""
         ]
       ]
@@ -233654,7 +235138,22 @@
       "address": 3071376,
       "name": "sub_002EDD90",
       "file": "recomp_0087.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002EDD90(void)\n{\n",
+          "    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fbs = 0;\n    (void)_fa; (void)_fb; (void)_fas;"
+        ],
+        [
+          2136,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          " += 12; recomp_cont_leave(&_cont_frame); return; /* ret 8 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 3071424,
@@ -233692,6 +235191,13 @@
       "file": "recomp_0087.c",
       "edits": [
         [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002EE050(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
           19261,
           "    uint32_t _block_002EE1A1_eax = eax;\n    int _block_002EE1A1_g_fp_top = g_fp_top;\n    #define g_fp_top _block_002EE1A1_g_fp_top\n    g_fp_instruction_pointer = 0x002EE1A1u; g_fp_opcode = 0x1C0u; g_fp_code_selector = 8;\n",
           "    g_fp_instruction_pointer = 0x002EE1A1u; g_fp_opcode = 0x1C0u; g_fp_code_selector = 8;\n",
@@ -233725,6 +235231,13 @@
           "    g_fp_instruction_pointer = 0x002EE222u; g_fp_opcode = 0x15Cu; g_fp_code_selector = 8; g_fp_data_pointer = esp + 0x1C; g_fp_data_selector = 0x10;\n    MEMF(esp + 0x1C) = (float)fp_top(); fp_pop(); /* fstp */\n\n",
           "6B80)); recomp_fp_commit((unsigned)(&(fp_top()) - g_fp_stack)); /* fmul dword ptr [0x346b80] */\n",
           "loc_002EE226: ;\n    g_fp_instruction_pointer = 0x002EE226u; g_fp_opcode = 0x144u; g_fp_code_sele"
+        ],
+        [
+          31908,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -233920,9 +235433,23 @@
         [
           26,
           "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002F00D0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    int _flags = 0; /* f"
+        ],
+        [
+          26,
+          "",
           "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
           "void sub_002F00D0(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          2544,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    cpu_resume_002F00D6: ;\n    PUSH32(esp, esi);\n    cpu_resume_002F00D7: ;\n   "
         ],
         [
           3596,
@@ -233979,6 +235506,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(ebp + -4), 1 (32-bit) */\n",
           "\n    cpu_resume_002F01DD: ;\n    if (!((g_eflags & 0x40u) != 0)) goto loc_002F01F"
+        ],
+        [
+          37042,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "+= 20; recomp_cont_leave(&_cont_frame); return; /* ret 16 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -234137,9 +235671,23 @@
         [
           26,
           "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002F0D10(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          26,
+          "",
           "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
           "void sub_002F0D10(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int "
+        ],
+        [
+          1389,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    PUSH32(esp, ebx);\n    PUSH32(esp, esi);\n    PUSH32(esp, edi);\n    edi = eax"
         ],
         [
           3261,
@@ -234154,6 +235702,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "t32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp esi, 6 (32-bit) */\n",
           "\n    MEM32(edi) = 0x32;\n    edx = 0xC;\n    if (((g_eflags & 0x1u) != 0)) goto lo"
+        ],
+        [
+          16356,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -234210,7 +235765,36 @@
       "address": 3084256,
       "name": "sub_002F0FE0",
       "file": "recomp_0087.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002F0FE0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_002F0FE0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int "
+        ],
+        [
+          4932,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    MEM32(esp + 0x14) = esi;\n    eax = eax + edx + 4;\n    MEM32(esp + 0x18) = e"
+        ],
+        [
+          5669,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          " += 12; recomp_cont_leave(&_cont_frame); return; /* ret 8 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 3084352,
@@ -234367,6 +235951,20 @@
       "file": "recomp_0087.c",
       "edits": [
         [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002F1970(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          26,
+          "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_002F1970(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
           8219,
           "    uint32_t _block_002F1A14_eax = eax;\n    uint32_t _block_002F1A14_ecx = ecx;\n    _block_002F1A14_ecx = MEM32(esi + 0x518);\n    MEM32(_block_002F1A14_eax + 0xC) = _block_002F1A14_ecx;\n    edx = MEM32(esi + 0x51C);\n    MEM32(_block_002F1A14_eax + 0x10) = edx;\n    _block_002F1A14_ecx = MEM32(esi + 0x510);\n    g_fp_instruction_pointer = 0x002F1A2Cu; g_fp_opcode = 0x158u; g_fp_code_selector = 8; g_fp_data_pointer = _block_002F1A14_eax + 0x18; g_fp_data_selector = 0x10;\n    MEMF(_block_002F1A14_eax + 0x18) = (float)fp_top(); fp_pop(); /* fstp */\n    g_fp_instruction_pointer = 0x002F1A2Fu; g_fp_opcode = 0x105u; g_fp_code_selector = 8; g_fp_data_pointer = 0x346B24; g_fp_data_selector = 0x10;\n",
           "    ecx = MEM32(esi + 0x518);\n    MEM32(eax + 0xC) = ecx;\n    edx = MEM32(esi + 0x51C);\n    MEM32(eax + 0x10) = edx;\n    ecx = MEM32(esi + 0x510);\n    g_fp_instruction_pointer = 0x002F1A2Cu; g_fp_opcode = 0x158u; g_fp_code_selector = 8; g_fp_data_pointer = eax + 0x18; g_fp_data_selector = 0x10;\n    MEMF(eax + 0x18) = (float)fp_top(); fp_pop(); /* fstp */\n    g_fp_instruction_pointer = 0x002F1A2Fu; g_fp_opcode = 0x105u; g_fp_code_selector = 8; g_fp_data_pointer = 0x346B24; g_fp_data_selector = 0x10;\n",
@@ -234386,6 +235984,20 @@
           "    if (!((g_eflags & 0x80u) != 0)) goto loc_002F1A4F; /* jns: not sign (positive) */\n",
           " ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "\nloc_002F1A3F: ;\n    _fa = (uint32_t)(MEM32(0x30C168)) & 0xFFFFFFFFu; _fb = (uint32_t)(ebx) & 0x"
+        ],
+        [
+          13360,
+          "",
+          "\n#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ],
+        [
+          13360,
+          "",
+          "#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -234742,7 +236354,22 @@
       "address": 3093072,
       "name": "sub_002F3250",
       "file": "recomp_0087.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002F3250(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          8947,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "p += 8; recomp_cont_leave(&_cont_frame); return; /* ret 4 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 3093216,
@@ -235146,7 +236773,36 @@
       "address": 3103264,
       "name": "sub_002F5A20",
       "file": "recomp_0087.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002F5A20(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          26,
+          "",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "void sub_002F5A20(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    i"
+        ],
+        [
+          1149,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    PUSH32(esp, edi);\n    MEM32(esi) = eax;\n    PUSH32(esp, 0x002F5A2Fu);\n    r"
+        ],
+        [
+          5795,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 3103424,
@@ -235961,13 +237617,35 @@
       "address": 3108128,
       "name": "sub_002F6D20",
       "file": "recomp_0087.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002F6D20(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          22143,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "esp += 4; recomp_cont_leave(&_cont_frame); return; /* ret */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 3108416,
       "name": "sub_002F6E40",
       "file": "recomp_0087.c",
       "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002F6E40(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
         [
           26,
           "",
@@ -236011,11 +237689,25 @@
           "\n    if (!((g_eflags & 0x1u) != 0)) goto loc_002F6F44; /* jae: above or equal (u"
         ],
         [
-          14708,
-          "    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
-          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags(_fa, _fb) & 0x8D5u);",
-          "int32_t)(int32_t)(_fb); /* cmp eax, edi (32-bit) */\n    _cf = (int)(_fa < _fb);\n",
+          13893,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n\nloc_002F6F33: ;\n    ecx = MEM32(edx);\n    edi = esi;\n    _fb = (uint32_t)(ecx)"
+        ],
+        [
+          14680,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, edi (32-bit) */\n",
           "\n    if (((g_eflags & 0x1u) != 0)) { recomp_cont_site(&_cont_frame, 0x2002F6F33U"
+        ],
+        [
+          17293,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          " += 12; recomp_cont_leave(&_cont_frame); return; /* ret 8 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -236510,6 +238202,13 @@
         [
           26,
           "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002FB1B0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          26,
+          "",
           "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    extern __declspec(noalias) uint32_t smt9_cmp8_flags(uint32_t, uint32_t);\n",
           "void sub_002FB1B0(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int "
@@ -236613,11 +238312,25 @@
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_002FB2D4; /* jne: not equal / not "
         ],
         [
+          20821,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    if (!((g_eflags & 0x80u) != 0)) { recomp_cont_site(&_cont_frame, 0x2002FB26"
+        ],
+        [
           21501,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, MEM32(ebp + 4) (32-bit) */\n",
           "\n    if (((g_eflags & 0x1u) != 0)) goto loc_002FB2FB; /* jb: below (unsigned <) "
+        ],
+        [
+          23569,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          "p += 8; recomp_cont_leave(&_cont_frame); return; /* ret 4 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -236752,6 +238465,20 @@
       "name": "sub_002FB9D0",
       "file": "recomp_0088.c",
       "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_002FB9D0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
+        [
+          26,
+          "",
+          "    RecompFpMetadata *const _recomp_fp_metadata = &g_fp_metadata;\n#define g_fp_metadata (*_recomp_fp_metadata)\n",
+          "void sub_002FB9D0(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
+        ],
         [
           26,
           "",
@@ -236935,6 +238662,13 @@
           "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa"
         ],
         [
+          32385,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "k_002FBC45_edx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    g_fp_instruction_pointer = 0x002FBC4Bu; g_fp_opcode = 0x146u; g_fp_code_sel"
+        ],
+        [
           33251,
           "    edx = _block_002FBC45_edx; g_fp_top = _block_002FBC45_g_fp_top;\n",
           "",
@@ -237031,6 +238765,20 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebp, 0x40430 (32-bit) */\n",
           "\n    MEM32(esp + 0x10) = edi;\n    if (((g_eflags & 0x1u) != 0)) { recomp_cont_si"
+        ],
+        [
+          49830,
+          "",
+          "\n#undef g_fp_metadata\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ],
+        [
+          49830,
+          "",
+          "#undef g_xbox_mem_offset\n",
+          "f fp_pop\n    #undef fp_top\n    #undef fp_st\n    #undef fp_st1\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
         ]
       ]
     },
@@ -237760,6 +239508,13 @@
           "\n    ebx = esi;\n    if (!((g_eflags & 0x40u) != 0)) { recomp_cont_site(&_cont_fr"
         ],
         [
+          41043,
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
+          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          "\n    /* nop */\n\nloc_002FFD40: ;\n    MEM32(edi) = ebp;\n    MEM32(edi + 0x24) = eb"
+        ],
+        [
           42584,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
@@ -238079,7 +239834,22 @@
       "address": 3214849,
       "name": "sub_00310E01",
       "file": "recomp_0088.c",
-      "edits": []
+      "edits": [
+        [
+          26,
+          "",
+          "    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "void sub_00310E01(void)\n{\n",
+          "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0, _fb"
+        ],
+        [
+          7198,
+          "",
+          "\n#undef g_xbox_mem_offset\n",
+          " += 12; recomp_cont_leave(&_cont_frame); return; /* ret 8 */\n\n    recomp_cont_leave(&_cont_frame);\n}",
+          ""
+        ]
+      ]
     },
     {
       "address": 3214957,

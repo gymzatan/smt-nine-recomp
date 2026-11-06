@@ -98,6 +98,7 @@ void d3d8_vsh_parse(const DWORD *microcode, int num_insns, NV2AVshProgram *progr
         inst->ilu_op=(NV2AVshIluOp)decoded.ilu;
         inst->const_index=decoded.constant;
         inst->input_index=decoded.input;
+        program->inputs_read|=decoded.inputs_read;
         for(unsigned which=0;which<3;which++) {
             const Nv2aVshSource *source=&decoded.source[which];
             NV2AVshSrcOperand *dest=&inst->mac_src[which];
@@ -109,8 +110,6 @@ void d3d8_vsh_parse(const DWORD *microcode, int num_insns, NV2AVshProgram *progr
             dest->negate=source->neg;
             memcpy(&dest->swizzle,source->swizzle,sizeof dest->swizzle);
             dest->rel_addr=decoded.relative && dest->reg_type==NV2A_VSH_REG_CONST;
-            if((decoded.sources_used&(1u<<which)) && dest->reg_type==NV2A_VSH_REG_INPUT)
-                program->inputs_read|=1u<<dest->reg_index;
         }
         inst->ilu_src=inst->mac_src[2];
         inst->mac_dst.temp_reg=decoded.temp<=12?decoded.temp:-1;
