@@ -31,6 +31,14 @@ def apply_project_edits(body, row):
         previous_end=end
     for offset,removed,inserted,before,after in reversed(row['edits']):
         body=body[:offset]+inserted+body[offset+len(removed):]
+    # Project edits can retain the lifter's block-local stack selector.
+    # Its existing helper operands must use that same selector.
+    if '    #define fp_stack_top g_fp_top\n' in body:
+        body = re.sub(
+            r'(?m)^[ \t]*recomp_fp_(?:push_integer|push_raw|push_copy|store_raw)\([^\n]*$',
+            lambda statement: re.sub(r'\bg_fp_top\b', 'fp_stack_top', statement.group()),
+            body,
+        )
     return body
 
 

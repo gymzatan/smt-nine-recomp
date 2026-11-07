@@ -43,3 +43,38 @@ def test_exception_lowering_rejects_incomplete_ebp_frame(generator, suffix):
     body='void sub_test(void)\n{\n    {"ebp", &ebp, sizeof ebp};'+suffix+'\n}'
     with pytest.raises(ValueError, match='Missing .* for an EBP frame'):
         generator.lower_exception_continuation(body)
+
+
+@pytest.mark.parametrize('helper', [
+    'recomp_fp_push_integer(&fp_stack_top, SMEM32(esp + 0x20));',
+    'recomp_fp_push_raw(&fp_stack_top, (void *)XBOX_PTR(esi), 8);',
+    'recomp_fp_push_copy(&fp_stack_top, (fp_stack_top + 1) & 7u);',
+    'recomp_fp_store_raw((void *)XBOX_PTR(edi), 8, fp_stack_top);',
+])
+def test_project_cached_top_keeps_original_helper_selector(generator, helper):
+    # Model the existing pipeline: normalize the lifter output, then let the
+    # project edit introduce its cached TOP and publish it at the block exit.
+    raw = ('void sub_test(void)\n{\n'
+           '    #define fp_stack_top g_fp_top\n'
+           '    '+helper+'\n'
+           '    #undef fp_stack_top\n}\n')
+    normalized = generator.normalize(raw)
+    at = normalized.index('    recomp_fp_')
+    removed = normalized[at:normalized.index('\n', at)]
+    replacement = ('    #define fp_stack_top g_fp_top\n'
+                   '    {\n'
+                   '        int _block_g_fp_top = g_fp_top;\n'
+                   '        #undef fp_stack_top\n'
+                   '        #define fp_stack_top _block_g_fp_top\n'
+                   '    '+removed+'\n'
+                   '        g_fp_top = _block_g_fp_top;\n'
+                   '        #undef fp_stack_top\n'
+                   '        #define fp_stack_top g_fp_top\n'
+                   '    }\n'
+                   '    #undef fp_stack_top')
+    row = {'name':'sub_test', 'edits':[[at, removed, replacement,
+           normalized[:at], normalized[at+len(removed):]]]}
+    result = generator.apply_project_edits(normalized, row)
+    expected = normalized[:at]+replacement.replace('    '+removed, '        '+helper)+normalized[at+len(removed):]
+    assert result == expected
+    assert generator.apply_project_edits(normalized, {'name':'sub_test','edits':[]}) == normalized

@@ -340,7 +340,7 @@ The shared FP helper annotations are checked with the original complete street-e
 
 The original clear-page ownership component exercises actual CPU write faults through every existing memory view, dirty same-page color neighbours, padding and a dirty depth owner, pending query order, unrelated protected color and subsequent overwrite/read. Its original read-fault publication assertion remains intact. The unchanged control fails the new unrelated-publication assertion; the range-preserving source passes on D3D11, D3D12, Vulkan and OpenGL at native and doubled scale. Three-backend host-file-write, texture-reuse and output-guard nodes bring the affected component total to seventeen passing cases. The original seven support objects and nine libraries are reused with unchanged supporting headers; only the affected GPU translation unit is compiled for each source. These checks establish removed unrelated readback work and retained pixel/protection consumers, without a complete-game build or gameplay frame-rate measurement.
 
-The original swizzled-region consumer also checks clean same-extent layout reinterpretation against actual native pixels, retaining an unrelated dirty owner without readback. Dirty reinterpretation publishes its old encoded layout; a retained taller extent and pending query retain full publication. The unchanged control fails the clean-layout readback assertion. The combined swizzled-region, clear-ownership and clean-texture-overlap cases pass twenty-two configurations across the four existing native backends and native/doubled scales, with all earlier assertions retained. The same support objects and libraries are reused; only the affected GPU translation unit is compiled. This is component work and pixel verification, without a complete-game build or frame-rate measurement.
+The swizzled-region consumer checks clean same-extent layout reinterpretation against actual native pixels and preserves an unrelated dirty owner without readback. Dirty same-extent reinterpretation with no pending output or other dirty owner on its rounded pages publishes only the target, using its old encoded layout and existing read-only CPU protection. A later real CPU read still publishes deferred data; CPU writes invalidate the existing shared aliases. Dirty colour or depth neighbours crossing the target page boundary retain complete publication and accessible outside pages. A retained taller extent and pending query also retain full publication. The extended swizzled-region, clear-ownership and clean-texture-overlap cases pass twenty-two configurations across the four existing native backends and native/doubled scales. This establishes component pixels, operation counts and protection behavior, without a complete-game build or frame-rate measurement.
 
 The existing clean-overlap consumer verifies full-size swizzled ARGB reuse against the original publication encoder, actual guest-image bindings and every pixel, including alpha. Four native backends at ordinary and enlarged scale retain dirty RAM ownership until a real CPU or overlapping linear upload consumes it. Partial and clean-after-partial surfaces, pending outputs, dirty color/depth overlaps, physical feedback, asset overrides and partial-page targets retain their existing paths. Original swizzled-region and finished-display consumers cover upload, capture, physical aliases and checkpoint restoration. The unchanged source fails the retained-dirty/no-readback work assertion. The actual asset provider passes ordinary-match output/log comparisons and protected-pointer NULL-query checks without side effects. These component checks establish preserved output and removed transfer work, not whole-game FPS or complete calculation minimality.
 
@@ -457,6 +457,25 @@ control mode, reduces cost by about 7.6 to 13.6 percent for its fixed nonzero
 input. This measures the complete emitted instruction, including metadata and
 state publication, rather than an entire caller, battle or weak-PC frame rate.
 Source identities and instruction counts are static coverage, not frequency.
+
+Project edits that retain a block-local floating-point stack selector bind the
+existing integer, raw and copy helpers to that same selector. The block exit
+still publishes its TOP to the canonical state. The field-grid producer retains
+all its existing edits, operand reads, metadata, calls and continuation paths;
+only the helper TOP operands change. The original generator pipeline checks all
+four existing selector-taking helper forms and leaves canonical-only functions
+unchanged.
+
+An actual field-grid basic block is compared with its original generic integer
+loads: 16,128 valid inputs match the complete 424-byte State, 4-KiB RAM, branch
+result and MXCSR after the selector connection. The disconnected form differs
+on all those inputs. Another 96 guarded reads preserve the original early-read
+fault state; these faults occur before the changed helper and do not establish
+post-helper fault coverage. These results cover the coupled block, rather than
+the complete producer or a rendered-game acceptance.
+
+The corrected selector connection also passes the captured street scene in the actual native window. The original executable displays a yellow road, while the corrected executable displays the textured road from the same checkpoint payload. Both observations use the existing window and screenshot capture with per-draw diagnostics disabled. This covers that field and backend, not every street or weaker computer. The CPU host-pixel buffer is updated by capture or restore and must not be treated as an automatically refreshed native display.
+
 
 The standard generator refreshes the canonical header before native compilation. The normal update build uses the shared register and floating-point ABI consistently in generated functions and affected native libraries. Component observations remain distinct from the aggregate runtime checks below.
 

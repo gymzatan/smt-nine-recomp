@@ -955,7 +955,23 @@ static HwColor *hw_color_target(void)
     if(hw_pending_output(color->memory,color->memory_offset,(size_t)height*pitch)) hw_collect_queries(1);
     if((color->format^s_gpu.format)&0xFFFF0F00u) {
         if(color->dirty || color->height!=height || color->width!=width ||
-           hw_pending_output(NULL,0,0))hw_publish_all();
+           hw_pending_output(NULL,0,0)) {
+            int isolated=color->dirty && color->height==height && color->width==width &&
+                !hw_pending_output(NULL,0,0);
+            size_t lo=color->memory_offset&~(size_t)4095;
+            size_t hi=(color->memory_offset+hw_color_bytes(color)+4095)&~(size_t)4095;
+            for(HwColor *other=s_hw_colors;other && isolated;other=other->next)
+                if(other!=color && other->memory==color->memory && other->dirty &&
+                   hw_ranges_overlap(lo,hi-lo,other->memory_offset,hw_color_bytes(other)))isolated=0;
+            for(HwDepth *depth=s_hw_depths;depth && isolated;depth=depth->next)
+                if(depth->memory==color->memory && depth->dirty &&
+                   hw_ranges_overlap(lo,hi-lo,depth->memory_offset,hw_depth_bytes(depth)))isolated=0;
+            if(isolated) {
+                /* Preserve the old layout without publishing disjoint owners. */
+                hw_copy_color_to_memory(color);
+                hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_READONLY,0);
+            } else hw_publish_all();
+        }
         color->upload_needed=1;
     }
     color->format=s_gpu.format;

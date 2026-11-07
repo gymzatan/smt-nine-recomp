@@ -402,7 +402,12 @@ static void verify_swizzled_regions(void) {
     hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,NULL);
     readbacks=s_gpu.hardware_color_readbacks;
     method(NV097_SET_SURFACE_FORMAT,0x08070124);assert(hw_color(0)==color);
-    assert(s_gpu.hardware_color_readbacks==readbacks+2 && !unrelated->dirty);
+    assert(s_gpu.hardware_color_readbacks==readbacks+1 && unrelated->dirty);
+    MEMORY_BASIC_INFORMATION layout_page;
+    assert(VirtualQuery((void *)(xbox_GetMemoryOffset()+unrelated->address),&layout_page,sizeof layout_page));
+    assert(layout_page.Protect==PAGE_NOACCESS);
+    assert(VirtualQuery((void *)(xbox_GetMemoryOffset()+color->address),&layout_page,sizeof layout_page));
+    assert(layout_page.Protect==PAGE_READONLY);
     assert(!memcmp(memory,swizzled,bytes));
 
     /* A retained taller allocation keeps the original complete publication. */
@@ -424,6 +429,64 @@ static void verify_swizzled_regions(void) {
     assert(!s_hw_query_count && *output==0x12345678 && !unrelated->dirty);
     assert(s_gpu.hardware_color_readbacks==readbacks+1);
     fprintf(stderr,"[CLEAN LAYOUT] clean equal extent skips unrelated publication; native new-layout pixels, dirty old-layout encoding, retained taller extent and pending output preserved\n");
+
+    /* A real CPU consumer still publishes the deferred unrelated image. */
+    unrelated->dirty=1;unrelated->dirty_bounds=(RECT){0,0,128,256};
+    hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,0);
+    readbacks=s_gpu.hardware_color_readbacks;
+    assert(BRIDGE_MEM32(unrelated->address)==0xFF665544u);
+    assert(s_gpu.hardware_color_readbacks==readbacks+1 && !unrelated->dirty);
+
+    /* A dirty neighbour crosses the target's last page into an outside page. */
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0x7ff00);
+    method(NV097_SET_SURFACE_CLIP_VERTICAL,8u<<16);
+    method(NV097_SET_SURFACE_FORMAT,0x03070124);
+    HwColor *neighbour=hw_color(0);
+    method(NV097_SET_SURFACE_COLOR_OFFSET,0x60000);
+    method(NV097_SET_SURFACE_CLIP_VERTICAL,256u<<16);
+    method(NV097_SET_SURFACE_FORMAT,0x08070124);assert(hw_color(0)==color);
+    for(unsigned kind=0;kind<2;kind++) {
+        HwDepth *shared_depth=NULL;
+        if(kind) {
+            method(NV097_SET_SURFACE_ZETA_OFFSET,0x7ff00);
+            method(NV097_SET_SURFACE_CLIP_VERTICAL,8u<<16);
+            method(NV097_SET_SURFACE_FORMAT,0x03070124);
+            shared_depth=hw_depth();assert(shared_depth->height==8);
+            method(NV097_SET_SURFACE_CLIP_VERTICAL,256u<<16);
+            method(NV097_SET_SURFACE_FORMAT,0x08070124);assert(hw_color(0)==color);
+        }
+        color->dirty=1;color->dirty_bounds=(RECT){0,0,128,256};
+        unrelated->dirty=1;unrelated->dirty_bounds=(RECT){0,0,128,256};
+        hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,0);
+        hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,0);
+        if(!kind) {
+            neighbour->dirty=1;neighbour->dirty_bounds=(RECT){0,0,128,8};
+            hw_protect(neighbour->memory,neighbour->memory_offset,hw_color_bytes(neighbour),PAGE_NOACCESS,0);
+        } else {
+            shared_depth->dirty=1;
+            hw_protect(shared_depth->memory,shared_depth->memory_offset,hw_depth_bytes(shared_depth),PAGE_NOACCESS,0);
+        }
+        readbacks=s_gpu.hardware_color_readbacks;
+        method(NV097_SET_SURFACE_FORMAT,0x08070224);assert(hw_color(0)==color);
+        assert(s_gpu.hardware_color_readbacks==readbacks+(kind?2:3));
+        assert(!unrelated->dirty && !neighbour->dirty && (!kind || !shared_depth->dirty));
+        assert(VirtualQuery((void *)(xbox_GetMemoryOffset()+0x80080000u),&layout_page,sizeof layout_page));
+        assert(layout_page.Protect!=PAGE_NOACCESS);
+        volatile uint32_t outside=BRIDGE_MEM32(0x80080000u);(void)outside;
+        method(NV097_SET_SURFACE_FORMAT,0x08070124);assert(hw_color(0)==color);
+    }
+    /* A clean shared-page alias keeps the normal CPU write invalidation. */
+    color->dirty=1;color->dirty_bounds=(RECT){0,0,128,256};
+    neighbour->upload_needed=1;
+    unrelated->dirty=1;hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,0);
+    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,0);
+    readbacks=s_gpu.hardware_color_readbacks;
+    method(NV097_SET_SURFACE_FORMAT,0x08070224);assert(hw_color(0)==color);
+    assert(s_gpu.hardware_color_readbacks==readbacks+1 && unrelated->dirty);
+    BRIDGE_MEM32(color->address+0x1ff00)=0xC0123456u;
+    assert(color->upload_needed && neighbour->upload_needed);
+    assert(BRIDGE_MEM32(color->address+0x1ff00)==0xC0123456u && unrelated->dirty);
+    fprintf(stderr,"[DIRTY LAYOUT] target-only old-layout readback, deferred real CPU read, dirty color/depth page conflict, outer-page guard and clean-alias CPU write passed\n");
     free(linear);free(swizzled);
     fprintf(stderr,"[SWIZZLE REGION] actual native128x256 upload, pitched readback, highY dirty origin and all outside bytes passed\n");
 }
