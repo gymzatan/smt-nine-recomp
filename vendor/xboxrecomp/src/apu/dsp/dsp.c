@@ -133,6 +133,7 @@ DSPState *dsp_init(void *rw_opaque, dsp_scratch_rw_func scratch_rw,
 void dsp_destroy(DSPState *dsp)
 {
     dsp->ops->finalize(dsp);
+    free(dsp->dma.staging);
     g_free(dsp);
 }
 

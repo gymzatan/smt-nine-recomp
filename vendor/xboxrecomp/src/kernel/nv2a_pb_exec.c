@@ -458,16 +458,16 @@ static float normalized_vertex_short(float value)
 /* Callers write local, transformed-vertex or upload data, not descriptors. */
 static int fetch_attr(const VertexAttr * __restrict a, uint32_t index, float out[4])
 {
+    static const float defaults[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     const uint8_t *p;
     uint32_t i;
 
-    out[0] = out[1] = out[2] = 0.0f;
-    out[3] = 1.0f;
     if (!a->size) {
         /* Disabled arrays consume the original current attribute register. */
         memcpy(out,s_gpu.imm_attr[a-s_gpu.attr],sizeof s_gpu.imm_attr[0]);
         return 1;
     }
+    memcpy(out, defaults, sizeof defaults);
     if (!a->stride)
         return 0;
     if (s_gpu.inline_active) {
@@ -3143,6 +3143,7 @@ static void raster_batch_vertices(int fixed)
             attributes[attribute_count++]=(unsigned)ctz32(remaining);
             remaining&=remaining-1;
         }
+        s_hw_program_vertex_stride=attribute_count*16;
         s_hw_topology=s_gpu.prim==NV_PRIM_POINTS?D3D11_PRIMITIVE_TOPOLOGY_POINTLIST:s_gpu.prim<=NV_PRIM_LINE_STRIP?D3D11_PRIMITIVE_TOPOLOGY_LINELIST_ADJ:D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ;
         s_hw_bounds=(RECT){(LONG)s_gpu.clip_x,(LONG)s_gpu.clip_y,(LONG)(s_gpu.clip_x+s_gpu.clip_w),(LONG)(s_gpu.clip_y+s_gpu.clip_h)};
     } else

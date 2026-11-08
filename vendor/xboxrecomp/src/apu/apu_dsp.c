@@ -56,25 +56,26 @@ static void scatter_gather_rw(MCPXAPUState *d, hwaddr sge_base,
         assert(paddr <= 0x04000000u && bytes_to_copy <= 0x04000000u-paddr);
 
         assert(d->physical_resolve);
-        unsigned copied = 0;
-        while (copied < bytes_to_copy) {
-            uint32_t physical = (uint32_t)paddr + copied;
+        uint32_t physical = (uint32_t)paddr;
+        unsigned remaining = bytes_to_copy;
+        do {
             unsigned chunk = TARGET_PAGE_SIZE - (physical & (TARGET_PAGE_SIZE - 1));
-            if (chunk > bytes_to_copy - copied) chunk = bytes_to_copy - copied;
+            if (chunk > remaining) chunk = remaining;
             uint8_t *backing = d->physical_resolve(physical, chunk);
-            if (!dir && sge_base == d->regs[NV_PAPU_EPSADDR] &&
-                addr == 0xC00 && len == 754 * 4 && copied == 0) {
+            if (DEBUG_DSP && !dir && sge_base == d->regs[NV_PAPU_EPSADDR] &&
+                addr == 0xC00 && len == 754 * 4 && remaining == bytes_to_copy) {
                 fprintf(stderr, "[DSPDMA] EP source SGE table=%08X entry=%u prd=%08X physical=%08X bytes=%u backing=%p first=%08X destination=%p\n",
                         (unsigned)sge_base, page_entry, prd_address, physical,
                         chunk, backing, ldl_le_p(backing), ptr);
                 fflush(stderr);
             }
-            if (dir) memcpy(backing, ptr + copied, chunk);
-            else memcpy(ptr + copied, backing, chunk);
-            copied += chunk;
-        }
+            if (dir) memcpy(backing, ptr, chunk);
+            else memcpy(ptr, backing, chunk);
+            physical += chunk;
+            ptr += chunk;
+            remaining -= chunk;
+        } while (remaining);
 
-        ptr += bytes_to_copy;
         len -= bytes_to_copy;
 
         /* After the first iteration, we are page aligned */
@@ -158,7 +159,8 @@ static void gp_fifo_rw(void *opaque, uint8_t *ptr, unsigned int index,
         cur_reg = NV_PAPU_GPIFCUR0 + 0x10 * index;
     }
 
-    uint32_t cur = GET_MASK(d->regs[cur_reg], NV_PAPU_GPOFCUR0_VALUE);
+    const uint32_t cursor = d->regs[cur_reg];
+    uint32_t cur = GET_MASK(cursor, NV_PAPU_GPOFCUR0_VALUE);
 
     // fprintf(stderr, "GP %s fifo #%d, base = %x, end = %x, cur = %x, len = %x\n",
     //     dir ? "writing to" : "reading from", index,
@@ -174,7 +176,8 @@ static void gp_fifo_rw(void *opaque, uint8_t *ptr, unsigned int index,
         d->regs[NV_PAPU_GPFADDR], d->regs[NV_PAPU_GPFMAXSGE],
         ptr, base, end, cur, len, dir);
 
-    SET_MASK(d->regs[cur_reg], NV_PAPU_GPOFCUR0_VALUE, cur);
+    /* The circular transfer returns a cursor within the masked bounds. */
+    d->regs[cur_reg] = (cursor & ~NV_PAPU_GPOFCUR0_VALUE) | cur;
 }
 
 static void ep_sink_samples(MCPXAPUState *d, uint8_t *ptr, size_t len)
@@ -212,7 +215,8 @@ static void ep_fifo_rw(void *opaque, uint8_t *ptr, unsigned int index,
         cur_reg = NV_PAPU_EPIFCUR0 + 0x10 * index;
     }
 
-    uint32_t cur = GET_MASK(d->regs[cur_reg], NV_PAPU_GPOFCUR0_VALUE);
+    const uint32_t cursor = d->regs[cur_reg];
+    uint32_t cur = GET_MASK(cursor, NV_PAPU_GPOFCUR0_VALUE);
 
     if (g_dbg.trace_enabled) {
         static unsigned trace_count;
@@ -241,7 +245,8 @@ static void ep_fifo_rw(void *opaque, uint8_t *ptr, unsigned int index,
         d->regs[NV_PAPU_EPFADDR], d->regs[NV_PAPU_EPFMAXSGE],
         ptr, base, end, cur, len, dir);
 
-    SET_MASK(d->regs[cur_reg], NV_PAPU_GPOFCUR0_VALUE, cur);
+    /* The circular transfer returns a cursor within the masked bounds. */
+    d->regs[cur_reg] = (cursor & ~NV_PAPU_GPOFCUR0_VALUE) | cur;
 }
 
 static void proc_rst_write(DSPState *dsp, uint32_t oldval, uint32_t val)
@@ -456,12 +461,14 @@ const MemoryRegionOps ep_ops = {
 
 void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_PER_FRAME])
 {
-    /* Write VP results to the GP DSP MIXBUF */
+    /* Write VP results to the GP DSP MIXBUF. */
+    _Static_assert(NUM_MIXBINS * NUM_SAMPLES_PER_FRAME == DSP_MIXBUFFER_SIZE,
+                   "VP mixbins must cover GP MIXBUF");
+    uint32_t *const mixbuffer = dsp_jit_gp_mixbuffer(d->gp.dsp);
+    uint32_t *output = mixbuffer;
     for (int mixbin = 0; mixbin < NUM_MIXBINS; mixbin++) {
-        uint32_t base = GP_DSP_MIXBUF_BASE + mixbin * NUM_SAMPLES_PER_FRAME;
         for (int sample = 0; sample < NUM_SAMPLES_PER_FRAME; sample++) {
-            dsp_write_memory(d->gp.dsp, 'X', base + sample,
-                             float_to_24b(mixbins[mixbin][sample]));
+            *output++ = float_to_24b(mixbins[mixbin][sample]);
         }
     }
 
@@ -483,18 +490,15 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
             (d->monitor.point == MCPX_APU_DEBUG_MON_GP_OR_EP && !ep_enabled)) {
             int off = (d->ep_frame_div % 8) * NUM_SAMPLES_PER_FRAME;
             for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-                uint32_t l = dsp_read_memory(d->gp.dsp, 'X', 0x1400 + i);
-                d->monitor.frame_buf[off + i][0] = l >> 8;
-                uint32_t r =
-                    dsp_read_memory(d->gp.dsp, 'X', 0x1400 + 1 * 0x20 + i);
-                d->monitor.frame_buf[off + i][1] = r >> 8;
+                /* GP execution has updated the same 24-bit MIXBUF backing. */
+                d->monitor.frame_buf[off + i][0] = (mixbuffer[i] & 0x00FFFFFFu) >> 8;
+                d->monitor.frame_buf[off + i][1] = (mixbuffer[0x20 + i] & 0x00FFFFFFu) >> 8;
             }
         }
     }
 
     /* Run EP */
-    if ((d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPRST) &&
-        (d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPDSPRST)) {
+    if (ep_enabled) {
         if (d->ep_frame_div % 8 == 0) {
             dsp_start_frame(d->ep.dsp);
             dsp_set_halt_requested(d->ep.dsp, false);

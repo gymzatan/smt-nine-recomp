@@ -19,6 +19,7 @@ static NV2AState *g_nv2a = NULL;
 static MemoryRegion g_vram_region;
 static MemoryRegion g_ramin_region;
 static uint64_t g_ptimer_clock_bias;
+static LARGE_INTEGER g_clock_frequency;
 
 NV2AState *nv2a_get_state(void) {
     return g_nv2a;
@@ -214,7 +215,7 @@ void pbus_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 uint64_t ptimer_get_clock(NV2AState *d)
 {
     if (d->ptimer.numerator == 0) return 0;
-    return muldiv64(muldiv64(qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)+g_ptimer_clock_bias,
+    return muldiv64(muldiv64(qemu_clock_get_ns(g_clock_frequency.QuadPart)+g_ptimer_clock_bias,
                              d->pramdac.core_clock_freq,
                              NANOSECONDS_PER_SECOND),
                     d->ptimer.denominator,
@@ -329,7 +330,7 @@ void pfb_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
  * from the existing paused/restored virtual clock, at the NTSC field rate. */
 void nv2a_vblank_tick(NV2AState *d)
 {
-    uint64_t clock = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + g_ptimer_clock_bias;
+    uint64_t clock = qemu_clock_get_ns(g_clock_frequency.QuadPart) + g_ptimer_clock_bias;
     uint64_t frame = muldiv64(clock, 60, 1000000000);
     if (frame == d->vblank_frame) return;
     d->vblank_frame = frame;
@@ -1644,7 +1645,8 @@ NV2AState *nv2a_init_standalone(uint8_t *vram_ptr, uint32_t vram_size,
     qemu_cond_init(&d->pfifo.fifo_cond);
     qemu_cond_init(&d->pfifo.fifo_idle_cond);
 
-    d->vblank_frame = muldiv64(qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL), 60, 1000000000);
+    QueryPerformanceFrequency(&g_clock_frequency);
+    d->vblank_frame = muldiv64(qemu_clock_get_ns(g_clock_frequency.QuadPart), 60, 1000000000);
     g_nv2a = d;
 
     fprintf(stderr, "[NV2A] Standalone GPU initialized: VRAM=%uMB RAMIN=%uKB\n",
@@ -1658,7 +1660,7 @@ int nv2a_save_checkpoint(FILE *out) {
     if(!out || !g_nv2a || !xbox_CheckpointFrozen()) return 0;
     Nv2aCheckpoint *saved=calloc(1,sizeof *saved);if(!saved) return 0;
     NV2AState *d=g_nv2a;qemu_mutex_lock(&d->pfifo.lock);
-    saved->state_bytes=sizeof saved->state;saved->clock=qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)+g_ptimer_clock_bias;memcpy(&saved->state,d,sizeof *d);
+    saved->state_bytes=sizeof saved->state;saved->clock=qemu_clock_get_ns(g_clock_frequency.QuadPart)+g_ptimer_clock_bias;memcpy(&saved->state,d,sizeof *d);
     NV2AState *s=&saved->state;s->parent_obj.irq_notify=NULL;s->parent_obj.irq_opaque=NULL;
     s->vga.vram_ptr=NULL;memset(&s->hw_ops,0,sizeof s->hw_ops);
     s->vram=NULL;s->vram_ptr=NULL;s->ramin_ptr=NULL;s->vram_pci.opaque=s->ramin.opaque=s->mmio.opaque=NULL;
@@ -1690,7 +1692,7 @@ void nv2a_apply_checkpoint(const void *prepared) {
     memcpy(d->pfifo.regs,s->pfifo.regs,sizeof d->pfifo.regs);InterlockedExchange(&d->pfifo.fifo_kick,0);d->pfifo.halt=s->pfifo.halt;
     d->pvideo=s->pvideo;d->ptimer=s->ptimer;d->pfb=s->pfb;d->pgraph=s->pgraph;
     d->pcrtc=s->pcrtc;d->pramdac=s->pramdac;d->puserdac=s->puserdac;
-    g_ptimer_clock_bias=saved->clock-qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    g_ptimer_clock_bias=saved->clock-qemu_clock_get_ns(g_clock_frequency.QuadPart);
     if (d->pfifo.thread.thread) nv2a_fifo_kick(d);
     qemu_mutex_unlock(&d->pfifo.lock);
 }

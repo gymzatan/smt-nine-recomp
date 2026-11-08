@@ -65,6 +65,9 @@ typedef struct DSPDMAState {
     /* DMA completion timer: counts reads of DMA_CONTROL while RUNNING.
      * After 3 reads, transitions RUNNING -> STOPPED. */
     uint32_t dma_read_count;
+    /* Host-only staging for one DMA node. */
+    uint8_t *staging;
+    size_t staging_capacity;
 } DSPDMAState;
 
 uint32_t dsp_dma_read(DSPDMAState *s, DSPDMARegister reg);

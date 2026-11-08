@@ -22,6 +22,10 @@
 
 #include <stdint.h>
 #include <math.h>
+#if defined(_MSC_VER) && defined(_M_X64)
+#include <emmintrin.h>
+#include <errno.h>
+#endif
 
 static inline float int8_to_float(int8_t x)
 {
@@ -62,7 +66,13 @@ static inline uint32_t float_to_24b(float value)
     } else if (scaled_value <= (-8.0 * 0x100000)) {
         int24 = -1 - 0x7fffff;
     } else {
+#if defined(_MSC_VER) && defined(_M_X64)
+        int24 = _mm_cvtsd_si32(_mm_set_sd(scaled_value));
+        /* Only NaN can return the SSE indefinite value after clipping. */
+        if (int24 == INT32_MIN) _set_errno(EDOM);
+#else
         int24 = (int)lrint(scaled_value);
+#endif
     }
     return int24 & 0xffffff;
 }

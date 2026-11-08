@@ -227,10 +227,11 @@ static DWORD checkpoint_wait(ULONG count,const HANDLE *handles,BOOL wait_all,
     int tracked=xbox_kernel_wait_tracked(),poll=tracked || xbox_ThreadApcsEnabled();
     DWORD outcome;
     if (tracked) milliseconds=xbox_kernel_wait_begin(milliseconds);
-    ULONGLONG started=GetTickCount64();
+    const int timed_poll=poll && milliseconds!=INFINITE;
+    ULONGLONG started=timed_poll?GetTickCount64():0;
     for (;;) {
         DWORD remaining=milliseconds;
-        if (poll && milliseconds!=INFINITE) {
+        if (timed_poll) {
             ULONGLONG elapsed=GetTickCount64()-started;
             remaining=elapsed>=milliseconds?0:milliseconds-(DWORD)elapsed;
         }
@@ -239,15 +240,15 @@ static DWORD checkpoint_wait(ULONG count,const HANDLE *handles,BOOL wait_all,
             int delivered=xbox_DeliverThreadApcs(alertable && mode==UserMode);
             xbox_kernel_wait_apc_end();
             if(delivered){outcome=XBOX_WAIT_USER_APC;break;}
-            if(poll && milliseconds!=INFINITE) {
+            if(timed_poll) {
                 ULONGLONG elapsed=GetTickCount64()-started;
                 remaining=elapsed>=milliseconds?0:milliseconds-(DWORD)elapsed;
             }
         }
         if (tracked) {
-            ULONGLONG boundary_started=GetTickCount64();
+            ULONGLONG boundary_started=timed_poll?GetTickCount64():0;
             xbox_kernel_wait_boundary(remaining);
-            started+=GetTickCount64()-boundary_started;
+            if(timed_poll)started+=GetTickCount64()-boundary_started;
         }
         DWORD slice=poll && remaining>10?10:remaining;
         uint32_t associated_queue=xbox_QueueThreadWaitBegin();

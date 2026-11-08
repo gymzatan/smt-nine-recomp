@@ -37,7 +37,6 @@
 #define F_BP 3
 #define F_BR 4
 #define F_AP 5
-#define F_R  1
 
 typedef struct {
     float f;
@@ -64,20 +63,13 @@ static inline void setup_svf(sv_filter *sv, float fc, float q, int t) {
     }
 }
 
-static inline float run_svf(sv_filter *sv, float in) {
-    float out;
+static inline float run_svf_lowpass(sv_filter *sv, float in) {
     in = sv->qnrm * in;
-    for (int i = 0; i < F_R; i++) {
-        sv->b = flush_to_zero(sv->b - sv->b * sv->b * sv->b * 0.001f);
-        sv->h = flush_to_zero(in - sv->l - sv->q * sv->b);
-        sv->b = sv->b + sv->f * sv->h;
-        sv->l = flush_to_zero(sv->l + sv->f * sv->b);
-        sv->n = sv->l + sv->h;
-        sv->p = sv->l - sv->h;
-        out = *(sv->op);
-        in = out;
-    }
-    return out;
+    sv->b = flush_to_zero(sv->b - sv->b * sv->b * sv->b * 0.001f);
+    sv->h = flush_to_zero(in - sv->l - sv->q * sv->b);
+    sv->b = sv->b + sv->f * sv->h;
+    sv->l = flush_to_zero(sv->l + sv->f * sv->b);
+    return sv->l;
 }
 
 /* ============================================================

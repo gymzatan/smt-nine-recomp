@@ -82,20 +82,18 @@ static inline int ctz32(uint32_t val) {
 #define SET_MASK(v, mask, val) \
     do { (v) &= ~(mask); (v) |= ((val) * ((uint32_t)(mask) & (0u - (uint32_t)(mask)))) & (mask); } while (0)
 
-/* muldiv64: (a * b) / c with 128-bit intermediate */
+/* Low 64 bits of the quotient, using an exact wide product. */
 #ifdef _MSC_VER
 #include <intrin.h>
-static inline uint64_t muldiv64(uint64_t a, uint32_t b, uint32_t c) {
-    uint64_t hi, lo;
-    lo = _umul128(a, (uint64_t)b, &hi);
-    /* Simple fallback: if hi is 0, just do lo/c */
-    if (hi == 0) return lo / c;
-    /* Otherwise use 128-bit division via shifts */
-    /* For our use case (timer math), overflow is unlikely */
-    return (uint64_t)(((double)a * b) / c);
+static inline uint64_t muldiv64(uint64_t a, uint64_t b, uint64_t c) {
+    uint64_t high, remainder;
+    uint64_t low = _umul128(a, b, &high);
+    /* Removing a multiple of c from the high word leaves these quotient bits unchanged. */
+    if (high >= c) high %= c;
+    return _udiv128(high, low, c, &remainder);
 }
 #else
-static inline uint64_t muldiv64(uint64_t a, uint32_t b, uint32_t c) {
+static inline uint64_t muldiv64(uint64_t a, uint64_t b, uint64_t c) {
     return (uint64_t)(((unsigned __int128)a * b) / c);
 }
 #endif
@@ -387,14 +385,14 @@ static inline void bql_unlock(void) {}
 
 /* Timer */
 extern void xbox_RuntimePerformanceCounter(LARGE_INTEGER *);
-static inline int64_t qemu_clock_get_ns(int type) {
-    (void)type;
-    LARGE_INTEGER freq, count;
-    QueryPerformanceFrequency(&freq);
+static inline int64_t qemu_clock_get_ns(int64_t frequency) {
+    LARGE_INTEGER count;
     xbox_RuntimePerformanceCounter(&count);
-    return (int64_t)(count.QuadPart * 1000000000LL / freq.QuadPart);
+    uint64_t ticks = (uint64_t)count.QuadPart;
+    uint64_t magnitude = count.QuadPart < 0 ? -ticks : ticks;
+    uint64_t ns = muldiv64(magnitude, NANOSECONDS_PER_SECOND, (uint64_t)frequency);
+    return (int64_t)(count.QuadPart < 0 ? -ns : ns);
 }
-#define QEMU_CLOCK_VIRTUAL 0
 
 /* Error type stub */
 typedef struct Error { char msg[256]; } Error;

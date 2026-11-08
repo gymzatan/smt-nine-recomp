@@ -127,6 +127,9 @@ uint32_t dsp_read_memory(DSPState *dsp, char space, uint32_t addr);
 void dsp_write_memory(DSPState *dsp, char space, uint32_t address,
                       uint32_t value);
 
+/* GP MIXBUF backing for the VP producer, used under the APU lock. */
+uint32_t *dsp_jit_gp_mixbuffer(DSPState *dsp);
+
 /* Accessor functions for backend-independent state access */
 bool dsp_get_halt_requested(DSPState *dsp);
 void dsp_set_halt_requested(DSPState *dsp, bool idle);

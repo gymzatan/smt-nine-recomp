@@ -48,15 +48,35 @@ int nine_title_assets_init(float aspect)
     if(ok)ok=fgetc(file)==EOF && !ferror(file);fclose(file);
     if(!ok){free(logos);return 0;}
     /* The full-screen background stretches; logos share the title menu anchor. */
-    for(unsigned y=0;y<512;y++)for(unsigned x=0;x<512;x++) {
-        float source=((float)x+0.5f-NINE_TITLE_UI_ORIGIN)/factor+NINE_TITLE_UI_ORIGIN-0.5f;
-        if(source<0 || source>=511)continue;
-        unsigned left=(unsigned)source;float t=source-left;
-        const uint8_t *a=logos+((size_t)y*512+left)*4,*b=a+4;
-        float aa=a[3]/255.0f,ba=b[3]/255.0f,alpha=aa*(1-t)+ba*t;
-        uint8_t *pixel=title_pixels+((size_t)y*512+x)*4;
-        for(unsigned channel=0;channel<3;channel++)
-            pixel[channel]=(uint8_t)(pixel[channel]*(1-alpha)+a[channel]*aa*(1-t)+b[channel]*ba*t+0.5f);
+    struct TitleColumn {
+        int left;
+        float left_weight, right_weight;
+    } columns[512];
+    /* The valid source coordinates span a single interval. */
+    unsigned first = 512, end = 0;
+    for (unsigned x = 0; x < 512; ++x) {
+        float source = ((float)x + 0.5f - NINE_TITLE_UI_ORIGIN) / factor + NINE_TITLE_UI_ORIGIN - 0.5f;
+        if (source < 0 || source >= 511) continue;
+        if (first == 512) first = x;
+        end = x + 1;
+        int left = (int)source;
+        float t = source - left;
+        columns[x] = (struct TitleColumn){left, 1 - t, t};
+    }
+    for (unsigned y = 0; y < 512; ++y) {
+        for (unsigned x = first; x < end; ++x) {
+            const struct TitleColumn *column = &columns[x];
+            const uint8_t *a = logos + ((size_t)y * 512 + column->left) * 4;
+            const uint8_t *b = a + 4;
+            if (!a[3] && !b[3]) continue;
+            float left_weight = column->left_weight, right_weight = column->right_weight;
+            float aa = a[3] / 255.0f, ba = b[3] / 255.0f;
+            float alpha = aa * left_weight + ba * right_weight;
+            uint8_t *pixel = title_pixels + ((size_t)y * 512 + x) * 4;
+            for (unsigned channel = 0; channel < 3; ++channel)
+                pixel[channel] = (uint8_t)(pixel[channel] * (1 - alpha) +
+                    a[channel] * aa * left_weight + b[channel] * ba * right_weight + 0.5f);
+        }
     }
     free(logos);d3d8_SetTextureAssetLookup(lookup);return 1;
 }

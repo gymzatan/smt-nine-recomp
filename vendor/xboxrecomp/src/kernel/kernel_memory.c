@@ -174,7 +174,28 @@ VOID __stdcall xbox_MmUnmapIoSpace(PVOID BaseAddress, ULONG NumberOfBytes)
 static SRWLOCK g_dma_page_lock = SRWLOCK_INIT;
 typedef struct DmaPageIdentity { uint32_t guest, physical; } DmaPageIdentity;
 static DmaPageIdentity g_dma_pages[16384];
-static unsigned g_dma_page_count;
+/* Writers serialize registration. DMA readers snapshot this count before
+ * reading the index so they can only see complete allocation batches. */
+static ULONG g_dma_page_count;
+static uint16_t g_dma_slot_by_physical_page[XBOX_CONTIG_SIZE / 4096u];
+
+static inline uint16_t dma_read_slot(const uint16_t *slot)
+{
+#ifdef _WIN32
+    return ReadUShortNoFence(slot);
+#else
+    return __atomic_load_n(slot, __ATOMIC_RELAXED);
+#endif
+}
+
+static inline void dma_write_slot(uint16_t *slot, uint16_t value)
+{
+#ifdef _WIN32
+    WriteUShortNoFence(slot, value);
+#else
+    __atomic_store_n(slot, value, __ATOMIC_RELAXED);
+#endif
+}
 typedef struct DmaPageCheckpoint { uint32_t count;DmaPageIdentity pages[16384]; } DmaPageCheckpoint;
 int xbox_SaveDmaPageIdentities(FILE *out) {
     if(!out || !xbox_CheckpointFrozen())return 0;
@@ -200,7 +221,12 @@ void *xbox_PrepareDmaPageIdentities(FILE *in) {
 void xbox_ApplyDmaPageIdentities(void *opaque) {
     DmaPageCheckpoint *saved=opaque;
     AcquireSRWLockExclusive(&g_dma_page_lock);
-    memcpy(g_dma_pages,saved->pages,saved->count*sizeof g_dma_pages[0]);g_dma_page_count=saved->count;
+    /* The checkpoint controller holds the device and guest CPU gates. */
+    memcpy(g_dma_pages,saved->pages,saved->count*sizeof g_dma_pages[0]);
+    memset(g_dma_slot_by_physical_page, 0, sizeof g_dma_slot_by_physical_page);
+    for (unsigned i = 0; i < saved->count; ++i)
+        g_dma_slot_by_physical_page[g_dma_pages[i].physical / 4096u] = (uint16_t)(i + 1);
+    WriteRelease((volatile LONG *)&g_dma_page_count, (LONG)saved->count);
     ReleaseSRWLockExclusive(&g_dma_page_lock);
 }
 
@@ -217,8 +243,6 @@ ULONG_PTR __stdcall xbox_MmGetPhysicalAddress(PVOID BaseAddress)
         fprintf(stderr, "[STOP] MmGetPhysicalAddress has no CPU backing: 0x%08X\n", va);
         exit(5);
     }
-    remaining = xbox_HeapBlockSize(va);
-    pages = remaining ? (uint32_t)(((uint64_t)(va & 4095u) + remaining + 4095) / 4096) : 1;
     AcquireSRWLockExclusive(&g_dma_page_lock);
     for (i = 0; i < g_dma_page_count; ++i)
         if (g_dma_pages[i].guest == page) {
@@ -226,6 +250,9 @@ ULONG_PTR __stdcall xbox_MmGetPhysicalAddress(PVOID BaseAddress)
             ReleaseSRWLockExclusive(&g_dma_page_lock);
             return physical + (va & 4095u);
         }
+    /* Only a new identity needs the heap span. Heap lookup never enters DMA. */
+    remaining = xbox_HeapBlockSize(va);
+    pages = remaining ? (uint32_t)(((uint64_t)(va & 4095u) + remaining + 4095) / 4096) : 1;
     for (i = 0; i < g_dma_page_count; ++i)
         if (g_dma_pages[i].guest >= page &&
             (uint64_t)g_dma_pages[i].guest < (uint64_t)page + pages * 4096u) {
@@ -238,10 +265,17 @@ ULONG_PTR __stdcall xbox_MmGetPhysicalAddress(PVOID BaseAddress)
         exit(5);
     }
     physical -= XBOX_CONTIG_BASE;
+    unsigned end = g_dma_page_count;
     for (i = 0; i < pages; ++i) {
-        g_dma_pages[g_dma_page_count].guest = page + i * 4096u;
-        g_dma_pages[g_dma_page_count++].physical = physical + i * 4096u;
+        DmaPageIdentity *identity = &g_dma_pages[end++];
+        identity->guest = page + i * 4096u;
+        identity->physical = physical + i * 4096u;
+        uint16_t *slot = &g_dma_slot_by_physical_page[identity->physical / 4096u];
+        /* Preserve the original first match if a physical page is registered twice. */
+        if (!*slot)
+            dma_write_slot(slot, (uint16_t)end);
     }
+    WriteRelease((volatile LONG *)&g_dma_page_count, (LONG)end);
     ReleaseSRWLockExclusive(&g_dma_page_lock);
     return physical + (va & 4095u);
 }
@@ -249,23 +283,24 @@ ULONG_PTR __stdcall xbox_MmGetPhysicalAddress(PVOID BaseAddress)
 void *xbox_ResolvePhysicalBuffer(uint32_t physical, uint32_t bytes)
 {
     uint32_t guest = XBOX_CONTIG_BASE + physical;
-    unsigned i;
     if ((uint64_t)physical + bytes > XBOX_CONTIG_SIZE) {
         fprintf(stderr, "[STOP] DMA physical span 0x%08X + 0x%X\n", physical, bytes);
         exit(5);
     }
-    AcquireSRWLockShared(&g_dma_page_lock);
-    for (i = 0; i < g_dma_page_count; ++i)
-        if (physical >= g_dma_pages[i].physical &&
-            physical - g_dma_pages[i].physical < 4096) {
-            if ((physical & 4095u) + (uint64_t)bytes > 4096) {
+    /* APU and OHCI workers hold the device gate. Guest OHCI MMIO runs
+     * under the guest CPU gate. Neither can see checkpoint replacement. */
+    if (physical < XBOX_CONTIG_SIZE) {
+        unsigned count = (unsigned)ReadAcquire((const volatile LONG *)&g_dma_page_count);
+        uint16_t slot = dma_read_slot(&g_dma_slot_by_physical_page[physical / 4096u]);
+        if (slot && slot <= count) {
+            uint32_t offset = physical & 4095u;
+            if (offset + (uint64_t)bytes > 4096) {
                 fprintf(stderr, "[STOP] CPU DMA alias crosses an unverified page boundary\n");
                 exit(5);
             }
-            guest = g_dma_pages[i].guest + (physical & 4095u);
-            break;
+            guest = g_dma_pages[slot - 1].guest + offset;
         }
-    ReleaseSRWLockShared(&g_dma_page_lock);
+    }
     return (void *)((uintptr_t)xbox_GetMemoryOffset() + guest);
 }
 

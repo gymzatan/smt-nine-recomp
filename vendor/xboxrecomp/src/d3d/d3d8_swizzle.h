@@ -327,14 +327,21 @@ static inline uint32_t d3d8_format_dxt_block_bytes(uint32_t fmt)
  * Xbox formats with "LIN_" prefix are linear; DXT formats are block-compressed.
  * All other uncompressed formats are swizzled by default.
  */
-/* Decode the block output retained by the original CPU sampler cache.
- * Texel selection and the complete block use this single palette formula. */
-static inline int d3d8_dxt_decode_block(const uint8_t *block, uint32_t fmt,
-                                       uint32_t pixels[16])
+/* Decode the top-left rectangle of a block, with 1 to 4 columns and rows.
+ * Texture upload and the CPU sampler use the same palette and selectors. */
+static
+#if defined(_MSC_VER)
+__forceinline
+#else
+inline
+#endif
+int d3d8_dxt_decode_block_rect(const uint8_t *block, uint32_t fmt,
+                                            void *pixels, size_t pitch,
+                                            uint32_t columns, uint32_t rows)
 {
     uint32_t block_bytes = d3d8_format_dxt_block_bytes(fmt);
     const uint8_t *b = block;
-    uint32_t c[4] = {0, 0, 0, 0}, a[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    uint32_t c[4], a[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     uint32_t c0, c1, i;
     uint64_t alpha_bits = 0;
     if (!block_bytes) return 0;
@@ -356,14 +363,22 @@ static inline int d3d8_dxt_decode_block(const uint8_t *block, uint32_t fmt,
     }
     c0 = (uint32_t)b[0] | ((uint32_t)b[1] << 8);
     c1 = (uint32_t)b[2] | ((uint32_t)b[3] << 8);
+    /* DXT1 opacity depends only on the palette entry. */
+    uint32_t color_alpha = block_bytes == 8 ? 0xFF000000u : 0;
     for (i = 0; i < 2; i++) {
         uint32_t rgb = i ? c1 : c0;
-        c[i] = (d3d8_expand_channel((rgb >> 11) & 0x1Fu, 5) << 16)
-             | (d3d8_expand_channel((rgb >>  5) & 0x3Fu, 6) <<  8)
-             |  d3d8_expand_channel( rgb        & 0x1Fu, 5);
+        uint32_t r = (rgb >> 11) & 0x1Fu;
+        uint32_t g = (rgb >> 5) & 0x3Fu;
+        uint32_t b5 = rgb & 0x1Fu;
+        /* Exact floor(channel * 255 / max) over the masked 5/6-bit ranges. */
+        c[i] = color_alpha | (((r * 1053u) >> 7) << 16)
+             | ((((g * 259u) + 3u) >> 6) << 8)
+             | ((b5 * 1053u) >> 7);
     }
     /* Only DXT1 uses the three-colour, transparent-selector mode. */
+    c[2] = color_alpha;
     if (c0 > c1 || block_bytes == 16) {
+        c[3] = color_alpha;
         for (i = 0; i < 3; i++) {
             uint32_t sh = i * 8, m0 = (c[0] >> sh) & 0xFFu, m1 = (c[1] >> sh) & 0xFFu;
             c[2] = (c[2] & ~(0xFFu << sh)) | (((2 * m0 + m1) / 3) << sh);
@@ -378,16 +393,35 @@ static inline int d3d8_dxt_decode_block(const uint8_t *block, uint32_t fmt,
     }
     uint32_t color_bits = (uint32_t)b[4] | ((uint32_t)b[5] << 8)
         | ((uint32_t)b[6] << 16) | ((uint32_t)b[7] << 24);
-    for (uint32_t texel = 0; texel < 16; texel++) {
-        uint32_t idx = (color_bits >> (2 * texel)) & 3u, alpha = 255u;
-        if (fmt == 0x0E) {
-            uint32_t nib = block[texel >> 1];
-            alpha = d3d8_expand_channel((texel & 1u) ? (nib >> 4) : (nib & 0x0Fu), 4);
-        } else if (fmt == 0x0F) alpha = a[(uint32_t)((alpha_bits >> (3 * texel)) & 7u)];
-        else if (c0 <= c1 && idx == 3) alpha = 0;
-        pixels[texel] = (alpha << 24) | (c[idx] & 0x00FFFFFFu);
+    for (uint32_t y = 0; y < rows; y++) {
+        uint8_t *row = (uint8_t *)pixels + y * pitch;
+        uint32_t row_colors = color_bits;
+        uint64_t row_alpha = alpha_bits;
+        for (uint32_t x = 0; x < columns; x++) {
+            uint32_t pixel = c[row_colors & 3u];
+            row_colors >>= 2;
+            if (fmt == 0x0E) {
+                uint32_t texel = y * 4 + x;
+                uint32_t nib = block[texel >> 1];
+                uint32_t alpha = d3d8_expand_channel((texel & 1u) ? (nib >> 4) : (nib & 0x0Fu), 4);
+                pixel |= alpha << 24;
+            } else if (fmt == 0x0F) {
+                pixel |= a[row_alpha & 7u] << 24;
+                row_alpha >>= 3;
+            }
+            memcpy(row + x * sizeof pixel, &pixel, sizeof pixel);
+        }
+        /* Advance a full source row even when the output block is clipped. */
+        color_bits >>= 8;
+        alpha_bits >>= 12;
     }
     return 1;
+}
+
+static inline int d3d8_dxt_decode_block(const uint8_t *block, uint32_t fmt,
+                                       uint32_t pixels[16])
+{
+    return d3d8_dxt_decode_block_rect(block, fmt, pixels, 4 * sizeof *pixels, 4, 4);
 }
 
 /* Retain the original texel entry point for the format layer's callers. */

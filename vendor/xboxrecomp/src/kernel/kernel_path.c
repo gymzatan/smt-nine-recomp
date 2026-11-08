@@ -31,18 +31,23 @@ static int match_prefix(const char* path, const char* prefix)
 {
     int i = 0;
     while (prefix[i]) {
-        if (tolower((unsigned char)path[i]) != tolower((unsigned char)prefix[i]))
+        unsigned char actual = (unsigned char)path[i];
+        unsigned char expected = (unsigned char)prefix[i];
+        if (actual != expected && tolower(actual) != tolower(expected))
             return 0;
         i++;
     }
     return i;
 }
 
+static const wchar_t s_cache_subdir[] = L"\\Cache";
+static const wchar_t s_title_subdir[] = L"\\TitleData";
+
 /* A device-path translation rule, shared by both backends. */
 typedef struct {
     const char* prefix;     /* Xbox path prefix (backslash form)         */
     int         to_save;    /* 0 = game, 1 = runtime, 2 = Partition1, 3 = U: */
-    const char* sub_win;    /* sub-directory, Win32 backslash form       */
+    const wchar_t *sub_win; /* sub-directory, Win32 backslash form    */
     const char* sub_posix;  /* sub-directory, POSIX slash form           */
 } path_rule;
 
@@ -56,25 +61,31 @@ static const path_rule s_rules[] = {
     { "\\Device\\Harddisk0\\Partition2\\",    0, NULL,         NULL          },
     { "C:\\",                                 0, NULL,         NULL          },
     { "\\??\\C:\\",                           0, NULL,         NULL          },
-    { "\\Device\\Harddisk0\\Partition2",     1, "\\SystemData", "/SystemData" },
-    { "\\Device\\Harddisk0\\Partition3",     1, "\\Cache",   "/Cache"      },
-    { "\\Device\\Harddisk0\\Partition4",     1, "\\Cache",   "/Cache"      },
-    { "\\Device\\Harddisk0\\Partition5",     1, "\\Cache",   "/Cache"      },
+    { "\\Device\\Harddisk0\\Partition2",     1, L"\\SystemData", "/SystemData" },
+    { "\\Device\\Harddisk0\\Partition3",     1, s_cache_subdir,   "/Cache"      },
+    { "\\Device\\Harddisk0\\Partition4",     1, s_cache_subdir,   "/Cache"      },
+    { "\\Device\\Harddisk0\\Partition5",     1, s_cache_subdir,   "/Cache"      },
     { "D:\\",                                 0, NULL,         NULL          },
     { "d:\\",                                 0, NULL,         NULL          },
     /* Y: is the Xbox dashboard partition; the dashboard opens its assets
      * (e.g. "Y:\default.xip") from there. Map it to the game dir. */
     { "Y:\\",                                 0, NULL,         NULL          },
     { "y:\\",                                 0, NULL,         NULL          },
-    { "T:\\",                                 1, "\\TitleData","/TitleData"  },
-    { "U:\\",                                 3, "\\UserData", "/UserData"   },
-    { "Z:\\",                                 1, "\\Cache",    "/Cache"      },
+    { "T:\\",                                 1, s_title_subdir,"/TitleData"  },
+    { "U:\\",                                 3, L"\\UserData", "/UserData"   },
+    { "Z:\\",                                 1, s_cache_subdir,    "/Cache"      },
     { "\\??\\D:\\",                           0, NULL,         NULL          },
     { "\\??\\Y:\\",                           0, NULL,         NULL          },
     { "\\??\\y:\\",                           0, NULL,         NULL          },
-    { "\\??\\T:\\",                           1, "\\TitleData","/TitleData"  },
+    { "\\??\\T:\\",                           1, s_title_subdir,"/TitleData"  },
 };
 #define PATH_RULE_COUNT ((int)(sizeof(s_rules) / sizeof(s_rules[0])))
+
+static size_t path_rule_device_name_length(const char *prefix)
+{
+    size_t length=strlen(prefix);
+    return length && prefix[length-1]=='\\' ? length-1 : length;
+}
 
 /* Physical device identities are drawn from this same path table. The rule
  * index is retained in the existing object record, including across snapshots. */
@@ -83,10 +94,9 @@ int xbox_path_device_rule(unsigned rule,char *name,DWORD capacity,ULONG *type) {
     if(!rule || rule>PATH_RULE_COUNT)return 0;
     const char *prefix=s_rules[rule-1].prefix;
     if(!match_prefix(prefix,"\\Device\\"))return 0;
-    size_t length=strlen(prefix);if(prefix[length-1]=='\\')--length;
+    size_t length=path_rule_device_name_length(prefix);
     for(unsigned i=0;i+1<rule;i++) {
-        size_t earlier=strlen(s_rules[i].prefix);
-        if(earlier && s_rules[i].prefix[earlier-1]=='\\')--earlier;
+        size_t earlier=path_rule_device_name_length(s_rules[i].prefix);
         if(earlier==length) {
             size_t j=0;while(j<length && tolower((unsigned char)prefix[j])==tolower((unsigned char)s_rules[i].prefix[j]))++j;
             if(j==length)return 0;
@@ -96,28 +106,27 @@ int xbox_path_device_rule(unsigned rule,char *name,DWORD capacity,ULONG *type) {
     if(type)*type=match_prefix(prefix,"\\Device\\CdRom")?2:7;
     return 1;
 }
-#if defined(_WIN32)
-static BOOL xbox_translate_path_impl(const char*,xbox_host_char*,DWORD);
-#endif
+#if !defined(_WIN32)
 BOOL xbox_translate_device_path(unsigned rule,const char *rest,xbox_host_char *output,DWORD capacity) {
-    char name[64];if(!rest || !xbox_path_device_rule(rule,name,sizeof name,NULL))return FALSE;
-    size_t head=strlen(name),tail=strlen(rest);
+    if(!rest || !rule || rule>PATH_RULE_COUNT)return FALSE;
+    /* The caller uses a device rule validated at publication or restore. */
+    const char *name=s_rules[rule-1].prefix;
+    size_t head=path_rule_device_name_length(name),tail=strlen(rest);
     if(head+tail+1>UINT16_MAX)return FALSE;
     char *path=malloc(head+tail+2);if(!path)return FALSE;
     memcpy(path,name,head);if(tail)path[head++]='\\';memcpy(path+head,rest,tail+1);
-#if defined(_WIN32)
-    BOOL ok=xbox_translate_path_impl(path,output,capacity);
-#else
     BOOL ok=xbox_translate_path(path,output,capacity);
-#endif
     free(path);return ok;
 }
+#endif
 
 /* Drive spellings share the same link identity in the existing I/O map. */
 static int split_symlink_path(const char *path,char link[7],const char **rest) {
-    if(!path)return 0;
-    if(match_prefix(path,"\\??\\") && path[4] && path[5]==':')path+=4;
-    if(!path[0] || path[1]!=':')return 0;
+    if(!path || !path[0])return 0;
+    if(path[1]!=':') {
+        if(!match_prefix(path,"\\??\\") || !path[4] || path[5]!=':')return 0;
+        path+=4;
+    }
     memcpy(link,"\\??\\",4);link[4]=(char)toupper((unsigned char)path[0]);link[5]=':';link[6]=0;
     *rest=path+2;while(**rest=='\\' || **rest=='/')++*rest;return 1;
 }
@@ -182,19 +191,27 @@ static WCHAR s_save_dir[MAX_PATH];
 static WCHAR s_user_dir[MAX_PATH];
 static WCHAR s_partition1_dir[MAX_PATH];
 static BOOL  s_initialized = FALSE;
-static char s_language_cache[80],s_language_title[80];
+static WCHAR s_language_cache[80],s_language_title[80];
 static WCHAR s_language_media_root[MAX_PATH];
+
+static void set_language_subdir(WCHAR *wide, int capacity,
+                                const char *prefix, const char *language)
+{
+    char subdir[80];
+    WCHAR path[MAX_PATH];
+    sprintf_s(subdir, sizeof subdir, "%s%s", prefix, language);
+    MultiByteToWideChar(CP_ACP, 0, subdir, -1, wide, capacity);
+    swprintf_s(path, MAX_PATH, L"%s%hs", s_save_dir, subdir);
+    CreateDirectoryW(path, NULL);
+}
 void xbox_path_set_language_media(const char *language,const char *media_root)
 {
     s_language_media_root[0]=0;
     s_language_cache[0]=s_language_title[0]=0;
     if(language[0]) {
         MultiByteToWideChar(CP_UTF8,0,media_root,-1,s_language_media_root,MAX_PATH);
-        sprintf_s(s_language_cache,sizeof s_language_cache,"\\Cache%s",language);
-        sprintf_s(s_language_title,sizeof s_language_title,"\\TitleData%s",language);
-        WCHAR path[MAX_PATH];
-        swprintf_s(path,MAX_PATH,L"%s%hs",s_save_dir,s_language_cache);CreateDirectoryW(path,NULL);
-        swprintf_s(path,MAX_PATH,L"%s%hs",s_save_dir,s_language_title);CreateDirectoryW(path,NULL);
+        set_language_subdir(s_language_cache, _countof(s_language_cache), "\\Cache", language);
+        set_language_subdir(s_language_title, _countof(s_language_title), "\\TitleData", language);
     }
 }
 BOOL xbox_path_set_user_directory(const char *directory)
@@ -288,11 +305,54 @@ static void xbox_remember_host_path(const wchar_t *p)
 
 
 
-static BOOL xbox_translate_path_impl(const char* xbox_path, xbox_host_char* host_path_buf, DWORD buf_size)
+static void translate_matched_path(const path_rule *rule, const char *remainder,
+                                   unsigned leading_separator,
+                                   xbox_host_char *host_path_buf, DWORD buf_size)
 {
-    const char*  remainder = NULL;
-    const WCHAR* base_dir  = NULL;
-    const char*  sub_dir   = NULL;
+    static const WCHAR *const roots[]={s_game_dir,s_save_dir,s_partition1_dir,s_user_dir};
+    const WCHAR *base_dir=roots[rule->to_save];
+    const WCHAR *sub_dir=rule->sub_win;
+    if (!leading_separator && s_language_media_root[0] && base_dir==s_game_dir &&
+        _strnicmp(remainder,"Media\\",6)==0)
+        base_dir=s_language_media_root;
+    if (s_language_cache[0] && sub_dir) {
+        if (sub_dir==s_cache_subdir) sub_dir=s_language_cache;
+        else if (sub_dir==s_title_subdir) sub_dir=s_language_title;
+    }
+
+    WCHAR remainder_wide[MAX_PATH];
+    if (leading_separator) remainder_wide[0]=L'\\';
+    MultiByteToWideChar(CP_ACP, 0, remainder, -1, remainder_wide+leading_separator,
+                        MAX_PATH-leading_separator);
+
+    for (WCHAR* p = remainder_wide; *p; p++) {
+        if (*p == L'/') *p = L'\\';
+    }
+
+    int path_length;
+    if (sub_dir) {
+        path_length = swprintf_s(host_path_buf, buf_size, L"%s%s\\%s", base_dir, sub_dir, remainder_wide);
+
+        WCHAR dir_path[MAX_PATH];
+        swprintf_s(dir_path, MAX_PATH, L"%s%s", base_dir, sub_dir);
+        CreateDirectoryW(s_save_dir, NULL);
+        CreateDirectoryW(dir_path, NULL);
+    } else {
+        path_length = swprintf_s(host_path_buf, buf_size, L"%s\\%s", base_dir, remainder_wide);
+    }
+
+    /* An empty remainder means the title opened the device itself, so
+     * the join above leaves a trailing separator -- which CreateFileW
+     * rejects even with FILE_FLAG_BACKUP_SEMANTICS, turning an existing
+     * directory into STATUS_OBJECT_PATH_NOT_FOUND. */
+    while (path_length > 1 && (host_path_buf[path_length - 1] == L'\\'
+                               || host_path_buf[path_length - 1] == L'/'))
+        host_path_buf[--path_length] = L'\0';
+}
+
+static BOOL xbox_translate_path_impl(const char* xbox_path, xbox_host_char* host_path_buf,
+                                     DWORD buf_size, unsigned device_rule)
+{
     int          skip;
 
     if (!xbox_path || !host_path_buf || buf_size == 0)
@@ -301,7 +361,7 @@ static BOOL xbox_translate_path_impl(const char* xbox_path, xbox_host_char* host
     if (!s_initialized)
         xbox_path_init(NULL, NULL);
 
-    {
+    if (!device_rule) {
         char link[7];const char *rest;
         if(split_symlink_path(xbox_path,link,&rest)) {
             int resolved=xbox_SymbolicLinkPath(link,rest,host_path_buf,buf_size);
@@ -312,20 +372,14 @@ static BOOL xbox_translate_path_impl(const char* xbox_path, xbox_host_char* host
         }
     }
 
-    for (int i = 0; i < PATH_RULE_COUNT; i++) {
+    for (unsigned i = device_rule ? device_rule - 1 : 0; i < PATH_RULE_COUNT; i++) {
         skip = match_prefix(xbox_path, s_rules[i].prefix);
         if(skip && s_rules[i].prefix[skip-1]!='\\' && xbox_path[skip] && xbox_path[skip]!='\\' && xbox_path[skip]!='/')skip=0;
         if (skip) {
-            remainder = xbox_path + skip;
-            const WCHAR *roots[]={s_game_dir,s_save_dir,s_partition1_dir,s_user_dir};
-            base_dir=roots[s_rules[i].to_save];
-            sub_dir   = s_rules[i].sub_win;
-            if(s_language_media_root[0] && base_dir==s_game_dir && _strnicmp(remainder,"Media\\",6)==0)base_dir=s_language_media_root;
-            if(s_language_cache[0] && sub_dir) {
-                if(!strcmp(sub_dir,"\\Cache"))sub_dir=s_language_cache;
-                else if(!strcmp(sub_dir,"\\TitleData"))sub_dir=s_language_title;
-            }
-            goto translate;
+            xbox_log(XBOX_LOG_TRACE, XBOX_LOG_PATH, "%s", xbox_path);
+            translate_matched_path(&s_rules[i],xbox_path+skip,0,host_path_buf,buf_size);
+            XBOX_TRACE(XBOX_LOG_PATH, "%s -> %S", xbox_path, host_path_buf);
+            return TRUE;
         }
     }
 
@@ -333,48 +387,39 @@ static BOOL xbox_translate_path_impl(const char* xbox_path, xbox_host_char* host
     MultiByteToWideChar(CP_ACP, 0, xbox_path, -1, host_path_buf, buf_size);
     return TRUE;
 
-translate:
-    xbox_log(XBOX_LOG_TRACE, XBOX_LOG_PATH, "%s", xbox_path);
-    {
-        WCHAR remainder_wide[MAX_PATH];
-        MultiByteToWideChar(CP_ACP, 0, remainder, -1, remainder_wide, MAX_PATH);
+}
 
-        for (WCHAR* p = remainder_wide; *p; p++) {
-            if (*p == L'/') *p = L'\\';
-        }
+BOOL xbox_translate_device_path(unsigned rule,const char *rest,xbox_host_char *output,DWORD capacity)
+{
+    if (!rest || !rule || rule>PATH_RULE_COUNT || !output || !capacity)
+        return FALSE;
 
-        if (sub_dir) {
-            WCHAR sub_wide[MAX_PATH];
-            MultiByteToWideChar(CP_ACP, 0, sub_dir, -1, sub_wide, MAX_PATH);
-            swprintf_s(host_path_buf, buf_size, L"%s%s\\%s", base_dir, sub_wide, remainder_wide);
-
-            WCHAR dir_path[MAX_PATH];
-            swprintf_s(dir_path, MAX_PATH, L"%s%s", base_dir, sub_wide);
-            CreateDirectoryW(s_save_dir, NULL);
-            CreateDirectoryW(dir_path, NULL);
-        } else {
-            swprintf_s(host_path_buf, buf_size, L"%s\\%s", base_dir, remainder_wide);
-        }
-
-        /* An empty remainder means the title opened the device itself, so
-         * the join above leaves a trailing separator -- which CreateFileW
-         * rejects even with FILE_FLAG_BACKUP_SEMANTICS, turning an existing
-         * directory into STATUS_OBJECT_PATH_NOT_FOUND. */
-        {
-            size_t n = wcslen(host_path_buf);
-            while (n > 1 && (host_path_buf[n - 1] == L'\\'
-                             || host_path_buf[n - 1] == L'/'))
-                host_path_buf[--n] = L'\0';
-        }
-
-        XBOX_TRACE(XBOX_LOG_PATH, "%s -> %S", xbox_path, host_path_buf);
-        return TRUE;
+    const path_rule *resolved=&s_rules[rule-1];
+    const char *name=resolved->prefix;
+    size_t head=path_rule_device_name_length(name);
+    size_t tail=strlen(rest);
+    if (head+tail+1>UINT16_MAX) return FALSE;
+    if (!tail) {
+        /* The bare device can match a later rule, for example SystemData. */
+        char root[MAX_PATH];
+        memcpy(root,name,head);
+        root[head]=0;
+        return xbox_translate_path_impl(root,output,capacity,rule);
     }
+
+    if (!s_initialized) xbox_path_init(NULL,NULL);
+    /* A rule without a trailing separator matched only the device name.
+     * Its original remainder began with the join separator. */
+    unsigned leading_separator=name[head]=='\0';
+    xbox_log(XBOX_LOG_TRACE,XBOX_LOG_PATH,"%.*s\\%s",(int)head,name,rest);
+    translate_matched_path(resolved,rest,leading_separator,output,capacity);
+    XBOX_TRACE(XBOX_LOG_PATH,"%.*s\\%s -> %S",(int)head,name,rest,output);
+    return TRUE;
 }
 
 /* ======================================================================== */
 BOOL xbox_translate_path(const char *path,xbox_host_char *output,DWORD capacity) {
-    if(!xbox_translate_path_impl(path,output,capacity))return FALSE;
+    if(!xbox_translate_path_impl(path,output,capacity,0))return FALSE;
     if(g_xbox_path_hook)g_xbox_path_hook(path);
     xbox_remember_host_path(output);return TRUE;
 }

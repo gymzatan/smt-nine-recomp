@@ -96,7 +96,7 @@ static RECT s_hw_bounds;
 static int s_hw_program_active, s_hw_fixed_active, s_hw_output_active;
 static uint32_t s_hw_polygon_info[NV_MAX_INDICES];
 static D3D11_PRIMITIVE_TOPOLOGY s_hw_topology;
-static uint32_t s_hw_program_vertex_count;
+static uint32_t s_hw_program_vertex_count, s_hw_program_vertex_stride;
 static uint32_t s_hw_program_inputs;
 /* Valid only during raster_batch_vertices and its immediate flush. */
 static const uint32_t *s_hw_program;
@@ -256,12 +256,18 @@ static void hw_invalidate_texture_range(HwMemory *memory,size_t offset,size_t by
             hw_texture_invalidate(t);
     }
 }
-static void hw_protect_views(HwMemory *memory,size_t offset,size_t bytes,DWORD protection)
+enum HwProtectMode {
+    HW_PROTECT_NORMAL = 0,
+    HW_PROTECT_COMPLETION = 1,
+    HW_PROTECT_CACHE_INVALIDATED = 2,
+    HW_PROTECT_OUTPUT_CLEAR = 4
+};
+static void hw_protect_views(HwMemory *memory,size_t offset,size_t bytes,DWORD protection,enum HwProtectMode mode)
 {
     if(!bytes || offset>memory->views.view_size || bytes>memory->views.view_size-offset) hw_check(E_INVALIDARG,"shared colour protection extent");
-    if(protection==PAGE_NOACCESS) hw_invalidate_texture_range(memory,offset,bytes);
-    if(protection==PAGE_READWRITE) {
+    if(!(mode&HW_PROTECT_CACHE_INVALIDATED) && (protection==PAGE_NOACCESS || protection==PAGE_READWRITE))
         hw_invalidate_texture_range(memory,offset,bytes);
+    if(protection==PAGE_READWRITE) {
         for(size_t page=offset/4096;page<(offset+bytes+4095)/4096;page++)
             for(unsigned i=0;i<memory->views.view_count;i++) memory->write_guard_protections[page*memory->views.view_count+i]=0;
     }
@@ -285,13 +291,21 @@ static void hw_protect_views(HwMemory *memory,size_t offset,size_t bytes,DWORD p
 }
 static size_t hw_color_bytes(const HwColor *color) { return (size_t)color->pitch*color->height; }
 static int hw_ranges_overlap(size_t a,size_t an,size_t b,size_t bn) { return a<b+bn && b<a+an; }
-static int hw_pending_output(HwMemory *memory,size_t offset,size_t bytes)
+static inline int hw_pending_output_ranges(HwMemory *memory,size_t offset,size_t bytes,
+                                           HwMemory *second_memory,size_t second_offset,size_t second_bytes)
 {
     for(size_t i=0;i<s_hw_query_count;i++) {
         HwQuery *q=&s_hw_queries[i];
-        if(q->memory && q->pending && (!memory || (q->memory==memory && hw_ranges_overlap(offset,bytes,q->offset,4)))) return 1;
+        if(!q->memory || !q->pending) continue;
+        if(!memory ||
+           (q->memory==memory && hw_ranges_overlap(offset,bytes,q->offset,4)) ||
+           (q->memory==second_memory && hw_ranges_overlap(second_offset,second_bytes,q->offset,4))) return 1;
     }
     return 0;
+}
+static int hw_pending_output(HwMemory *memory,size_t offset,size_t bytes)
+{
+    return hw_pending_output_ranges(memory,offset,bytes,NULL,0,0);
 }
 static void hw_guard_cpu_write_range(HwMemory *memory,size_t offset,size_t bytes);
 enum HwOutputProtection { HW_OUTPUT_REFRESH, HW_OUTPUT_APPEND, HW_OUTPUT_COMPLETE };
@@ -303,9 +317,8 @@ static void hw_output_page_protection(HwQuery *query, enum HwOutputProtection tr
          * pending output. The original queue is the sole pending identity. */
         if(transition==HW_OUTPUT_APPEND) {
             int protected=0;
-            for(size_t i=0;i<(size_t)s_hw_query_count;i++) {
-                HwQuery *q=&s_hw_queries[i];
-                if(q->memory==query->memory && q->pending && q!=query &&
+            for(HwQuery *q=s_hw_queries;q!=query;q++) {
+                if(q->memory==query->memory && q->pending &&
                    hw_ranges_overlap(page,4096,q->offset,4)) {protected=1;break;}
             }
             if(protected) continue;
@@ -344,22 +357,25 @@ static void hw_output_page_protection(HwQuery *query, enum HwOutputProtection tr
         }
         if(transition==HW_OUTPUT_COMPLETE && protection==PAGE_READONLY)
             hw_invalidate_texture_range(query->memory,page,4096);
-        hw_protect_views(query->memory,page,4096,protection);
+        hw_protect_views(query->memory,page,4096,protection,HW_PROTECT_NORMAL);
     }
 }
-static void hw_protect(HwMemory *memory,size_t offset,size_t bytes,DWORD protection,int completion)
+static void hw_protect(HwMemory *memory,size_t offset,size_t bytes,DWORD protection,enum HwProtectMode mode)
 {
     /* The completion writer has already resolved its output pages. A colour
      * readback can also change ownership on that colour's other pages. */
     size_t lo=offset&~(size_t)4095,hi=(offset+bytes+4095)&~(size_t)4095;
-    if(!completion)hw_protect_views(memory,offset,bytes,protection);
-    for(size_t i=0;i<(size_t)s_hw_query_count;i++) {
+    int completion=mode==HW_PROTECT_COMPLETION;
+    if(!completion)hw_protect_views(memory,offset,bytes,protection,mode);
+    if(mode&HW_PROTECT_OUTPUT_CLEAR)return;
+    size_t count=(size_t)s_hw_query_count;
+    for(size_t i=0;i<count;i++) {
         HwQuery *q=&s_hw_queries[i];
         if(q->memory==memory && q->pending && (completion || hw_ranges_overlap(lo,hi-lo,q->offset,4)))
             hw_output_page_protection(q,HW_OUTPUT_REFRESH,0);
     }
 }
-static void hw_append_query(HwQuery query)
+static HwQuery *hw_append_query(HwQuery query)
 {
     size_t count=(size_t)s_hw_query_count;
     if(count==s_hw_query_capacity) {
@@ -371,6 +387,7 @@ static void hw_append_query(HwQuery query)
     }
     query.pending=1;
     s_hw_queries[count]=query;InterlockedIncrement64(&s_hw_query_count);
+    return &s_hw_queries[count];
 }
 static void hw_initialize(void);
 static void hw_defer_output(uint8_t *output,uint32_t value)
@@ -389,11 +406,13 @@ static void hw_defer_output(uint8_t *output,uint32_t value)
     }
     ID3D11DeviceContext_End(d3d8_GetD3D11Context(),(ID3D11Asynchronous *)query.query);
     }
-    hw_append_query(query);hw_output_page_protection(&s_hw_queries[s_hw_query_count-1],HW_OUTPUT_APPEND,0);
+    HwQuery *appended=hw_append_query(query);
+    hw_output_page_protection(appended,HW_OUTPUT_APPEND,0);
     gpu_timing_finish(start,&s_gpu.hardware_gpu_completion_ticks);
     hw_leave();
 }
-static void hw_mark_cpu_write(HwMemory *memory,size_t offset,size_t bytes,HwQuery *completed,int surface_empty)
+static void hw_mark_cpu_write(HwMemory *memory,size_t offset,size_t bytes,HwQuery *completed,
+                              int surface_empty,enum HwProtectMode mode)
 {
     size_t lo=offset&~(size_t)4095,hi=(offset+bytes+4095)&~(size_t)4095;
     int colour=0,depth=0;
@@ -405,7 +424,7 @@ static void hw_mark_cpu_write(HwMemory *memory,size_t offset,size_t bytes,HwQuer
         hw_output_page_protection(completed,HW_OUTPUT_COMPLETE,!colour && !depth);
         if(!colour)return;
     }
-    hw_protect(memory,offset,bytes,PAGE_READWRITE,completed!=NULL);
+    hw_protect(memory,offset,bytes,PAGE_READWRITE,mode);
 }
 /* Keep existing colour/query protections stronger than an owned write guard.
  * Per-view records retain only permissions changed here; content validity stays
@@ -435,7 +454,13 @@ static void hw_guard_cpu_write_range(HwMemory *memory,size_t offset,size_t bytes
         }
     }
 }
-static void hw_release_cpu_write_range(HwMemory *memory,size_t offset,size_t bytes,int output_free)
+enum HwWriteRangeOwners {
+    HW_WRITE_CHECK_OWNERS,
+    HW_WRITE_OUTPUT_CLEAR,
+    HW_WRITE_OWNER_FREE
+};
+static void hw_release_cpu_write_range(HwMemory *memory,size_t offset,size_t bytes,
+                                       enum HwWriteRangeOwners owners)
 {
     hw_invalidate_texture_range(memory,offset,bytes);
     size_t lo=offset&~(size_t)4095,hi=(offset+bytes+4095)&~(size_t)4095;
@@ -444,11 +469,8 @@ static void hw_release_cpu_write_range(HwMemory *memory,size_t offset,size_t byt
         int owned=0;for(unsigned i=0;i<memory->views.view_count;i++) if(permissions[i]){owned=1;break;}
         if(!owned) continue;
         int output=0;DWORD protection=0;
-        /* The fault classifier already excludes every colour, depth and
-         * output page while holding this same lock. Other callers retain
-         * the original ownership calculation. */
-        if(!output_free) {
-            output=hw_pending_output(memory,page,4096);
+        if(owners!=HW_WRITE_OWNER_FREE) {
+            if(owners==HW_WRITE_CHECK_OWNERS)output=hw_pending_output(memory,page,4096);
             protection=output?PAGE_READONLY:0;
             for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==memory && hw_ranges_overlap(page,4096,c->memory_offset,hw_color_bytes(c))) {
                 if(c->dirty) {protection=PAGE_NOACCESS;break;}
@@ -471,7 +493,7 @@ static void hw_vertex_batch_discard(HwVertexBatch *entry)
 {
     entry->valid=0;
     for(unsigned i=0;i<entry->range_count;i++)
-        hw_release_cpu_write_range(entry->ranges[i].memory,entry->ranges[i].offset,entry->ranges[i].bytes,0);
+        hw_release_cpu_write_range(entry->ranges[i].memory,entry->ranges[i].offset,entry->ranges[i].bytes,HW_WRITE_CHECK_OWNERS);
     free(entry->data);memset(entry,0,sizeof *entry);
 }
 static void hw_free_vertex_batches(void)
@@ -595,8 +617,8 @@ static void hw_vertex_batch_end(HwVertexBatch *entry,unsigned attribute_count)
 
 static void hw_disarm_texture(HwTexture *texture)
 {
-    if(texture->memory) hw_release_cpu_write_range(texture->memory,texture->memory_offset,texture->raw_size,0);
-    if(texture->palette_memory) hw_release_cpu_write_range(texture->palette_memory,texture->palette_offset,sizeof texture->palette,0);
+    if(texture->memory) hw_release_cpu_write_range(texture->memory,texture->memory_offset,texture->raw_size,HW_WRITE_CHECK_OWNERS);
+    if(texture->palette_memory) hw_release_cpu_write_range(texture->palette_memory,texture->palette_offset,sizeof texture->palette,HW_WRITE_CHECK_OWNERS);
 }
 static void hw_free_textures(void)
 {
@@ -627,12 +649,18 @@ static void hw_initialize(void)
     s_hw_ps_value_valid=0;
     s_hw_initialized=1;
 }
-static void hw_preserve_cpu_write(HwMemory *memory,size_t offset,size_t bytes,int overwrite);
+enum HwCpuWriteSurface {
+    HW_CPU_WRITE_COLOR = 1,
+    HW_CPU_WRITE_DEPTH = 2
+};
+static unsigned hw_preserve_cpu_write(HwMemory *memory,size_t offset,size_t bytes,int overwrite,
+                                      int check_clean);
+static void hw_collect_queries_locked(int wait);
 static void hw_upload_native_color(HwColor *color)
 {
-    if(hw_pending_output(color->memory,color->memory_offset,hw_color_bytes(color))) hw_collect_queries(1);
-    hw_preserve_cpu_write(color->memory,color->memory_offset,hw_color_bytes(color),0);
-    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_READONLY,0);
+    if(hw_pending_output(color->memory,color->memory_offset,hw_color_bytes(color))) hw_collect_queries_locked(1);
+    hw_preserve_cpu_write(color->memory,color->memory_offset,hw_color_bytes(color),0,0);
+    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_READONLY,HW_PROTECT_NORMAL);
     const uint8_t *memory=color->memory->host_view+color->memory_offset;
     if(color_swizzled(color->format)) {
         D3DLOCKED_RECT locked;
@@ -679,8 +707,8 @@ static void hw_upload_color(HwColor *color,uint32_t cleared_channels)
     if((cleared_channels&NV097_CLEAR_COLOR_MASK)==NV097_CLEAR_COLOR_MASK &&
        !bounds.x0 && !bounds.y0 && bounds.x1==color->width && bounds.y1==color->height) {
         /* The original CPU clear has already written every target byte. */
-        if(hw_pending_output(color->memory,color->memory_offset,hw_color_bytes(color))) hw_collect_queries(1);
-        hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_READONLY,0);
+        if(hw_pending_output(color->memory,color->memory_offset,hw_color_bytes(color))) hw_collect_queries_locked(1);
+        hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_READONLY,HW_PROTECT_NORMAL);
         hw_clear_color_image(color);
         color->upload_needed=0;
     } else {
@@ -698,104 +726,134 @@ static void hw_resolve_color(HwColor *color)
 static void hw_copy_color_to_memory(HwColor *color)
 {
     if(!color->dirty) return;
-    uint64_t timing_start=gpu_timing_clock();D3DLOCKED_RECT locked;
+    uint64_t timing_start=gpu_timing_clock();
     hw_resolve_color(color);
     const RECT *bounds=&color->dirty_bounds;
-    uint8_t *native_pixels=NULL;
-    if(color->native_surface) {
-        native_pixels=malloc((size_t)color->width*color->height*4);
-        if(!native_pixels)hw_check(E_OUTOFMEMORY,"colour readback storage");
-        hw_vk_check(nvk_image_read(color->native_surface,native_pixels,color->width*4),"colour readback");
-        locked.Pitch=color->width*4;locked.pBits=native_pixels+(size_t)bounds->top*locked.Pitch+bounds->left*4;
-    } else hw_check(color->surface->lpVtbl->LockRect(color->surface,&locked,bounds,D3DLOCK_READONLY),"surface readback");
     uint8_t *mem=color->memory->host_view+color->memory_offset;
     size_t row_bytes=(size_t)(bounds->right-bounds->left)*color->bpp;
-    /* Seed the existing masked walk once at this dirty rectangle's origin. */
-    uint32_t mask_x=0,mask_y=0,first_x=0,off_y=0;
-    if(color_swizzled(color->format)) {
-        xbox_swizzle_masks(color_width(color->format,color->pitch,color->bpp),color_height(color->format,0),&mask_x,&mask_y);
-        first_x=swizzle_deposit((uint32_t)bounds->left,mask_x);
-        off_y=swizzle_deposit((uint32_t)bounds->top,mask_y);
-    }
-    for(LONG y=bounds->top;y<bounds->bottom;y++) {
-        const uint8_t *row=(uint8_t *)locked.pBits+(size_t)(y-bounds->top)*locked.Pitch;
-        if(color_swizzled(color->format)) {
-            uint32_t off_x=first_x;
-            LONG x=bounds->left;
-            if((x&1) && x<bounds->right) {
-                *(uint32_t *)(mem+(size_t)(off_x|off_y)*color->bpp)=
-                    ((const uint32_t *)row)[x-bounds->left];
-                off_x=(off_x-mask_x)&mask_x;
-                ++x;
-            }
-            /* The original Morton mask assigns bit zero to X whenever a
-             * row has a pair. Copy both raw pixels before advancing X by two. */
-            uint32_t pair_mask=mask_x&~1u;
-            for(;x+1<bounds->right;x+=2) {
-                memcpy(mem+(size_t)(off_x|off_y)*color->bpp,
-                       row+(size_t)(x-bounds->left)*color->bpp,8);
-                off_x=(off_x-pair_mask)&pair_mask;
-            }
-            if(x<bounds->right)
-                *(uint32_t *)(mem+(size_t)(off_x|off_y)*color->bpp)=
-                    ((const uint32_t *)row)[x-bounds->left];
-            off_y=(off_y-mask_y)&mask_y;
-        } else {
-            size_t at=(size_t)y*color->pitch+(size_t)bounds->left*color->bpp;
-            memcpy(mem+at,row,row_bytes);
+    int swizzled=color_swizzled(color->format);
+    if(color->native_surface && !swizzled && color->bpp==4 &&
+       !bounds->left && !bounds->top && bounds->right==(LONG)color->width &&
+       bounds->bottom==(LONG)color->height && color->pitch>=row_bytes) {
+        /* The existing readback copies only the pixel bytes of each row. */
+        hw_vk_check(nvk_image_read(color->native_surface,mem,color->pitch),"colour readback");
+    } else {
+        D3DLOCKED_RECT locked;
+        uint8_t *native_pixels=NULL;
+        if(color->native_surface) {
+            native_pixels=malloc((size_t)color->width*color->height*4);
+            if(!native_pixels)hw_check(E_OUTOFMEMORY,"colour readback storage");
+            hw_vk_check(nvk_image_read(color->native_surface,native_pixels,color->width*4),"colour readback");
+            locked.Pitch=color->width*4;locked.pBits=native_pixels+(size_t)bounds->top*locked.Pitch+bounds->left*4;
+        } else hw_check(color->surface->lpVtbl->LockRect(color->surface,&locked,bounds,D3DLOCK_READONLY),"surface readback");
+        /* Seed the existing masked walk once at this dirty rectangle's origin. */
+        uint32_t mask_x=0,mask_y=0,first_x=0,off_y=0;
+        if(swizzled) {
+            xbox_swizzle_masks(color_width(color->format,color->pitch,color->bpp),color_height(color->format,0),&mask_x,&mask_y);
+            first_x=swizzle_deposit((uint32_t)bounds->left,mask_x);
+            off_y=swizzle_deposit((uint32_t)bounds->top,mask_y);
         }
+        for(LONG y=bounds->top;y<bounds->bottom;y++) {
+            const uint8_t *row=(uint8_t *)locked.pBits+(size_t)(y-bounds->top)*locked.Pitch;
+            if(swizzled) {
+                uint32_t off_x=first_x;
+                LONG x=bounds->left;
+                if((x&1) && x<bounds->right) {
+                    *(uint32_t *)(mem+(size_t)(off_x|off_y)*color->bpp)=
+                        ((const uint32_t *)row)[x-bounds->left];
+                    off_x=(off_x-mask_x)&mask_x;
+                    ++x;
+                }
+                /* The original Morton mask assigns bit zero to X whenever a
+                 * row has a pair. Copy both raw pixels before advancing X by two. */
+                uint32_t pair_mask=mask_x&~1u;
+                for(;x+1<bounds->right;x+=2) {
+                    memcpy(mem+(size_t)(off_x|off_y)*color->bpp,
+                           row+(size_t)(x-bounds->left)*color->bpp,8);
+                    off_x=(off_x-pair_mask)&pair_mask;
+                }
+                if(x<bounds->right)
+                    *(uint32_t *)(mem+(size_t)(off_x|off_y)*color->bpp)=
+                        ((const uint32_t *)row)[x-bounds->left];
+                off_y=(off_y-mask_y)&mask_y;
+            } else {
+                size_t at=(size_t)y*color->pitch+(size_t)bounds->left*color->bpp;
+                memcpy(mem+at,row,row_bytes);
+            }
+        }
+        if(native_pixels)free(native_pixels);
+        else hw_check(color->surface->lpVtbl->UnlockRect(color->surface),"surface unlock");
     }
-    if(native_pixels)free(native_pixels);
-    else hw_check(color->surface->lpVtbl->UnlockRect(color->surface),"surface unlock");
     s_gpu.hardware_color_readback_bytes+=row_bytes*(size_t)(bounds->bottom-bounds->top);
     hw_invalidate_texture_range(color->memory,color->memory_offset,hw_color_bytes(color));
     color->dirty=0;++s_gpu.hardware_color_readbacks;gpu_timing_finish(timing_start,&s_gpu.hardware_publish_ticks);
 }
-static void hw_publish_all(void)
+/* The draw and clear paths already hold PFIFO and the graphics lock. */
+static void hw_publish_all_locked(void)
 {
-    if(!hw_enabled() || !s_hw_initialized) return;
-    hw_enter();
-    int protection_needed=hw_pending_output(NULL,0,0);
-    if(protection_needed) hw_collect_queries(1);
+    int output_pending=hw_pending_output(NULL,0,0);
+    if(output_pending) hw_collect_queries_locked(1);
+    /* Readbacks below do not append memory outputs under this lock. */
+    enum HwProtectMode protection_mode=output_pending && s_hw_query_count?
+                                       HW_PROTECT_NORMAL:HW_PROTECT_OUTPUT_CLEAR;
+    int protection_needed=output_pending;
     for(HwColor *color=s_hw_colors;color;color=color->next) {
         if(color->dirty || color->upload_needed) protection_needed=1;
         hw_copy_color_to_memory(color);
     }
     for(HwDepth *depth=s_hw_depths;depth;depth=depth->next) if(depth->memory && depth->dirty) {
         hw_copy_depth_to_memory(depth);
-        hw_protect(depth->memory,depth->memory_offset,hw_depth_bytes(depth),depth->upload_needed?PAGE_READWRITE:PAGE_READONLY,0);
+        hw_protect(depth->memory,depth->memory_offset,hw_depth_bytes(depth),depth->upload_needed?PAGE_READWRITE:PAGE_READONLY,protection_mode);
     }
-    if(protection_needed) for(HwColor *color=s_hw_colors;color;color=color->next) if(color->height) hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),color->upload_needed?PAGE_READWRITE:PAGE_READONLY,0);
+    if(protection_needed) for(HwColor *color=s_hw_colors;color;color=color->next) if(color->height) hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),color->upload_needed?PAGE_READWRITE:PAGE_READONLY,protection_mode);
+}
+static void hw_publish_all(void)
+{
+    if(!hw_enabled() || !s_hw_initialized) return;
+    hw_enter();
+    hw_publish_all_locked();
     hw_leave();
 }
-static void hw_preserve_cpu_write(HwMemory *memory,size_t offset,size_t bytes,int overwrite)
+
+static unsigned hw_preserve_cpu_write(HwMemory *memory,size_t offset,size_t bytes,int overwrite,
+                                      int check_clean)
 {
     size_t lo=offset&~(size_t)4095,hi=(offset+bytes+4095)&~(size_t)4095;
+    unsigned surfaces=0;
     /* Every owner of pages made writable must retain its untouched
      * bytes. A complete overwrite needs none of that owner's pixels. */
-    for(HwColor *c=s_hw_colors;c;c=c->next)
-        if(c->memory==memory && c->dirty && hw_ranges_overlap(lo,hi-lo,c->memory_offset,hw_color_bytes(c))) {
-            if(overwrite && c->memory_offset>=offset && c->memory_offset<=offset+bytes &&
-               hw_color_bytes(c)<=offset+bytes-c->memory_offset)c->dirty=0;
-            else hw_copy_color_to_memory(c);
-        }
-    for(HwDepth *d=s_hw_depths;d;d=d->next) if(d->memory==memory && d->dirty && hw_ranges_overlap(lo,hi-lo,d->memory_offset,hw_depth_bytes(d))) {
-        if(overwrite && d->memory_offset>=offset && d->memory_offset<=offset+bytes && hw_depth_bytes(d)<=offset+bytes-d->memory_offset)d->dirty=0;
+    for(HwColor *c=s_hw_colors;c;c=c->next) {
+        if(c->memory!=memory || (!c->dirty && !check_clean) ||
+           !hw_ranges_overlap(lo,hi-lo,c->memory_offset,hw_color_bytes(c))) continue;
+        surfaces|=HW_CPU_WRITE_COLOR;
+        if(!c->dirty) continue;
+        if(overwrite && c->memory_offset>=offset && c->memory_offset<=offset+bytes &&
+           hw_color_bytes(c)<=offset+bytes-c->memory_offset)c->dirty=0;
+        else hw_copy_color_to_memory(c);
+    }
+    for(HwDepth *d=s_hw_depths;d;d=d->next) {
+        if(d->memory!=memory || (!d->dirty && !check_clean) ||
+           !hw_ranges_overlap(lo,hi-lo,d->memory_offset,hw_depth_bytes(d))) continue;
+        surfaces|=HW_CPU_WRITE_DEPTH;
+        if(!d->dirty) continue;
+        if(overwrite && d->memory_offset>=offset && d->memory_offset<=offset+bytes &&
+           hw_depth_bytes(d)<=offset+bytes-d->memory_offset)d->dirty=0;
         else hw_copy_depth_to_memory(d);
     }
+    return surfaces;
 }
 static void hw_cpu_write_begin(uint32_t address,size_t bytes,int overwrite)
 {
     if(!s_hw_initialized) return;
     hw_enter();
-    if(hw_pending_output(NULL,0,0))hw_collect_queries(1);
+    if(hw_pending_output(NULL,0,0))hw_collect_queries_locked(1);
     uintptr_t p=(uintptr_t)xbox_GetMemoryOffset()+address;
     for(HwMemory *m=s_hw_memories;m;m=m->next) for(unsigned i=0;i<m->views.view_count;i++) {
         uintptr_t b=(uintptr_t)m->views.cpu_views[i];
         if(p>=b && p-b<m->views.view_size && bytes<=m->views.view_size-(p-b)) {
             size_t offset=p-b;
-            hw_preserve_cpu_write(m,offset,bytes,overwrite);
-            hw_mark_cpu_write(m,offset,bytes,NULL,0);hw_leave();return;
+            hw_preserve_cpu_write(m,offset,bytes,overwrite,0);
+            hw_mark_cpu_write(m,offset,bytes,NULL,0,HW_PROTECT_NORMAL);hw_leave();return;
         }
     }
     hw_leave();
@@ -809,17 +867,34 @@ int nv2a_pb_host_write_begin(void *address,size_t bytes)
         uintptr_t b=(uintptr_t)m->views.cpu_views[i];
         if(p>=b && p-b<m->views.view_size && bytes<=m->views.view_size-(p-b)) {
             size_t lo=(p-b)&~(size_t)4095,hi=(p-b+bytes+4095)&~(size_t)4095;
-            if(hw_pending_output(m,lo,hi-lo))hw_collect_queries(1);
+            int pending=hw_pending_output(m,lo,hi-lo);
+            if(pending)hw_collect_queries_locked(1);
             /* Host reads may be short or fail: preserve every dirty owner on
-             * pages made writable, without publishing unrelated surfaces. */
-            hw_preserve_cpu_write(m,p-b,bytes,0);
-            hw_release_cpu_write_range(m,p-b,bytes,0);
+             * pages made writable, without publishing unrelated surfaces.
+             * Preservation adds no outputs while this lock is held. */
+            unsigned surfaces=hw_preserve_cpu_write(m,p-b,bytes,0,1);
+            /* A completed wait can drain the queue. An unready Vulkan
+             * visibility query can still leave pending entries. */
+            int output_pending=pending && s_hw_query_count;
+            enum HwWriteRangeOwners owners=HW_WRITE_CHECK_OWNERS;
+            if(!output_pending)owners=surfaces?HW_WRITE_OUTPUT_CLEAR:HW_WRITE_OWNER_FREE;
+            hw_release_cpu_write_range(m,p-b,bytes,owners);
+            if(!surfaces)return 1;
+            /* Guard release invalidated the entire page span. Later marks use
+             * that span or a subset, so the output check also remains valid. */
+            enum HwProtectMode mode=HW_PROTECT_CACHE_INVALIDATED;
+            if(!output_pending)mode|=HW_PROTECT_OUTPUT_CLEAR;
+            if(surfaces&HW_CPU_WRITE_DEPTH) {
+                /* The full-span mark already covers every colour and depth
+                 * owner that the per-colour page intersections could mark. */
+                hw_mark_cpu_write(m,lo,hi-lo,NULL,0,mode);
+                return 1;
+            }
             for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==m && hw_ranges_overlap(lo,hi-lo,c->memory_offset,hw_color_bytes(c))) {
                 size_t color_lo=c->memory_offset&~(size_t)4095,color_hi=(c->memory_offset+hw_color_bytes(c)+4095)&~(size_t)4095;
                 size_t begin=lo>color_lo?lo:color_lo,end=hi<color_hi?hi:color_hi;
-                hw_mark_cpu_write(m,begin,end-begin,NULL,0);
+                hw_mark_cpu_write(m,begin,end-begin,NULL,0,mode);
             }
-            for(HwDepth *d=s_hw_depths;d;d=d->next) if(d->memory==m && hw_ranges_overlap(lo,hi-lo,d->memory_offset,hw_depth_bytes(d)))hw_mark_cpu_write(m,lo,hi-lo,NULL,0);
             return 1;
         }
     }
@@ -847,7 +922,8 @@ int nv2a_pb_handle_memory_fault(uintptr_t address,int is_write)
             if(address>=b+lo && address<b+hi){memory=d->memory;offset=address-b;depth_owner=1;break;}
         }
     }
-    for(size_t n=0;n<s_hw_query_count && !memory;n++) {
+    size_t query_count=(size_t)s_hw_query_count;
+    for(size_t n=0;n<query_count && !memory;n++) {
         HwQuery *q=&s_hw_queries[n];if(!q->memory) continue;
         size_t lo=q->offset&~(size_t)4095,hi=(q->offset+4+4095)&~(size_t)4095;
         for(unsigned i=0;i<q->memory->views.view_count;i++) {
@@ -886,15 +962,15 @@ int nv2a_pb_handle_memory_fault(uintptr_t address,int is_write)
     }
     if(owner || depth_owner) {
         if(is_write) {
-            if(hw_pending_output(NULL,0,0))hw_collect_queries(1);
+            if(hw_pending_output(NULL,0,0))hw_collect_queries_locked(1);
             /* A fault supplies no overwrite extent. Preserve every owner of
              * the original marked pages before making those pages writable. */
-            hw_preserve_cpu_write(memory,write_offset,write_bytes,0);
+            hw_preserve_cpu_write(memory,write_offset,write_bytes,0,0);
         } else hw_publish_all();
-    } else if(!texture_fault) hw_collect_queries(1);
+    } else if(!texture_fault) hw_collect_queries_locked(1);
     if(is_write) {
-        if(texture_fault) hw_release_cpu_write_range(memory,offset&~(size_t)4095,4096,1);
-        else hw_mark_cpu_write(memory,write_offset,write_bytes,NULL,0);
+        if(texture_fault) hw_release_cpu_write_range(memory,offset&~(size_t)4095,4096,HW_WRITE_OWNER_FREE);
+        else hw_mark_cpu_write(memory,write_offset,write_bytes,NULL,0,HW_PROTECT_NORMAL);
         ++s_gpu.hardware_cpu_write_faults;
     } else ++s_gpu.hardware_cpu_read_faults;
     gpu_timing_finish(started,&s_gpu.hardware_cpu_access_ticks);hw_leave();return 1;
@@ -906,17 +982,17 @@ void nv2a_pb_release_memory_views(void)
     hw_free_vertex_batches();
     hw_free_textures();
     for(HwColor *c=s_hw_colors;c;) {
-        HwColor *next=c->next;if(c->height) hw_protect(c->memory,c->memory_offset,hw_color_bytes(c),PAGE_READWRITE,0);
+        HwColor *next=c->next;if(c->height) hw_protect(c->memory,c->memory_offset,hw_color_bytes(c),PAGE_READWRITE,HW_PROTECT_NORMAL);
         if(c->native_host)nvk_image_destroy(c->native_host);
         if(c->native_surface)nvk_image_destroy(c->native_surface);
         if(c->host_surface)c->host_surface->lpVtbl->Release(c->host_surface);
         if(c->surface) c->surface->lpVtbl->Release(c->surface);free(c);c=next;
     }
     s_hw_colors=NULL;
-    for(HwDepth *d=s_hw_depths;d;d=d->next){d->dirty=0;d->upload_needed=1;hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_READWRITE,0);}
+    for(HwDepth *d=s_hw_depths;d;d=d->next){d->dirty=0;d->upload_needed=1;hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_READWRITE,HW_PROTECT_NORMAL);}
     hw_free_depths(s_hw_depths);s_hw_depths=NULL;
     for(HwMemory *m=s_hw_memories;m;) { HwMemory *next=m->next;
-        hw_release_cpu_write_range(m,0,m->views.view_size,0);
+        hw_release_cpu_write_range(m,0,m->views.view_size,HW_WRITE_CHECK_OWNERS);
         UnmapViewOfFile(m->host_view);free(m->write_guard_protections);free(m);m=next;
     }
     s_hw_memories=NULL;
@@ -947,12 +1023,13 @@ static HwColor *hw_color_target(void)
         HwMemory *memory=hw_memory(&views);
         for(color=s_hw_colors;color;color=color->next) if(color->memory==memory && color->memory_offset==views.offset && color->pitch==pitch) break;
         if(!color) {
-            hw_publish_all();color=(HwColor *)calloc(1,sizeof *color);if(!color) hw_check(E_OUTOFMEMORY,"colour identity allocation");
+            hw_publish_all_locked();color=(HwColor *)calloc(1,sizeof *color);if(!color) hw_check(E_OUTOFMEMORY,"colour identity allocation");
             color->address=address;color->pitch=pitch;color->bpp=bpp;color->memory=memory;color->memory_offset=views.offset;color->upload_needed=1;
             color->next=s_hw_colors;s_hw_colors=color;
         }
     }
-    if(hw_pending_output(color->memory,color->memory_offset,(size_t)height*pitch)) hw_collect_queries(1);
+    if(hw_pending_output(color->memory,color->memory_offset,(size_t)height*pitch)) hw_collect_queries_locked(1);
+    int isolated_layout_publication=0;
     if((color->format^s_gpu.format)&0xFFFF0F00u) {
         if(color->dirty || color->height!=height || color->width!=width ||
            hw_pending_output(NULL,0,0)) {
@@ -969,15 +1046,19 @@ static HwColor *hw_color_target(void)
             if(isolated) {
                 /* Preserve the old layout without publishing disjoint owners. */
                 hw_copy_color_to_memory(color);
-                hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_READONLY,0);
-            } else hw_publish_all();
+                /* No output can require refreshing page guards under this lock. */
+                hw_protect_views(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_READONLY,HW_PROTECT_NORMAL);
+                isolated_layout_publication=1;
+            } else hw_publish_all_locked();
         }
         color->upload_needed=1;
     }
     color->format=s_gpu.format;
-    for(HwColor *other=s_hw_colors;other;other=other->next) if(other!=color && other->memory==color->memory && other->dirty && hw_ranges_overlap(other->memory_offset,hw_color_bytes(other),color->memory_offset,(size_t)height*pitch)) { hw_publish_all();break; }
+    /* The isolated path already excluded dirty owners across the unchanged extent. */
+    if(!isolated_layout_publication)
+        for(HwColor *other=s_hw_colors;other;other=other->next) if(other!=color && other->memory==color->memory && other->dirty && hw_ranges_overlap(other->memory_offset,hw_color_bytes(other),color->memory_offset,(size_t)height*pitch)) { hw_publish_all_locked();break; }
     if(color->height<height || color->width!=width) {
-        hw_publish_all();if(color->host_surface){color->host_surface->lpVtbl->Release(color->host_surface);color->host_surface=NULL;}
+        hw_publish_all_locked();if(color->host_surface){color->host_surface->lpVtbl->Release(color->host_surface);color->host_surface=NULL;}
         if(color->surface) color->surface->lpVtbl->Release(color->surface);
         color->width=width;color->height=height;
         if(color->memory_offset>color->memory->views.view_size || hw_color_bytes(color)>color->memory->views.view_size-color->memory_offset) hw_check(E_INVALIDARG,"physical colour shared extent");
@@ -1067,7 +1148,8 @@ static void hw_finish_native_frame(uint32_t address,uint32_t pitch)
     }
     if(color->upload_needed)hw_upload_color(color,0);
     hw_front_size(width*scale,height*scale);
-    if(d3d8_IsNativeVulkan()) {
+    int native_vulkan=d3d8_IsNativeVulkan();
+    if(native_vulkan) {
         int32_t bounds[4]={0,0,width*scale,height*scale};
         hw_vk_check(nvk_image_copy_rect(hw_vk_render(color),s_hw_vk_front,bounds,bounds,0),"finished display copy");
     } else {
@@ -1078,7 +1160,9 @@ static void hw_finish_native_frame(uint32_t address,uint32_t pitch)
     }
     /* Preserve the original flip's real GPU completion before acknowledgement.
      * RAM publication remains demand driven by the existing memory guards. */
-    hw_complete_commands_locked();hw_collect_queries(1);hw_leave();
+    hw_complete_commands_locked();
+    /* The completed Vulkan fence already covers the queued output serials. */
+    hw_collect_queries_locked(!native_vulkan);hw_leave();
 }
 static int hw_display_native(void *window,unsigned width,unsigned height,const int32_t bounds[4])
 {
@@ -1198,7 +1282,7 @@ static void hw_upload_depth(HwDepth *d)
         }
     }
     hw_vk_check(hw_depth_transfer(d,pixels,1,1),"depth RAM upload");free(pixels);d->upload_needed=0;
-    hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_READONLY,0);
+    hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_READONLY,HW_PROTECT_NORMAL);
 }
 static void hw_copy_depth_to_memory(HwDepth *d)
 {
@@ -1230,7 +1314,7 @@ static void hw_begin_depth_write(HwDepth *d)
 {
     if(!d)return;
     for(HwColor *c=s_hw_colors;c;c=c->next)if(c->memory==d->memory && c->dirty && hw_ranges_overlap(c->memory_offset,hw_color_bytes(c),d->memory_offset,hw_depth_bytes(d))){hw_copy_color_to_memory(c);d->upload_needed=1;}
-    hw_upload_depth(d);d->dirty=1;hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_NOACCESS,0);
+    hw_upload_depth(d);d->dirty=1;hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_NOACCESS,HW_PROTECT_NORMAL);
 }
 static void hw_depth_draw_write(HwDepth *d)
 {
@@ -1241,7 +1325,7 @@ static void hw_depth_draw_write(HwDepth *d)
         (rs[D3DRS_STENCILFAIL]!=NV_PGRAPH_CONTROL_2_STENCIL_OP_V_KEEP || rs[D3DRS_STENCILZFAIL]!=NV_PGRAPH_CONTROL_2_STENCIL_OP_V_KEEP || rs[D3DRS_STENCILPASS]!=NV_PGRAPH_CONTROL_2_STENCIL_OP_V_KEEP);
     if(!zwrite && !swrite)return;
     if(d->dirty)return; /* All protection writers preserve dirty-depth ownership. */
-    d->dirty=1;hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_NOACCESS,0);
+    d->dirty=1;hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_NOACCESS,HW_PROTECT_NORMAL);
 }
 static HwDepth *hw_depth(void)
 {
@@ -1256,11 +1340,11 @@ static HwDepth *hw_depth(void)
     if(!d){d=calloc(1,sizeof *d);if(!d)hw_check(E_OUTOFMEMORY,"depth identity");d->address=address;d->next=s_hw_depths;s_hw_depths=d;}
     int reinterpret=d->pitch!=pitch || d->format!=format || d->surface_format!=layout || d->width!=width;
     if(!d->memory || reinterpret || d->height<height) {
-        hw_publish_all();
+        hw_publish_all_locked();
         if(d->native){nvk_image_destroy(d->native);d->native=NULL;}
         if(d->view){ID3D11DepthStencilView_Release(d->view);d->view=NULL;}
         if(d->texture){ID3D11Texture2D_Release(d->texture);d->texture=NULL;}
-        if(d->memory){d->upload_needed=1;hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_READWRITE,0);}
+        if(d->memory){d->upload_needed=1;hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_READWRITE,HW_PROTECT_NORMAL);}
         d->width=width;d->height=height;d->format=format;d->pitch=pitch;d->surface_format=layout;
         XboxSharedMemoryViews views;if(!xbox_GetSharedMemoryViews((uint8_t *)xbox_GetMemoryOffset()+address,hw_depth_bytes(d),&views))hw_check(E_INVALIDARG,"depth shared identity");
         d->memory=hw_memory(&views);d->memory_offset=views.offset;d->upload_needed=1;
@@ -1338,11 +1422,11 @@ failed:hw_free_colors(*colors);*colors=NULL;hw_free_depths(*result);*result=NULL
 }
 static void hw_apply_depths(HwDepth *depths,HwColor *colors) {
     if(s_hw_initialized && !d3d8_IsNativeVulkan()) ID3D11DeviceContext_OMSetRenderTargets(d3d8_GetD3D11Context(),0,NULL,NULL);
-    for(HwDepth *d=s_hw_depths;d;d=d->next){d->dirty=0;d->upload_needed=1;hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_READWRITE,0);}
+    for(HwDepth *d=s_hw_depths;d;d=d->next){d->dirty=0;d->upload_needed=1;hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_READWRITE,HW_PROTECT_NORMAL);}
     hw_free_depths(s_hw_depths);s_hw_depths=depths;
-    for(HwDepth *d=s_hw_depths;d;d=d->next)hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_READONLY,0);
+    for(HwDepth *d=s_hw_depths;d;d=d->next)hw_protect(d->memory,d->memory_offset,hw_depth_bytes(d),PAGE_READONLY,HW_PROTECT_NORMAL);
     for(HwColor *color=s_hw_colors;color;color=color->next) { color->dirty=0;color->upload_needed=1;
-        if(color->height)hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_READWRITE,0); }
+        if(color->height)hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_READWRITE,HW_PROTECT_NORMAL); }
     hw_free_colors(s_hw_colors);s_hw_colors=colors;
     for(HwColor *color=s_hw_colors;color;color=color->next)hw_upload_native_color(color);
     hw_free_vertex_batches();
@@ -1468,7 +1552,7 @@ static void hw_begin_color_write(HwColor *color)
     for(HwDepth *d=s_hw_depths;d;d=d->next)if(d->memory==color->memory && hw_ranges_overlap(d->memory_offset,hw_depth_bytes(d),color->memory_offset,hw_color_bytes(color))) {
         if(d->dirty)hw_copy_depth_to_memory(d);d->upload_needed=1;
     }
-    if(!color->dirty)hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,0);
+    if(!color->dirty)hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,HW_PROTECT_NORMAL);
     for(HwColor *other=s_hw_colors;other;other=other->next) if(other!=color && !other->upload_needed && other->memory==color->memory && hw_ranges_overlap(other->memory_offset,hw_color_bytes(other),color->memory_offset,hw_color_bytes(color))) other->upload_needed=1;
 }
 static void hw_end_color_write(HwColor *color,RECT bounds)
@@ -1488,7 +1572,7 @@ static int hw_clear_full_color(void)
 {
     hw_enter();
     /* Keep the original full clear's completion boundary before changing ownership. */
-    if(hw_pending_output(NULL,0,0))hw_collect_queries(1);
+    if(hw_pending_output(NULL,0,0))hw_collect_queries_locked(1);
     HwColor *color=hw_color_target();
     ClearBounds bounds=clear_bounds();
     /* A retained taller target still needs its untouched rows. */
@@ -1521,9 +1605,18 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
     uint32_t stride=tex_face_stride(source);
     size_t bytes=volume?texture_volume_bytes(source):(size_t)stride*(source->cube?6:1);
     if(!bytes) hw_check(E_FAIL,"texture storage span");
-    for(HwDepth *d=s_hw_depths;d;d=d->next)if(d->dirty && source->offset<d->address+hw_depth_bytes(d) && d->address<source->offset+bytes)hw_publish_all();
-    for(HwColor *color=s_hw_colors;color;color=color->next) {
-        if(!volume && !float_texture && !source->cube && !tex_size_from_format(source->color) && color->bpp==4 &&
+    size_t end=(size_t)source->offset+bytes;
+    for(HwDepth *d=s_hw_depths;d;d=d->next) {
+        if(d->dirty && source->offset<d->address+hw_depth_bytes(d) && d->address<end) {
+            hw_publish_all_locked();
+            break;
+        }
+    }
+    HwColor *linear_targets=s_hw_colors;
+    if(linear_targets && (volume || float_texture || source->cube || tex_size_from_format(source->color)))
+        linear_targets=NULL;
+    for(HwColor *color=linear_targets;color;color=color->next) {
+        if(color->bpp==4 &&
            source->offset==color->address && source->pitch==color->pitch &&
            source->width==color->width && source->height==color->height) {
             D3D8Surface *surface=(D3D8Surface *)hw_render_surface(color);
@@ -1541,16 +1634,17 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
     }
     if(!volume && !float_texture && !source->cube && source->color==6) {
         for(HwColor *color=s_hw_colors;color;color=color->next) {
-            if(color->bpp!=4 || (color->format&15)!=8 || !color_swizzled(color->format) ||
+            if(!color->dirty || color->bpp!=4 || (color->format&15)!=8 || !color_swizzled(color->format) ||
                source->offset!=color->address || source->width!=color->width || source->height!=color->height)continue;
-            if(color->upload_needed || hw_pending_output(NULL,0,0))continue;
+            if(color->upload_needed)continue;
             if(color->memory_offset>color->memory->views.view_size || bytes>color->memory->views.view_size-color->memory_offset)continue;
             if(color->memory==current_target->memory && hw_ranges_overlap(color->memory_offset,bytes,current_target->memory_offset,hw_color_bytes(current_target)))continue;
             /* Deferred GPU ownership must cover complete protection pages. */
             if((color->memory_offset|hw_color_bytes(color))&(size_t)4095)continue;
             /* A partial publication preserves RAM outside dirty_bounds. */
-            if(!color->dirty || color->dirty_bounds.left!=0 || color->dirty_bounds.top!=0 ||
+            if(color->dirty_bounds.left!=0 || color->dirty_bounds.top!=0 ||
                color->dirty_bounds.right!=(LONG)color->width || color->dirty_bounds.bottom!=(LONG)color->height)continue;
+            if(hw_pending_output(NULL,0,0))continue;
             int overlap=0;
             for(HwColor *other=s_hw_colors;other;other=other->next)
                 if(other!=color && other->dirty && other->memory==color->memory && hw_ranges_overlap(color->memory_offset,bytes,other->memory_offset,hw_color_bytes(other))){overlap=1;break;}
@@ -1569,9 +1663,12 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
             return;
         }
     }
-    for(HwColor *color=s_hw_colors;color;color=color->next)
-        if(source->offset < color->address+color->height*color->pitch && color->address < source->offset+bytes &&
-           color->dirty) hw_publish_all();
+    for(HwColor *color=s_hw_colors;color;color=color->next) {
+        if(color->dirty && source->offset<color->address+color->height*color->pitch && color->address<end) {
+            hw_publish_all_locked();
+            break;
+        }
+    }
     unsigned bucket=hw_texture_bucket(source,bytes);
     HwTexture *entry,**link;
     for(link=&s_hw_texture_buckets[bucket];(entry=*link)!=NULL;link=&entry->hash_next)
@@ -1594,15 +1691,17 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
         entry->hash_next=s_hw_texture_buckets[bucket];s_hw_texture_buckets[bucket]=entry;
     }
     if(palette && (!entry->palette_memory || entry->identity.palette!=source->palette)) {
-        if(entry->palette_memory) hw_release_cpu_write_range(entry->palette_memory,entry->palette_offset,sizeof entry->palette,0);
+        if(entry->palette_memory) hw_release_cpu_write_range(entry->palette_memory,entry->palette_offset,sizeof entry->palette,HW_WRITE_CHECK_OWNERS);
         XboxSharedMemoryViews views;
         if(!xbox_GetSharedMemoryViews(palette,sizeof entry->palette,&views)) hw_check(E_INVALIDARG,"palette shared memory identity");
         entry->palette_memory=hw_memory(&views);entry->palette_offset=views.offset;
         entry->identity.palette=source->palette;hw_texture_invalidate(entry);
     }
-    if(hw_pending_output(entry->memory,entry->memory_offset,bytes) ||
-       (palette && hw_pending_output(entry->palette_memory,entry->palette_offset,sizeof entry->palette)))
-        hw_collect_queries(1);
+    int pending=palette
+        ? hw_pending_output_ranges(entry->memory,entry->memory_offset,bytes,
+                                   entry->palette_memory,entry->palette_offset,sizeof entry->palette)
+        : hw_pending_output(entry->memory,entry->memory_offset,bytes);
+    if(pending) hw_collect_queries_locked(1);
     int changed=created;
     if(!entry->content_valid) {
         hw_guard_cpu_write_range(entry->memory,entry->memory_offset,bytes);
@@ -1627,12 +1726,17 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
             entry->host_width=width;entry->host_height=height;
         }
         ++s_gpu.hardware_texture_uploads;
+        size_t native_row=(size_t)width*4;
+        int direct_upload=entry->native && !volume && !source->cube &&
+            (asset || (!float_texture && source->color==D3DFMT_LIN_A8R8G8B8 && source->pitch>=native_row));
         uint8_t *native_pixels=NULL;
-        if(entry->native) {
+        if(entry->native && !direct_upload) {
             native_pixels=malloc((size_t)width*height*4*(volume?depth:source->cube?6:1));
             if(!native_pixels)hw_check(E_OUTOFMEMORY,"native texture pixels");
         }
-        if(volume) {
+        if(direct_upload) {
+            hw_vk_check(nvk_image_upload(entry->native,asset?asset:raw,asset?native_row:source->pitch),"texture upload");
+        } else if(volume) {
             D3DLOCKED_BOX locked;IDirect3DVolumeTexture8 *texture=(IDirect3DVolumeTexture8 *)entry->texture;
             if(native_pixels){locked.pBits=native_pixels;locked.RowPitch=width*4;locked.SlicePitch=width*height*4;}
             else hw_check(texture->lpVtbl->LockBox(texture,0,&locked,NULL,0),"volume upload lock");
@@ -1669,12 +1773,11 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
                 unsigned blocks_per_row=(source->width+3)/4;
                 const uint8_t *face_raw=raw+(size_t)face*stride;
                 for(unsigned by=0;by<source->height;by+=4) for(unsigned bx=0;bx<source->width;bx+=4) {
-                    uint32_t pixels[16];
-                    d3d8_dxt_decode_block(face_raw+((size_t)(by/4)*blocks_per_row+bx/4)*block_bytes,source->color,pixels);
                     unsigned columns=source->width-bx;if(columns>4)columns=4;
                     unsigned rows=source->height-by;if(rows>4)rows=4;
-                    for(unsigned row=0;row<rows;row++)
-                        memcpy((uint8_t *)locked.pBits+(size_t)(by+row)*locked.Pitch+bx*4,pixels+row*4,columns*4);
+                    const uint8_t *block=face_raw+((size_t)(by/4)*blocks_per_row+bx/4)*block_bytes;
+                    uint8_t *pixels=(uint8_t *)locked.pBits+(size_t)by*locked.Pitch+bx*4;
+                    d3d8_dxt_decode_block_rect(block,source->color,pixels,locked.Pitch,columns,rows);
                 }
             } else for(uint32_t y=0;y<source->height;y++) for(uint32_t x=0;x<source->width;x++) {
                 uint32_t pixel;
@@ -1715,17 +1818,19 @@ static DWORD hw_blend_enum(uint32_t value)
     default:hw_check(E_NOTIMPL,"blend factor");return 0;
     }
 }
-static void hw_collect_queries(int wait)
+static void hw_collect_queries_locked(int wait)
 {
-    hw_enter();size_t consumed=0,count=(size_t)s_hw_query_count;
+    size_t consumed=0,count=(size_t)s_hw_query_count;
     for(;consumed<count;consumed++) {
         HwQuery *q=&s_hw_queries[consumed];uint64_t pixels=0;HRESULT hr;
         uint64_t start=q->memory?gpu_timing_clock():0;
         if(d3d8_IsNativeVulkan()) {
             int result;
             if(q->memory) {
-                if(wait)hw_vk_check(nvk_wait(q->native_serial),"output completion");
-                result=nvk_completed(q->native_serial);
+                if(wait) {
+                    hw_vk_check(nvk_wait(q->native_serial),"output completion");
+                    result=1;
+                } else result=nvk_completed(q->native_serial);
             } else result=nvk_query_result(q->native_query,&pixels,wait);
             hw_vk_check(result>=0,"query output result");hr=result?S_OK:S_FALSE;
         } else do {
@@ -1756,15 +1861,21 @@ static void hw_collect_queries(int wait)
                 if(hw_ranges_overlap(d->memory_offset,hw_depth_bytes(d),q->offset,4))hw_copy_depth_to_memory(d);
             }
             memcpy(q->memory->host_view+q->offset,&q->value,4);
-            hw_mark_cpu_write(q->memory,q->offset,4,q,surface_empty);
+            hw_mark_cpu_write(q->memory,q->offset,4,q,surface_empty,HW_PROTECT_COMPLETION);
         } else s_gpu.zpass_count+=(uint32_t)pixels;
     }
     if(consumed) {
         memmove(s_hw_queries,s_hw_queries+consumed,(count-consumed)*sizeof *s_hw_queries);
         InterlockedExchange64(&s_hw_query_count,(LONG64)(count-consumed));
     }
+}
+static void hw_collect_queries(int wait)
+{
+    hw_enter();
+    hw_collect_queries_locked(wait);
     hw_leave();
 }
+
 static void hw_triangle(const XfTri *triangle)
 {
     if(s_hw_count+3>s_hw_capacity) {
@@ -2287,15 +2398,7 @@ static void hw_flush_batch(void)
     gpu_timing_finish(timing_start,&s_gpu.hardware_state_ticks);
     timing_start=gpu_timing_clock();
     UINT vertex_stride=sizeof *s_hw_vertices;
-    if(s_hw_program_active) {
-        unsigned count=0;
-        uint32_t remaining=s_hw_program_inputs;
-        while(remaining) {
-            ++count;
-            remaining&=remaining-1;
-        }
-        vertex_stride=count*16;
-    }
+    if(s_hw_program_active)vertex_stride=s_hw_program_vertex_stride;
     uint32_t vertex_bytes=s_hw_program_active?s_hw_program_vertex_count*vertex_stride:s_hw_count*sizeof *s_hw_vertices;
     uint32_t index_bytes=s_hw_program_active?s_hw_count*sizeof(uint32_t):0;
     uint32_t bytes=vertex_bytes+index_bytes;

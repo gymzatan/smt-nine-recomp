@@ -27,16 +27,16 @@ typedef struct SavedFrame {
     SavedLocal *locals;
     SavedJump *jumps;
 } SavedFrame;
-static CONT_TLS RecompContFrame *head;
+CONT_TLS RecompContFrame *recomp_cont_head;
 static CONT_TLS SavedFrame *recovery;
 static CONT_TLS uint32_t recovery_count, recovery_next;
 static CONT_TLS uint32_t returned_jump_buffer;
 
-int recomp_cont_active(void) { return head != 0; }
+int recomp_cont_active(void) { return recomp_cont_head != 0; }
 int recomp_cont_recovering(uint32_t function) {
     return recovery && recovery_next<recovery_count && recovery[recovery_next].function==function;
 }
-RecompContFrame *recomp_cont_current(void) { return head; }
+RecompContFrame *recomp_cont_current(void) { return recomp_cont_head; }
 
 void recomp_cont_invalid(void) {
     fputs("[STOP] invalid generated guest continuation\n", stderr);
@@ -82,14 +82,14 @@ static CONT_NOINLINE uint64_t restore_frame(RecompContFrame *f, uint32_t functio
 uint64_t recomp_cont_enter(RecompContFrame *f, uint32_t function,
                           const RecompContLocal *locals, size_t count) {
     f->function=function; f->site=0;
-    f->locals=locals; f->local_count=count; f->parent=head; f->jumps=0; f->on_leave=0; f->on_unwind=0; f->retained=0; head=f;
+    f->locals=locals; f->local_count=count; f->parent=recomp_cont_head; f->jumps=0; f->on_leave=0; f->on_unwind=0; f->retained=0; recomp_cont_head=f;
     if (recovery) return restore_frame(f,function,locals,count);
     return f->site;
 }
 void recomp_cont_leave(RecompContFrame *f) {
-    if (head!=f) recomp_cont_invalid();
+    if (recomp_cont_head!=f) recomp_cont_invalid();
     if (f->jumps) discard_jumps(f->jumps); f->jumps=0;
-    head=f->parent;
+    recomp_cont_head=f->parent;
     if (f->on_leave) f->on_leave(f);
 }
 static SavedJump *find_jump(const RecompContFrame *f, uint32_t buffer) {
@@ -98,7 +98,7 @@ static SavedJump *find_jump(const RecompContFrame *f, uint32_t buffer) {
     return 0;
 }
 void recomp_cont_jump_bind(RecompContFrame *f, uint32_t buffer, uint64_t site) {
-    if (head!=f || !buffer || (site>>32)!=4 || f->local_count>UINT32_MAX)
+    if (recomp_cont_head!=f || !buffer || (site>>32)!=4 || f->local_count>UINT32_MAX)
         recomp_cont_invalid();
     SavedJump *j=find_jump(f,buffer);
     if (!j) {
@@ -134,7 +134,7 @@ uint32_t recomp_cont_jump_buffer(const RecompContFrame *f,size_t index) {
     recomp_cont_invalid(); return 0;
 }
 int recomp_cont_jump_known(const RecompContFrame *f,uint32_t buffer) {
-    for (RecompContFrame *p=head;p;p=p->parent)
+    for (RecompContFrame *p=recomp_cont_head;p;p=p->parent)
         if (p==f) return find_jump(f,buffer)!=0;
     return 0;
 }
@@ -142,8 +142,8 @@ int recomp_cont_jump_known(const RecompContFrame *f,uint32_t buffer) {
  * guest drivers and wait, so dropping their frame before cleanup loses the
  * saved call path. The retained target itself is not being abandoned. */
 void recomp_cont_prepare_unwind(RecompContFrame *stop) {
-    if(!head) {if(stop)recomp_cont_invalid();return;}
-    RecompContFrame *owner=head;
+    if(!recomp_cont_head) {if(stop)recomp_cont_invalid();return;}
+    RecompContFrame *owner=recomp_cont_head;
     while(owner && owner!=stop)owner=owner->parent;
     if(stop && !owner)recomp_cont_invalid();
     const uint32_t function=0xfe00074cu;
@@ -172,14 +172,14 @@ finish:
 }
 
 void recomp_cont_unwind(RecompContFrame *f,uint32_t buffer) {
-    RecompContFrame *p=head;
+    RecompContFrame *p=recomp_cont_head;
     while (p && p!=f) p=p->parent;
     if (!p) recomp_cont_invalid();
-    while (head!=f) recomp_cont_leave(head);
+    while (recomp_cont_head!=f) recomp_cont_leave(recomp_cont_head);
     returned_jump_buffer=buffer;
 }
 uint64_t recomp_cont_jump_restore(RecompContFrame *f,uint32_t buffer) {
-    if (head!=f) recomp_cont_invalid();
+    if (recomp_cont_head!=f) recomp_cont_invalid();
     SavedJump *j=find_jump(f,buffer);
     if (!j) recomp_cont_invalid();
     for (size_t i=0;i<f->local_count;++i)
@@ -194,7 +194,7 @@ uint64_t recomp_cont_jump_return(RecompContFrame *f) {
 RecompContFrame *recomp_cont_transfer_owner(uint32_t frame_ebp) {
     if (recovery || !frame_ebp) recomp_cont_invalid();
     RecompContFrame *owner=0;
-    for (RecompContFrame *f=head;f;f=f->parent) {
+    for (RecompContFrame *f=recomp_cont_head;f;f=f->parent) {
         for (size_t i=0;i<f->local_count;++i) {
             const RecompContLocal *v=&f->locals[i];
             if (v->size==4 && !strcmp(v->name,"ebp") &&
@@ -236,13 +236,12 @@ void recomp_cont_prepare_transfer(uint32_t frame_ebp, uint32_t target) {
         }
         saved->jumps=f->jumps;f->jumps=0;
     }
-    while (head) {head->retained=1;recomp_cont_leave(head);}
+    while (recomp_cont_head) {recomp_cont_head->retained=1;recomp_cont_leave(recomp_cont_head);}
     recovery=frames;recovery_count=count;recovery_next=0;
 }
 
 void recomp_cont_site(RecompContFrame *f, uint64_t site) {
-    if (head!=f) recomp_cont_invalid();
-    f->site=site;
+    recomp_cont_site_inline(f, site);
 }
 static int write_u32(FILE *out, uint32_t v) {
     return fwrite(&v,sizeof v,1,out)==1;
@@ -259,12 +258,12 @@ static int read_u64(FILE *in, uint64_t *v) {
 static size_t snapshot_depth(void) {
     /* A call site records its suspended caller, not the native callee's
      * execution. The leaf must be a loop or described kernel-wait boundary. */
-    if (!head || ((head->site >> 32) != 2 &&
-                  !((head->site >> 32) == 5 && (uint32_t)head->site == head->function))) return 0;
+    if (!recomp_cont_head || ((recomp_cont_head->site >> 32) != 2 &&
+                  !((recomp_cont_head->site >> 32) == 5 && (uint32_t)recomp_cont_head->site == recomp_cont_head->function))) return 0;
     size_t depth=0;
-    for (RecompContFrame *f=head; f; f=f->parent) {
+    for (RecompContFrame *f=recomp_cont_head; f; f=f->parent) {
         if (!f->site || depth==UINT32_MAX || f->local_count>UINT32_MAX) return 0;
-        if (f!=head && (f->site>>32)!=1 && (f->site>>32)!=10 && (f->site>>32)!=3 && (f->site>>32)!=7 &&
+        if (f!=recomp_cont_head && (f->site>>32)!=1 && (f->site>>32)!=10 && (f->site>>32)!=3 && (f->site>>32)!=7 &&
             !(((f->site>>32)==6 || (f->site>>32)==8 || (f->site>>32)==9 || (f->site>>32)==11) && (uint32_t)f->site==f->function)) return 0;
         ++depth;
     }
@@ -273,7 +272,7 @@ static size_t snapshot_depth(void) {
 }
 int recomp_cont_snapshot_ready(void) { return snapshot_depth()!=0; }
 uint32_t recomp_cont_root_function(void) {
-    RecompContFrame *f=head;
+    RecompContFrame *f=recomp_cont_head;
     if (!f) return 0;
     while (f->parent) f=f->parent;
     return f->function;
@@ -284,7 +283,7 @@ int recomp_cont_save(FILE *out) {
     RecompContFrame **frames=malloc(depth*sizeof *frames);
     if (!frames) return 0;
     size_t i=depth;
-    for (RecompContFrame *f=head; f; f=f->parent) frames[--i]=f;
+    for (RecompContFrame *f=recomp_cont_head; f; f=f->parent) frames[--i]=f;
     int ok=fwrite("XBCONJ",6,1,out)==1 && write_u32(out,(uint32_t)depth);
     for (i=0; ok && i<depth; ++i) {
         RecompContFrame *f=frames[i];
@@ -366,11 +365,11 @@ int recomp_cont_validate(FILE *in,uint32_t *root_function) {
     discard_recovery(frames,count);return 1;
 }
 int recomp_cont_load(FILE *in) {
-    if (head || recovery || !read_recovery(in,&recovery,&recovery_count)) return 0;
+    if (recomp_cont_head || recovery || !read_recovery(in,&recovery,&recovery_count)) return 0;
     recovery_next=0;return 1;
 }
 void recomp_cont_discard_root(void) {
-    while(head) recomp_cont_leave(head);
+    while(recomp_cont_head) recomp_cont_leave(recomp_cont_head);
     if(recovery) discard_recovery(recovery,recovery_count);
     recovery=NULL;recovery_count=recovery_next=0;returned_jump_buffer=0;
 }

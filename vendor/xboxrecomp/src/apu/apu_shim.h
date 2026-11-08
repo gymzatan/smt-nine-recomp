@@ -40,22 +40,18 @@
  * QEMU clock helpers (beyond what NV2A shim provides)
  * ============================================================ */
 
-#define QEMU_CLOCK_REALTIME 1
-
 #ifndef qemu_clock_get_us
 extern void xbox_RuntimePerformanceCounter(LARGE_INTEGER *);
-static inline int64_t qemu_clock_get_us(int type) {
-    (void)type;
-    LARGE_INTEGER freq, count;
-    QueryPerformanceFrequency(&freq);
+static inline int64_t qemu_clock_get_us(int64_t frequency) {
+    LARGE_INTEGER count;
     xbox_RuntimePerformanceCounter(&count);
-    return (int64_t)(count.QuadPart * 1000000LL / freq.QuadPart);
+    return (int64_t)(count.QuadPart * 1000000LL / frequency);
 }
 #endif
 
 #ifndef qemu_clock_get_ms
-static inline int64_t qemu_clock_get_ms(int type) {
-    return qemu_clock_get_us(type) / 1000;
+static inline int64_t qemu_clock_get_ms(int64_t frequency) {
+    return qemu_clock_get_us(frequency) / 1000;
 }
 #endif
 

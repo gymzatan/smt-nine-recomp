@@ -8041,6 +8041,22 @@
     "called_by": []
   },
   {
+    "start": "0x0001A065",
+    "end": "0x0001A08A",
+    "size": 37,
+    "name": "sub_0001A065",
+    "section": ".text",
+    "confidence": 1.0,
+    "detection_method": "original_cxx_catch_continuation",
+    "num_instructions": 13,
+    "has_prologue": false,
+    "calls_to": [
+      "0x000193C7",
+      "0x00019411"
+    ],
+    "called_by": []
+  },
+  {
     "start": "0x0001A08A",
     "end": "0x0001A0AD",
     "size": 35,

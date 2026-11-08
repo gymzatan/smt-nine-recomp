@@ -90,6 +90,7 @@ LONG InterlockedDecrement(volatile LONG *Addend);
 LONG InterlockedExchange(volatile LONG *Target, LONG Value);
 LONG InterlockedExchangeAdd(volatile LONG *Addend, LONG Value);
 static inline LONG ReadAcquire(const volatile LONG *Source) { return __atomic_load_n(Source, __ATOMIC_ACQUIRE); }
+static inline void WriteRelease(volatile LONG *Target, LONG Value) { __atomic_store_n(Target, Value, __ATOMIC_RELEASE); }
 LONG InterlockedCompareExchange(volatile LONG *Dest, LONG Exchange, LONG Comparand);
 LONGLONG InterlockedCompareExchange64(volatile LONGLONG *Dest, LONGLONG Exchange, LONGLONG Comparand);
 PVOID InterlockedCompareExchangePointer(PVOID volatile *Dest, PVOID Exchange, PVOID Comparand);

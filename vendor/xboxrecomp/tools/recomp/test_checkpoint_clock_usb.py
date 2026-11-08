@@ -41,9 +41,12 @@ recomp_func_t recomp_lookup(uint32_t va) {
 recomp_func_t recomp_lookup_manual(uint32_t va) {(void)va;return NULL;}
 static void clock_values(uint64_t values[8]) {
     LARGE_INTEGER counter=xbox_KeQueryPerformanceCounter(),system;
+    LARGE_INTEGER frequency=xbox_KeQueryPerformanceFrequency();
     xbox_KeQuerySystemTime(&system);values[0]=counter.QuadPart;values[1]=system.QuadPart;
     values[2]=xbox_KeQueryInterruptTime();values[3]=xbox_ReadTimeStampCounter();
-    values[4]=xbox_RuntimeTickCount64();values[5]=qemu_clock_get_ns(0);values[6]=qemu_clock_get_us(0);
+    int64_t ns=qemu_clock_get_ns(frequency.QuadPart);
+    assert(ns / NANOSECONDS_PER_SECOND == counter.QuadPart / frequency.QuadPart);
+    values[4]=xbox_RuntimeTickCount64();values[5]=ns;values[6]=qemu_clock_get_us(frequency.QuadPart);
     xbox_UpdateKernelTick(g_xbox_mem_offset);
     values[7]=BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE+KDATA_TICK_COUNT);
 }

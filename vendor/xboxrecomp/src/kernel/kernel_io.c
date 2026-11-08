@@ -42,8 +42,10 @@ static XBOX_SYMLINK *g_symlinks;
 static uint32_t g_symlink_count;
 static char *link_pointer(uint32_t address) {return address?(char *)((uintptr_t)address+g_xbox_mem_offset):NULL;}
 static XBOX_SYMLINK *xbox_find_symlink(const char *name) {
-    if(!name || strlen(name)>UINT16_MAX)return NULL;
-    XBOX_ANSI_STRING wanted={(USHORT)strlen(name),(USHORT)strlen(name),(PCHAR)name};
+    if(!name)return NULL;
+    size_t length=strlen(name);
+    if(length>UINT16_MAX)return NULL;
+    XBOX_ANSI_STRING wanted={(USHORT)length,(USHORT)length,(PCHAR)name};
     for(uint32_t i=0;i<g_symlink_count;i++)if(g_symlinks[i].used) {
         XBOX_ANSI_STRING stored={(USHORT)g_symlinks[i].length,(USHORT)g_symlinks[i].length,link_pointer(g_symlinks[i].name)};
         if(xbox_RtlEqualString(&wanted,&stored,TRUE))return &g_symlinks[i];

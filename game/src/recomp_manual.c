@@ -237,8 +237,17 @@ static void prepare_original_ui_quad(void)
             if(vmax-vmin>inset_v+trim_v)MEMF(vertex+24)=vmin+inset_v+(MEMF(vertex+24)-vmin)*(vmax-vmin-inset_v-trim_v)/(vmax-vmin);
         }
     }
-    static uint32_t seen[7];static unsigned count;unsigned n=0;for(;n<count;n++)if(seen[n]==caller)break;
-    if(n==count && count<7){seen[count++]=caller;fprintf(stderr,"[UI PRODUCER] caller=%08X buffer=%08X size=%gx%g uv=%g,%g,%g,%g fullscreen=%d\n",caller,buffer,xmax-xmin,ymax-ymin,umin,vmin,umax,vmax,fullscreen);}
+    static uint32_t seen[7];
+    static unsigned count;
+    if(quad==0 && count<7){
+        unsigned n=0;
+        while(n<count && seen[n]!=caller)n++;
+        if(n==count){
+            seen[count++]=caller;
+            fprintf(stderr,"[UI PRODUCER] caller=%08X buffer=%08X size=%gx%g uv=%g,%g,%g,%g fullscreen=%d\n",
+                caller,buffer,xmax-xmin,ymax-ymin,umin,vmin,umax,vmax,fullscreen);
+        }
+    }
     }
 }
 static void prepare_original_speech_anchor(void)

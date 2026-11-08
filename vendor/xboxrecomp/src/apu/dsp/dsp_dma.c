@@ -208,7 +208,7 @@ static void dsp_dma_run(DSPDMAState *s)
 
         size_t transfer_size = count * item_size;
 
-        if (!direction && mem_space == DSP_SPACE_P &&
+        if (DEBUG_DSP && !direction && mem_space == DSP_SPACE_P &&
             mem_address <= 0x5EB && count > 0x5EB - mem_address) {
             fprintf(stderr, "[DSPDMA] P05EB source node=%04X space=%d control=%06X count=%u dsp=%04X scratch=%08X base=%08X offset=%08X size=%08X item=%u mem_core=%p rw_device=%p\n",
                     addr, block_space, control, count, dsp_offset,
@@ -217,54 +217,62 @@ static void dsp_dma_run(DSPDMAState *s)
             fflush(stderr);
         }
 
-        // FIXME: Remove this intermediate buffer
-        static uint8_t *scratch_buf = NULL;
-        static ptrdiff_t scratch_buf_size = -1;
-        if (count * item_size > scratch_buf_size) {
-            scratch_buf_size = count * item_size;
-            scratch_buf = malloc(scratch_buf_size);
+        /* Conversion and circular copies use the same buffer for this node. */
+        size_t required = transfer_size ? transfer_size : 1;
+        if (required > s->staging_capacity) {
+            uint8_t *staging = realloc(s->staging, required);
+            if (!staging) {
+                fprintf(stderr, "[STOP] DSP DMA staging allocation failed\n");
+                exit(5);
+            }
+            s->staging = staging;
+            s->staging_capacity = required;
         }
+        uint8_t *scratch_buf = s->staging;
 
         if (direction) {
             if (dsp_interleave) {
-                // FIXME: Above xfer size calculation instead of
-                // overwriting here
                 transfer_size = block_count * item_size * channel_count;
 
-                // Interleave samples
-                for (int i = 0; i < block_count; i++) {
-                    for (int ch = 0; ch < channel_count; ch++) {
-                        uint32_t v = s->mem_read(s->mem_opaque,
-                            mem_space, mem_address+ch*block_count+i);
-                        switch(item_size) {
-                        case 2:
-                            *(uint16_t*)(scratch_buf + i*2*channel_count + ch*2) = v >> 8;
-                            break;
-                        case 4:
-                            *(uint32_t*)(scratch_buf + i*4*channel_count + ch*4) = v;
-                            break;
-                        default:
+                if (item_size == 2) {
+                    uint16_t *samples = (uint16_t *)scratch_buf;
+                    for (uint32_t i = 0; i < block_count; ++i) {
+                        uint32_t address = mem_address + i;
+                        for (uint32_t ch = 0; ch < channel_count; ++ch) {
+                            *samples++ = s->mem_read(s->mem_opaque, mem_space, address) >> 8;
+                            address += block_count;
+                        }
+                    }
+                } else if (item_size == 4) {
+                    uint32_t *samples = (uint32_t *)scratch_buf;
+                    for (uint32_t i = 0; i < block_count; ++i) {
+                        uint32_t address = mem_address + i;
+                        for (uint32_t ch = 0; ch < channel_count; ++ch) {
+                            *samples++ = s->mem_read(s->mem_opaque, mem_space, address);
+                            address += block_count;
+                        }
+                    }
+                } else {
+                    for (uint32_t i = 0; i < block_count; ++i) {
+                        for (uint32_t ch = 0; ch < channel_count; ++ch) {
+                            s->mem_read(s->mem_opaque, mem_space, mem_address + ch * block_count + i);
                             assert(!"Invalid dsp dma item size for interleaved samples");
-                            break;
                         }
                     }
                 }
+            } else if (item_size == 2) {
+                uint16_t *samples = (uint16_t *)scratch_buf;
+                for (uint32_t i = 0; i < count; ++i)
+                    samples[i] = s->mem_read(s->mem_opaque, mem_space, mem_address + i) >> 8;
+            } else if (item_size == 4) {
+                uint32_t *samples = (uint32_t *)scratch_buf;
+                for (uint32_t i = 0; i < count; ++i)
+                    samples[i] = s->mem_read(s->mem_opaque, mem_space, mem_address + i);
             } else {
-                for (int i = 0; i < count; i++) {
-                    uint32_t v = s->mem_read(s->mem_opaque, mem_space, mem_address+i);
-                    switch(item_size) {
-                    case 2:
-                        *(uint16_t*)(scratch_buf + i*2) = v >> 8;
-                        break;
-                    case 4:
-                        *(uint32_t*)(scratch_buf + i*4) = v;
-                        break;
-                    default:
-                        assert(!"Invalid dsp dma item size");
-                        break;
-                    }
+                for (uint32_t i = 0; i < count; ++i) {
+                    s->mem_read(s->mem_opaque, mem_space, mem_address + i);
+                    assert(!"Invalid dsp dma item size");
                 }
-
             }
 
             /* FIXME: Move to function; then reuse for both directions */
@@ -298,22 +306,19 @@ static void dsp_dma_run(DSPDMAState *s)
                 assert(!"Unhandled dsp dma buffer");
             }
 
-            for (int i = 0; i < count; i++) {
-                uint32_t v;
-                switch(item_size) {
-                case 2:
-                    v = *(uint16_t*)(scratch_buf + i*2) << 8;
-                    break;
-                case 4:
-                    v = (*(uint32_t*)(scratch_buf + i*4)) & item_mask;
-                    break;
-                default:
-                    v = 0;
+            if (item_size == 2) {
+                const uint16_t *samples = (const uint16_t *)scratch_buf;
+                for (uint32_t i = 0; i < count; ++i)
+                    s->mem_write(s->mem_opaque, mem_space, mem_address + i, (uint32_t)samples[i] << 8);
+            } else if (item_size == 4) {
+                const uint32_t *samples = (const uint32_t *)scratch_buf;
+                for (uint32_t i = 0; i < count; ++i)
+                    s->mem_write(s->mem_opaque, mem_space, mem_address + i, samples[i] & item_mask);
+            } else {
+                for (uint32_t i = 0; i < count; ++i) {
                     assert(!"Invalid dsp dma item size");
-                    break;
+                    s->mem_write(s->mem_opaque, mem_space, mem_address + i, 0);
                 }
-
-                s->mem_write(s->mem_opaque, mem_space, mem_address+i, v);
             }
         }
 

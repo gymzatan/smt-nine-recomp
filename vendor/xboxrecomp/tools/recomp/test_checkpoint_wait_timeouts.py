@@ -20,12 +20,14 @@ def wait_timeout_probe(tmp_path_factory):
 #include <assert.h>
 static int simulated=1,tracked=1,pause_once;
 static DWORD calls,last_slice,forced_result=WAIT_TIMEOUT,restored=INFINITE;
+static unsigned tick_reads,checkpoint_boundaries,apc_calls,timeouts_before_result;
 static ULONGLONG wall,waited;
-static ULONGLONG observed_tick(void) {return simulated?wall/16*16:GetTickCount64();}
+static ULONGLONG observed_tick(void) {++tick_reads;return simulated?wall/16*16:GetTickCount64();}
 static DWORD observed_sleep(DWORD ms,BOOL alertable) {
     ++calls;last_slice=ms;
     if(!simulated)return SleepEx(ms,alertable);
     assert(ms!=INFINITE && calls<1000);wall+=ms;waited+=ms;
+    if(timeouts_before_result){--timeouts_before_result;return 0;}
     return forced_result==WAIT_TIMEOUT?0:forced_result;
 }
 static DWORD observed_objects(DWORD count,const HANDLE *objects,BOOL all,DWORD ms,BOOL alertable) {
@@ -39,7 +41,7 @@ typedef int KPROCESSOR_MODE;
 int xbox_ThreadApcsEnabled(void) {return 0;}
 uint32_t xbox_QueueThreadWaitBegin(void) {return 0;}
 void xbox_QueueThreadWaitEnd(uint32_t queue) {(void)queue;}
-int xbox_DeliverThreadApcs(BOOLEAN user) {(void)user;return 0;}
+int xbox_DeliverThreadApcs(BOOLEAN user) {(void)user;++apc_calls;return 0;}
 typedef LONG NTSTATUS;
 NTSTATUS xbox_kernel_wait_acquire(ULONG count,const HANDLE *source,HANDLE *owned,uint32_t *tokens) {
     for(ULONG i=0;i<count;i++){owned[i]=source[i];tokens[i]=i;}return 0;
@@ -59,6 +61,7 @@ int xbox_kernel_wait_tracked(void) {return tracked;}
 uint32_t xbox_kernel_wait_begin(uint32_t ms) {return restored==INFINITE?ms:restored;}
 void xbox_kernel_wait_boundary(uint32_t remaining) {
     (void)remaining;
+    ++checkpoint_boundaries;
     if(pause_once){wall+=1600;pause_once=0;}
 }
 #define GetTickCount64 observed_tick
@@ -85,6 +88,16 @@ int main(int argc,char **argv) {
         return 0;
     }
     DWORD count=(DWORD)atoi(argv[1]);assert(count<=2);HANDLE objects[2]={(HANDLE)1,(HANDLE)2};
+    if(strstr(argv[1],"-infinite")) {
+        pause_once=1;timeouts_before_result=1;forced_result=WAIT_IO_COMPLETION;
+        DWORD result=xbox_checkpoint_wait(count,objects,count==2,UserMode,TRUE,INFINITE);
+        fprintf(stderr,"infinite wait: ticks=%u boundaries=%u apc=%u calls=%lu\n",
+                tick_reads,checkpoint_boundaries,apc_calls,calls);
+        assert(result==WAIT_IO_COMPLETION && calls==2 && last_slice==10);
+        assert(waited==20 && wall==1620 && checkpoint_boundaries==2 && apc_calls==2);
+        assert(tick_reads==0);
+        return 0;
+    }
     for(DWORD ms=0;ms<=10;ms++) {
         for(int pause=0;pause<2;pause++) {
             calls=0;wall=waited=0;pause_once=pause;
@@ -95,7 +108,10 @@ int main(int argc,char **argv) {
     }
     calls=0;wall=waited=0;restored=2;
     assert(xbox_checkpoint_wait(count,objects,count==2,UserMode,FALSE,1000)==WAIT_TIMEOUT);
-    assert(calls==1 && waited==2);restored=INFINITE;
+    assert(calls==1 && waited==2);
+    calls=0;wall=waited=0;tick_reads=0;
+    assert(xbox_checkpoint_wait(count,objects,count==2,UserMode,FALSE,INFINITE)==WAIT_TIMEOUT);
+    assert(calls==1 && waited==2 && tick_reads>0);restored=INFINITE;
     calls=0;wall=waited=0;forced_result=WAIT_IO_COMPLETION;
     assert(xbox_checkpoint_wait(count,objects,count==2,UserMode,TRUE,INFINITE)==WAIT_IO_COMPLETION);
     assert(calls==1 && last_slice==10);
@@ -116,6 +132,12 @@ int main(int argc,char **argv) {
 @pytest.mark.parametrize('count',[0,1,2])
 def test_completed_final_timeout_is_not_repeated(wait_timeout_probe,count):
     result=subprocess.run([str(wait_timeout_probe),str(count)],capture_output=True,text=True,timeout=5)
+    assert result.returncode==0,result.stdout+result.stderr
+
+
+@pytest.mark.parametrize('count',[0,1,2])
+def test_infinite_wait_keeps_polling_without_timeout_clock(wait_timeout_probe,count):
+    result=subprocess.run([str(wait_timeout_probe),f'{count}-infinite'],capture_output=True,text=True,timeout=5)
     assert result.returncode==0,result.stdout+result.stderr
 
 

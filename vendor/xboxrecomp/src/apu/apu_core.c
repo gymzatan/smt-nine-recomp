@@ -34,6 +34,9 @@ uint8_t *g_apu_ram_ptr = NULL;
 
 MCPXAPUState *g_state = NULL;
 
+/* The host counter frequency is fixed and is not guest state. */
+static LARGE_INTEGER s_apu_clock_frequency;
+
 /* Forward declarations for software mixer */
 static void mixer_init(void);
 static void mixer_render(int16_t frame_buf[][2], int num_samples);
@@ -65,7 +68,7 @@ void mcpx_debug_end_frame(void) {}
  * addresses are resolved separately by the kernel; they are not DMA offsets. */
 uint8_t *mcpx_apu_phys(uint64_t addr, size_t length)
 {
-    if (!g_apu_ram_ptr || addr>0x04000000u || length>0x04000000u-addr) {
+    if (!g_apu_ram_ptr || length > 0x04000000u || addr > 0x04000000u - length) {
         fprintf(stderr,"[STOP] APU physical address outside connected RAM: 0x%llX\n",
                 (unsigned long long)addr);
         exit(5);
@@ -82,10 +85,10 @@ static void update_irq(MCPXAPUState *d)
         ((d->regs[NV_PAPU_ISTS] & ~NV_PAPU_ISTS_GINTSTS) &
          d->regs[NV_PAPU_IEN])) {
         qatomic_or(&d->regs[NV_PAPU_ISTS], NV_PAPU_ISTS_GINTSTS);
-        InterlockedExchange(&s_irq_line, 1);
+        WriteRelease(&s_irq_line, 1);
     } else {
         qatomic_and(&d->regs[NV_PAPU_ISTS], ~NV_PAPU_ISTS_GINTSTS);
-        InterlockedExchange(&s_irq_line, 0);
+        WriteRelease(&s_irq_line, 0);
     }
 }
 
@@ -94,7 +97,7 @@ int mcpx_apu_irqs_pending(void)
     MCPXAPUState *d=g_state;
     if (!d) return 0;
     qemu_mutex_lock(&d->lock);
-    int pending=InterlockedCompareExchange(&s_irq_line,0,0) || mcpx_ac97_irq_pending();
+    int pending=ReadAcquire(&s_irq_line) || mcpx_ac97_irq_pending();
     qemu_mutex_unlock(&d->lock);
     return pending;
 }
@@ -106,7 +109,7 @@ void mcpx_apu_service_irqs(int (*deliver)(uint32_t))
     MCPXAPUState *d=g_state;
     if (!d) return;
     qemu_mutex_lock(&d->lock);
-    while (InterlockedCompareExchange(&s_irq_line,0,0)) {
+    while (ReadAcquire(&s_irq_line)) {
         int claimed=deliver(5);
         if (claimed<0) {
             fprintf(stderr,"[STOP] APU IRQ has no callable connected ISR\n");
@@ -135,7 +138,7 @@ uint64_t mcpx_apu_read(void *opaque, hwaddr addr, unsigned int size)
 
     switch (addr) {
     case NV_PAPU_XGSCNT:
-        r = (uint64_t)(qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) / 100);
+        r = (uint64_t)(qemu_clock_get_ns(s_apu_clock_frequency.QuadPart) / 100);
         break;
     default:
         if (addr < 0x20000) {
@@ -331,7 +334,7 @@ static void throttle(MCPXAPUState *d)
     }
     if (queued_bytes >= 0 && queued_bytes <= d->monitor.queued_bytes_low) return;
 
-    int64_t now_us = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
+    int64_t now_us = qemu_clock_get_us(s_apu_clock_frequency.QuadPart);
 
     if (d->next_frame_time_us == 0 ||
         now_us - d->next_frame_time_us > EP_FRAME_US) {
@@ -339,7 +342,7 @@ static void throttle(MCPXAPUState *d)
     }
 
     while (!d->pause_requested) {
-        now_us = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
+        now_us = qemu_clock_get_us(s_apu_clock_frequency.QuadPart);
         int64_t remaining_ms = (d->next_frame_time_us - now_us) / 1000;
         if (remaining_ms > 0) {
             qemu_cond_timedwait(&d->cond, &d->lock, (int)remaining_ms);
@@ -353,7 +356,7 @@ static void throttle(MCPXAPUState *d)
         d->next_frame_time_us += (queued_bytes > mid) - (queued_bytes < mid);
     }
 
-    d->sleep_acc_us += (int)(qemu_clock_get_us(QEMU_CLOCK_REALTIME) - now_us);
+    d->sleep_acc_us += (int)(qemu_clock_get_us(s_apu_clock_frequency.QuadPart) - now_us);
 }
 
 /* ============================================================
@@ -367,7 +370,7 @@ static void se_frame(MCPXAPUState *d)
     g_dbg.gp_realtime = d->gp.realtime;
     g_dbg.ep_realtime = d->ep.realtime;
 
-    int64_t now_ms = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
+    int64_t now_ms = qemu_clock_get_ms(s_apu_clock_frequency.QuadPart);
     int64_t elapsed_ms = now_ms - d->frame_count_time_ms;
     if (elapsed_ms >= 1000) {
         g_dbg.utilization = 1.0f - d->sleep_acc_us / (elapsed_ms * 1000.0f);
@@ -542,7 +545,7 @@ int mcpx_apu_save_checkpoint(MCPXAPUState *d,FILE *out) {
             ok=ok && saved->filter_ops[v][ch]<6;state->vp.filters[v].svf[ch].op=NULL;
         }
     }
-    int64_t now=qemu_clock_get_us(QEMU_CLOCK_REALTIME);
+    int64_t now=qemu_clock_get_us(s_apu_clock_frequency.QuadPart);
     if(state->next_frame_time_us) state->next_frame_time_us-=now;
     state->frame_count_time_ms-=now/1000;
     if(state->throttle.deviation.last_us) state->throttle.deviation.last_us-=now;
@@ -604,7 +607,7 @@ int mcpx_apu_load_checkpoint(MCPXAPUState *d,FILE *in) {
             offset=offsetof(MCPXAPUState,regs);
             memcpy((char *)d+offset,(const char *)state+offset,offsetof(MCPXAPUState,monitor.stream)-offset);
             d->monitor.queued_bytes_low=state->monitor.queued_bytes_low;d->monitor.queued_bytes_high=state->monitor.queued_bytes_high;
-            int64_t now=qemu_clock_get_us(QEMU_CLOCK_REALTIME);
+            int64_t now=qemu_clock_get_us(s_apu_clock_frequency.QuadPart);
             if(d->next_frame_time_us) d->next_frame_time_us+=now;
             d->frame_count_time_ms+=now/1000;
             if(d->throttle.deviation.last_us) d->throttle.deviation.last_us+=now;
@@ -653,6 +656,7 @@ MCPXAPUState *mcpx_apu_init_standalone(uint8_t *ram_ptr,
         return NULL;
     }
 
+    QueryPerformanceFrequency(&s_apu_clock_frequency);
     g_apu_ram_ptr = ram_ptr;
     g_state = d;
     d->ram_ptr = ram_ptr;

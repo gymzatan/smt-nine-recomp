@@ -647,16 +647,16 @@ static void verify_original_file_policy_bounds(void) {
         assert(file_policy_test_reads==i);
     }
     xbox_FileHandleClosed(handles[1]);assert(CloseHandle(handles[1]));
-    /* An existing identity must be updated before filling an earlier hole. */
+    /* Closing an interior slot moves the last policy, and update follows its handle. */
     file_policy_test_reads=0;
     assert(file_policy_store(handles[2],GENERIC_WRITE,1,FILE_ATTRIBUTE_NORMAL,0x22,0x202));
-    assert(file_policy_test_reads==3);
-    assert(!s_file_open_policy[1].handle && s_file_open_policy[2].handle==handles[2]);
+    assert(file_policy_test_reads==2);
+    assert(s_file_policy_end==2 && s_file_open_policy[1].handle==handles[2]);
     handles[3]=CreateEventA(NULL,FALSE,FALSE,NULL);assert(handles[3]);
     file_policy_test_reads=0;
     assert(file_policy_store(handles[3],GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,0x303));
-    assert(file_policy_test_reads==3);
-    assert(s_file_open_policy[1].handle==handles[3]);
+    assert(file_policy_test_reads==2);
+    assert(s_file_open_policy[2].handle==handles[3]);
     /* Close-source copies all policy metadata and retires the source slot. */
     HANDLE alias=NULL;assert(DuplicateHandle(GetCurrentProcess(),handles[0],GetCurrentProcess(),&alias,0,FALSE,DUPLICATE_SAME_ACCESS));
     xbox_FileHandleDuplicated(handles[0],alias,1);assert(CloseHandle(handles[0]));
@@ -683,17 +683,29 @@ static void verify_original_file_policy_bounds(void) {
     xbox_FileHandleClosed(full[8192]);assert(CloseHandle(full[8192]));
     file_policy_test_reads=0;
     assert(file_policy_store(full[16383],GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,0xfedcba));
-    assert(file_policy_test_reads==16384);
-    assert(!s_file_open_policy[8192].handle && s_file_open_policy[16383].handle==full[16383]);
+    assert(file_policy_test_reads==8193);
+    assert(s_file_policy_end==16383 && s_file_open_policy[8192].handle==full[16383]);
     file_policy_test_reads=0;
     assert(file_policy_store(overflow,GENERIC_READ,3,FILE_ATTRIBUTE_NORMAL,0x20,0x123456));
-    assert(file_policy_test_reads==16384);
-    assert(s_file_open_policy[8192].handle==overflow);full[8192]=overflow;
-    /* Retire descending tails; no fabricated direct reset of the derived bound. */
-    for(unsigned i=16384;i;i--) {xbox_FileHandleClosed(full[i-1]);assert(CloseHandle(full[i-1]));}
+    assert(file_policy_test_reads==16383);
+    assert(s_file_open_policy[16383].handle==overflow);full[8192]=overflow;
+    /* Keep the high original handles alive while removing interior handles. */
+    for(unsigned i=1;i<16257;i++) {
+        xbox_FileHandleClosed(full[i]);assert(CloseHandle(full[i]));full[i]=NULL;
+    }
+    assert(s_file_policy_end==128);
+    assert(xbox_FileHandleDevice(full[0])==1);
+    assert(xbox_FileHandleDevice(full[16383])==0xfedcba);
+    for(unsigned i=16257;i<16383;i++) assert(xbox_FileHandleDevice(full[i])==i+1);
+    file_policy_test_reads=0;
+    assert(!xbox_FileHandleDevice((HANDLE)(uintptr_t)0x12345));assert(file_policy_test_reads==128);
+    fprintf(stderr,"[FILE POLICY DENSE] missing-handle reads after churn=128\n");
+    for(unsigned i=16384;i;i--) if(full[i-1]) {
+        xbox_FileHandleClosed(full[i-1]);assert(CloseHandle(full[i-1]));
+    }
     free(full);file_policy_test_reads=0;
     assert(!xbox_FileHandleDevice((HANDLE)(uintptr_t)0x12345));assert(file_policy_test_reads==0);
-    fprintf(stderr,"[FILE POLICY] holes/unique/close-source/tail/full16384/overflow passed\n");
+    fprintf(stderr,"[FILE POLICY] packed/reuse/close-source/tail/full16384/overflow passed\n");
     file_policy_test_observe=0;
 }
 
@@ -742,6 +754,14 @@ static int bound_restore(const char*mode,const char*path){assert(xbox_Checkpoint
  assert(checkpoint_clear_objects());f=fopen(path,"rb");assert(f&&xbox_CheckpointLoadObjects(f,NULL,0));fclose(f);assert(g_ke_shadow[4095].guest_va==0x1fff80 && ke_shadow_lookup(0x1fff80));
  HANDLE append=shadow_event();assert(ke_shadow_insert(0x380000,append)&&g_ke_shadow[0].host_handle==append);assert(checkpoint_clear_objects());xbox_CheckpointEnd();puts("bound lazy/full/hot sparse restore pass");return 0;}
 
+static ULONG network_attributes(HANDLE handle) {
+    XBOX_IO_STATUS_BLOCK ios={0};
+    XBOX_FILE_NETWORK_OPEN_INFORMATION info={0};
+    assert(xbox_NtQueryInformationFile(handle,&ios,&info,sizeof info,XboxFileNetworkOpenInformation)==0);
+    assert(!ios.Status && ios.Information==sizeof info);
+    return info.FileAttributes;
+}
+
 int main(int argc,char **argv) {
     if(argc==2 && !strcmp(argv[1],"bound_basic"))return bound_basic(argv[1]);
 
@@ -787,7 +807,7 @@ int main(int argc,char **argv) {
         assert(mounted!=old && MEM32(physical+0xc)==mounted && MEM32(mounted+4)==1);
         assert(xbox_NtFsControlFile(fresh,NULL,NULL,NULL,XBOX_TO_NATIVE(0x29220),0x90000,NULL,0,NULL,0)==STATUS_INVALID_DEVICE_REQUEST);
         object_roundtrip();fresh=bridge_resolve_handle(fresh_token);
-        assert(xbox_kernel_file_volume_status(bridge_resolve_handle(token))==(NTSTATUS)0xc000026eu);
+        assert(xbox_kernel_file_volume_status(bridge_resolve_handle(token),NULL)==(NTSTATUS)0xc000026eu);
         object_close(token);object_dereference(object);
         assert(!ke_object_slot(old) && MEM32(physical+0xc)==mounted && MEM32(mounted+4)==1);
         relative_oa.RootDirectory=fresh;
@@ -872,11 +892,14 @@ int main(int argc,char **argv) {
         assert(mounted && mounted!=physical && MEM32(physical+0xc)==mounted);
         assert(MEM8(mounted+0x1c)==3 && MEM32(MEM32(mounted+0x18))==physical);
         assert(ke_object_slot(physical)->references==references+1 && MEM32(mounted+4)==1);
-        assert(xbox_kernel_file_device_type(volume)==2);
+        assert(network_attributes(volume)==(XBOX_FILE_ATTRIBUTE_READONLY|XBOX_FILE_ATTRIBUTE_DIRECTORY));
         name=(XBOX_ANSI_STRING){28,28,"\\Device\\Harddisk0\\Partition1"};
         name.Length=(USHORT)strlen(name.Buffer);HANDLE directory;
         assert(xbox_NtOpenFile(&directory,0,&oa,&ios,7,0)==0);
         uint32_t disk=xbox_FileHandleDevice(directory);assert(disk!=mounted && MEM32(disk+4)==1);
+        BY_HANDLE_FILE_INFORMATION native;
+        assert(GetFileInformationByHandle(directory,&native));
+        assert(network_attributes(directory)==native.dwFileAttributes);
         name=(XBOX_ANSI_STRING){12,12,"D:\\asset.bin"};oa.RootDirectory=directory;
         assert(xbox_NtOpenFile(&second,XBOX_GENERIC_READ,&oa,&ios,7,0)==0);
         assert(xbox_FileHandleDevice(second)==mounted && MEM32(mounted+4)==2 && MEM32(disk+4)==1);
@@ -886,6 +909,7 @@ int main(int argc,char **argv) {
         assert(xbox_FileHandleDevice(handle)==mounted && MEM32(mounted+4)==2);
         assert(xbox_NtDuplicateObject(handle,&alias,0)==0 && MEM32(mounted+4)==2);
         assert(xbox_NtClose(handle)==0 && MEM32(mounted+4)==2);
+        assert(network_attributes(alias)==XBOX_FILE_ATTRIBUTE_READONLY);
         assert(xbox_NtOpenFile(&second,XBOX_GENERIC_READ,&oa,&ios,7,0)==0 && MEM32(mounted+4)==3);
         assert(xbox_NtClose(second)==0 && MEM32(mounted+4)==2);
         name=(XBOX_ANSI_STRING){7,7,"missing"};
@@ -895,6 +919,7 @@ int main(int argc,char **argv) {
         assert(xbox_NtClose(volume)==0 && MEM32(mounted+4)==1);
         object_roundtrip();XboxFileOpenState state;
         assert(xbox_CaptureFileOpenState(bridge_resolve_handle(token),&state) && state.device==mounted);
+        assert(network_attributes(bridge_resolve_handle(token))==XBOX_FILE_ATTRIBUTE_READONLY);
         assert(MEM32(mounted+4)==1 && ke_object_slot(physical)->references==references+1);
         object_close(token);assert(MEM32(mounted+4)==1 && ke_object_slot(object)->references==1);
         xbox_IoDeleteDevice(XBOX_TO_NATIVE(mounted));
@@ -1602,12 +1627,12 @@ int main(int argc,char **argv) {
         int create=strstr(argv[1],"create")!=NULL,sync=strstr(argv[1],"sync")!=NULL;
         int user_apc=strstr(argv[1],"apc")!=NULL;
         uint32_t file=object_reference(MEM32(0x20050),ke_object_type_for_kind(CHECKPOINT_FILE));
-        uint32_t event=sync?0x29100:object_reference(MEM32(0x20030),ke_object_type_for_kind(CHECKPOINT_EVENT));
+        uint32_t event=create?file+0x38:sync?0x29100:object_reference(MEM32(0x20030),ke_object_type_for_kind(CHECKPOINT_EVENT));
         if(sync)assert(ke_initialize_event(event,0,0));
         object_close(MEM32(0x20050));object_close(MEM32(0x20054));
         object_close(MEM32(0x20030));object_close(MEM32(0x20040));
         uint32_t irp=io_guest_address(xbox_IoAllocateIrp(1));assert(irp);
-        MEM32(irp+4)=(create?8:0)|(sync?4:0);
+        MEM32(irp+4)=create?0x8c:(sync?4:0);
         MEM32(irp+0x60)=file;MEM32(irp+0x20)=event;MEM32(irp+0x1c)=0x29200;
         MEM32(irp+0x10)=cancel?0xc0000120u:error?0xc0000001u:0;
         MEM32(irp+0x14)=17;MEM32(irp+0x5c)=irp+0x68;MEM8(irp+0x19)=1;
@@ -1625,8 +1650,13 @@ int main(int argc,char **argv) {
         if(strstr(argv[1],"checkpoint"))object_roundtrip();
         g_ecx=irp;g_edx=0;fixture_import(87);xbox_DeliverThreadApcs(FALSE);
         assert(create?ke_shadow_lookup(file)!=NULL:ke_shadow_lookup(file)==NULL);
-        assert(sync?ke_shadow_lookup(event)!=NULL:ke_shadow_lookup(event)==NULL);
-        if(create){assert(ke_object_slot(file)->references==1);object_dereference(file);}
+        assert((sync || create)?ke_shadow_lookup(event)!=NULL:ke_shadow_lookup(event)==NULL);
+        if(create) {
+            assert(MEM16(irp)==6 && MEM32(event+4)==1);
+            assert(ke_object_slot(file)->references==1);
+            xbox_IoFreeIrp(XBOX_TO_NATIVE(irp));object_dereference(file);
+            assert(!ke_shadow_lookup(event));
+        }
         if(sync)ke_shadow_remove(event);
         if(user_apc) {
             assert(!irp_user_apc_calls && MEM16(irp)==6);
@@ -2990,12 +3020,12 @@ def test_wait_closed_caller_handle_survives_hot_checkpoint(native_objects,tmp_pa
     assert result.returncode==0,result.stdout+result.stderr
 
 
-def test_original_file_policy_reuses_holes_and_retires_empty_tail(native_objects,tmp_path):
+def test_original_file_policy_keeps_live_slots_packed_and_reuses_retired_tail(native_objects,tmp_path):
     executable,xbe=native_objects
     result=subprocess.run([str(executable),'file_policy_bounds',str(xbe),'-','-','-',str(tmp_path)],
         capture_output=True,text=True,errors='replace',timeout=60)
     assert result.returncode==0,result.stdout+result.stderr
-    assert '[FILE POLICY] holes/unique/close-source/tail/full16384/overflow passed' in result.stderr
+    assert '[FILE POLICY] packed/reuse/close-source/tail/full16384/overflow passed' in result.stderr
 
 
 def test_original_shadow_insert_preserves_identity_holes_and_handle_ownership(native_objects):

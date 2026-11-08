@@ -153,19 +153,25 @@ void mcpx_ac97_frame(void)
             unsigned used=(NUM_SAMPLES_PER_FRAME*4-elapsed)/4;
             if (index==1) {
                 if (g_apu_state->monitor.point==MCPX_APU_DEBUG_MON_AC97) {
-                if (s_ac97.mixer_data[AC97_PCM_Front_DAC_Rate/2]!=48000)
-                    ac97_stop("non-48kHz DAC is not connected",0x2c,s_ac97.mixer_data[AC97_PCM_Front_DAC_Rate/2],2);
-                /* Accumulate the actual analog bus samples into the existing EP-sized output. */
-                uint16_t master=s_ac97.mixer_data[AC97_Master_Volume_Mute/2];
-                uint16_t volume=s_ac97.mixer_data[AC97_PCM_Out_Volume_Mute/2];
-                for (unsigned frame=0;frame<bytes/4;++frame) for (unsigned ch=0;ch<2;++ch) {
-                    unsigned shift=ch==0 ? 8 : 0;
-                    unsigned gain=255-255*((master>>shift)&63)/63;
-                    unsigned pgain=255-255*((volume>>shift)&31)/31;
-                    gain=gain*pgain/255;
-                    if ((master|volume)&0x8000) gain=0;
-                    g_apu_state->monitor.frame_buf[off+used+frame][ch]=(int16_t)((int32_t)pcm[(holding ? 0 : frame)*2+ch]*(int32_t)gain/255);
-                }
+                    if (s_ac97.mixer_data[AC97_PCM_Front_DAC_Rate/2]!=48000)
+                        ac97_stop("non-48kHz DAC is not connected",0x2c,s_ac97.mixer_data[AC97_PCM_Front_DAC_Rate/2],2);
+                    /* Accumulate the actual analog bus samples into the existing EP-sized output. */
+                    uint16_t master=s_ac97.mixer_data[AC97_Master_Volume_Mute/2];
+                    uint16_t volume=s_ac97.mixer_data[AC97_PCM_Out_Volume_Mute/2];
+                    int16_t (*output)[2]=g_apu_state->monitor.frame_buf+off+used;
+                    const int16_t *sample=pcm;
+                    unsigned step=holding ? 0 : 2;
+                    unsigned gain[2];
+                    for (unsigned ch=0;ch<2;++ch) {
+                        unsigned shift=ch==0 ? 8 : 0;
+                        unsigned master_gain=255-255*((master>>shift)&63)/63;
+                        unsigned pcm_gain=255-255*((volume>>shift)&31)/31;
+                        gain[ch]=(master|volume)&0x8000 ? 0 : master_gain*pcm_gain/255;
+                    }
+                    for (unsigned frame=0;frame<bytes/4;++frame,sample+=step) {
+                        for (unsigned ch=0;ch<2;++ch)
+                            output[frame][ch]=(int16_t)((int32_t)sample[ch]*(int32_t)gain[ch]/255);
+                    }
                 }
             } else {
                 /* Preserve the actual transmitted words independently of the

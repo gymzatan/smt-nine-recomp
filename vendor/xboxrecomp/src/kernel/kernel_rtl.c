@@ -190,7 +190,7 @@ ULONG __stdcall xbox_RtlCompareMemoryUlong(PVOID Source, ULONG Length, ULONG Pat
 #define XBOX_CS_TABLE_SIZE 4096
 
 typedef struct {
-    uintptr_t        key;        /* guest critical section; 0 means free */
+    volatile uintptr_t key;      /* published guest critical section; 0 means free */
     CRITICAL_SECTION cs;
     /* Who holds it, and the guest call site that took it.
      *
@@ -207,16 +207,24 @@ typedef struct {
 
 static XBOX_CS_SLOT g_cs_table[XBOX_CS_TABLE_SIZE];
 
-/* The slot a shadow lock lives in, or NULL if it is not one of ours --
- * RECOMP_CS_MODE=single hands out a lock that belongs to no slot. */
-static XBOX_CS_SLOT* xbox_cs_slot_of(CRITICAL_SECTION* cs)
+static inline uintptr_t xbox_cs_read_key(const XBOX_CS_SLOT *slot)
 {
-    char* p = (char*)cs;
-    if (p < (char*)&g_cs_table[0]
-            || p >= (char*)&g_cs_table[XBOX_CS_TABLE_SIZE])
-        return NULL;
-    return (XBOX_CS_SLOT*)(p - offsetof(XBOX_CS_SLOT, cs));
+#ifdef _WIN32
+    return ReadULongPtrAcquire(&slot->key);
+#else
+    return __atomic_load_n(&slot->key, __ATOMIC_ACQUIRE);
+#endif
 }
+
+static inline void xbox_cs_publish_key(XBOX_CS_SLOT *slot, uintptr_t key)
+{
+#ifdef _WIN32
+    WriteULongPtrRelease(&slot->key, key);
+#else
+    __atomic_store_n(&slot->key, key, __ATOMIC_RELEASE);
+#endif
+}
+
 static SRWLOCK      g_cs_table_lock = SRWLOCK_INIT;
 static int          g_cs_table_full;
 
@@ -235,18 +243,18 @@ static int          g_cs_table_full;
  * guest thread to make progress -- the runtime's own I/O completes
  * synchronously. That would not hold in general.
  */
-static CRITICAL_SECTION g_cs_single;
+static XBOX_CS_SLOT g_cs_single;
 static INIT_ONCE g_cs_single_once = INIT_ONCE_STATIC_INIT;
 static int g_cs_single_mode = -1;
 
 static BOOL CALLBACK xbox_cs_single_init(PINIT_ONCE o, PVOID p, PVOID *c)
 {
     (void)o; (void)p; (void)c;
-    InitializeCriticalSection(&g_cs_single);
+    InitializeCriticalSection(&g_cs_single.cs);
     return TRUE;
 }
 
-static CRITICAL_SECTION* xbox_cs_shadow(PRTL_CRITICAL_SECTION guest)
+static XBOX_CS_SLOT* xbox_cs_shadow(PRTL_CRITICAL_SECTION guest)
 {
     if (g_cs_single_mode < 0) {
         const char* mode = getenv("RECOMP_CS_MODE");
@@ -262,36 +270,32 @@ static CRITICAL_SECTION* xbox_cs_shadow(PRTL_CRITICAL_SECTION guest)
         return &g_cs_single;
     }
     uintptr_t key = (uintptr_t)guest;
-    CRITICAL_SECTION* found = NULL;
+    XBOX_CS_SLOT* found = NULL;
     size_t home, i;
 
     if (!key)
         return NULL;
     home = (size_t)((key >> 4) % XBOX_CS_TABLE_SIZE);
 
-    /* Shared pass first: after start-up almost every call finds an existing
-     * entry, and taking the table exclusively for each of those would put a
-     * global serialisation point in front of the title's own locks. */
-    AcquireSRWLockShared(&g_cs_table_lock);
+    /* Live entries are published once and survive until checkpoint rewind
+     * has parked all users and released the restored owners. */
     for (i = 0; i < XBOX_CS_TABLE_SIZE; i++) {
-        XBOX_CS_SLOT* slot = &g_cs_table[(home + i) % XBOX_CS_TABLE_SIZE];
-        if (slot->key == key) { found = &slot->cs; break; }
-        if (slot->key == 0) break;
+        XBOX_CS_SLOT *slot = &g_cs_table[(home + i) % XBOX_CS_TABLE_SIZE];
+        uintptr_t published = xbox_cs_read_key(slot);
+        if (published == key)
+            return slot;
+        if (!published)
+            break;
     }
-    ReleaseSRWLockShared(&g_cs_table_lock);
-    if (found)
-        return found;
 
     AcquireSRWLockExclusive(&g_cs_table_lock);
     for (i = 0; i < XBOX_CS_TABLE_SIZE; i++) {
         XBOX_CS_SLOT* slot = &g_cs_table[(home + i) % XBOX_CS_TABLE_SIZE];
-        if (slot->key == key) { found = &slot->cs; break; }
+        if (slot->key == key) { found = slot; break; }
         if (slot->key == 0) {
             InitializeCriticalSection(&slot->cs);
-            slot->key = key;             /* published last: a shared reader
-                                          * that sees the key sees a live
-                                          * lock behind it */
-            found = &slot->cs;
+            xbox_cs_publish_key(slot, key);
+            found = slot;
             break;
         }
     }
@@ -349,7 +353,19 @@ static void xbox_guest_backtrace(int depth)
     }
 }
 
-static LONG g_cs_contention_reports;
+static volatile LONG g_cs_contention_reports;
+
+static int xbox_cs_claim_contention_report(void)
+{
+    LONG count = ReadAcquire(&g_cs_contention_reports);
+    while (count < 16) {
+        LONG previous = InterlockedCompareExchange(&g_cs_contention_reports, count + 1, count);
+        if (previous == count)
+            return 1;
+        count = previous;
+    }
+    return 0;
+}
 
 /* Which CRT lock is this?
  *
@@ -449,20 +465,18 @@ static void crt_lock_trace(const char *what, PRTL_CRITICAL_SECTION guest)
 
 extern RECOMP_TLS uint32_t g_xbox_kernel_caller;
 
-static void xbox_cs_note_owner(CRITICAL_SECTION* cs)
+static void xbox_cs_note_owner(XBOX_CS_SLOT* slot)
 {
-    XBOX_CS_SLOT* slot = xbox_cs_slot_of(cs);
-    if (!slot)
+    if (slot == &g_cs_single)
         return;
     slot->owner_site = g_xbox_kernel_caller;
     slot->owner_tid  = GetCurrentThreadId();
     slot->depth++;
 }
 
-static void xbox_cs_clear_owner(CRITICAL_SECTION* cs)
+static void xbox_cs_clear_owner(XBOX_CS_SLOT* slot)
 {
-    XBOX_CS_SLOT* slot = xbox_cs_slot_of(cs);
-    if (!slot)
+    if (slot == &g_cs_single)
         return;
     if (--slot->depth <= 0) {
         slot->depth = 0;
@@ -474,17 +488,19 @@ extern int guest_cpu_is_held(void);
 extern void guest_cpu_join(void);
 VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSection)
 {
-    CRITICAL_SECTION* cs = xbox_cs_shadow(CriticalSection);
-    if (!cs)
+    XBOX_CS_SLOT* slot = xbox_cs_shadow(CriticalSection);
+    if (!slot)
         return;
+    CRITICAL_SECTION* cs = &slot->cs;
     crt_lock_trace("take", CriticalSection);
     if (TryEnterCriticalSection(cs)) {
-        xbox_cs_note_owner(cs);
+        xbox_cs_note_owner(slot);
         return;
     }
     int released=guest_cpu_is_held() && xbox_CurrentIrql()<DISPATCH_LEVEL;
     if (released) guest_cpu_part();
-    if (InterlockedIncrement(&g_cs_contention_reports) <= 16) {
+    int report_contention = xbox_cs_claim_contention_report();
+    if (report_contention) {
         fprintf(stderr, "  [CS] thread %lu waiting on guest lock 0x%08X"
                         " (held by thread %lu)\n",
                 GetCurrentThreadId(),
@@ -502,8 +518,7 @@ VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSectio
             /* Where the holder took it. The waiter's own backtrace below
              * says who is blocked; this is the half that says who to look
              * at. */
-            XBOX_CS_SLOT* slot = xbox_cs_slot_of(cs);
-            if (slot && slot->owner_tid)
+            if (slot != &g_cs_single && slot->owner_tid)
                 fprintf(stderr, "  [CS]   holder thread %lu took it at guest"
                                 " 0x%08X (depth %ld)\n",
                         slot->owner_tid, slot->owner_site, slot->depth);
@@ -512,8 +527,8 @@ VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSectio
         fflush(stderr);
     }
     EnterCriticalSection(cs);
-    xbox_cs_note_owner(cs);
-    if (g_cs_contention_reports <= 16) {
+    xbox_cs_note_owner(slot);
+    if (report_contention) {
         fprintf(stderr, "  [CS] thread %lu acquired 0x%08X\n",
                 GetCurrentThreadId(),
                 (uint32_t)((uintptr_t)CriticalSection
@@ -525,11 +540,11 @@ VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSectio
 
 VOID __stdcall xbox_RtlLeaveCriticalSection(PRTL_CRITICAL_SECTION CriticalSection)
 {
-    CRITICAL_SECTION* cs = xbox_cs_shadow(CriticalSection);
-    if (cs) {
+    XBOX_CS_SLOT* slot = xbox_cs_shadow(CriticalSection);
+    if (slot) {
         crt_lock_trace("drop", CriticalSection);
-        xbox_cs_clear_owner(cs);
-        LeaveCriticalSection(cs);
+        xbox_cs_clear_owner(slot);
+        LeaveCriticalSection(&slot->cs);
     }
 }
 
@@ -566,17 +581,17 @@ int xbox_ValidateCriticalSections(const XboxCriticalSectionState *states,unsigne
 int xbox_PrepareCriticalSections(const XboxCriticalSectionState *states,unsigned count) {
     if (!xbox_ValidateCriticalSections(states,count)) return 0;
     for (unsigned i=0;i<count;i++) {
-        CRITICAL_SECTION *cs=xbox_cs_shadow((PRTL_CRITICAL_SECTION)((uintptr_t)states[i].address+g_xbox_mem_offset));
-        if (!cs) return 0;
-        xbox_cs_slot_of(cs)->owner_site=states[i].site;
+        XBOX_CS_SLOT *slot=xbox_cs_shadow((PRTL_CRITICAL_SECTION)((uintptr_t)states[i].address+g_xbox_mem_offset));
+        if (!slot || slot==&g_cs_single) return 0;
+        slot->owner_site=states[i].site;
     }
     return 1;
 }
 void xbox_RestoreCriticalSectionOwner(uint32_t address,uint32_t depth,uint32_t site) {
     PRTL_CRITICAL_SECTION guest=(PRTL_CRITICAL_SECTION)((uintptr_t)address+g_xbox_mem_offset);
     for (uint32_t i=0;i<depth;i++) xbox_RtlEnterCriticalSection(guest);
-    XBOX_CS_SLOT *slot=xbox_cs_slot_of(xbox_cs_shadow(guest));
-    if (!slot || slot->depth!=(long)depth || slot->owner_tid!=GetCurrentThreadId()) {
+    XBOX_CS_SLOT *slot=xbox_cs_shadow(guest);
+    if (!slot || slot==&g_cs_single || slot->depth!=(long)depth || slot->owner_tid!=GetCurrentThreadId()) {
         fputs("[STOP] critical section owner restoration failed\n",stderr);exit(5);
     }
     slot->owner_site=site;

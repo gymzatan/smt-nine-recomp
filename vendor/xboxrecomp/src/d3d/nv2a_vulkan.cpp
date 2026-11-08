@@ -108,7 +108,7 @@ struct Context {
     VkPipelineLayout pipeline_layout{};
     VkPipelineCache pipeline_cache{};
     std::array<Chunk,chunk_count> chunks{};
-    Buffer readback;
+    Buffer sync_transfer;
     unsigned active{};
     bool recording{};
     NvkImage *render_color{},*render_depth{};
@@ -161,10 +161,10 @@ Buffer buffer_create(VkDeviceSize size,VkBufferUsageFlags usage) {
         return b;
     } catch(...) {destroy(b);throw;}
 }
-Buffer &readback_storage(VkDeviceSize bytes) {
-    Buffer &staging=context.readback;
+Buffer &sync_transfer_storage(VkDeviceSize bytes) {
+    Buffer &staging=context.sync_transfer;
     if(staging.size<bytes) {
-        Buffer larger=buffer_create(bytes,VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        Buffer larger=buffer_create(bytes,VK_BUFFER_USAGE_TRANSFER_SRC_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT);
         destroy(staging);staging=larger;
     }
     return staging;
@@ -234,13 +234,18 @@ uint64_t submit(VkSemaphore acquired={},VkSemaphore ready={}) {
     context.active=(context.active+1)%chunk_count;
     return serial;
 }
-VkDeviceSize upload(const void *data,size_t bytes,VkDeviceSize alignment=16) {
-    Chunk &chunk=begin();
+template<class Write>
+VkDeviceSize upload_range(Chunk &chunk,size_t bytes,VkDeviceSize alignment,Write write) {
     VkDeviceSize offset=(chunk.used+alignment-1)&~(alignment-1);
     require(offset+bytes<=chunk.upload.size,"Vulkan draw exceeded its reserved upload range");
-    std::memcpy(static_cast<char *>(chunk.upload.mapped)+offset,data,bytes);
+    write(static_cast<char *>(chunk.upload.mapped)+offset);
     if(timing_enabled)g_nvk_timings[7]+=bytes;
     chunk.used=offset+bytes;return offset;
+}
+VkDeviceSize upload(const void *data,size_t bytes,VkDeviceSize alignment=16) {
+    return upload_range(begin(),bytes,alignment,[&](char *destination) {
+        std::memcpy(destination,data,bytes);
+    });
 }
 uint32_t upload_uniform(unsigned slot,const void *data,size_t bytes,VkDeviceSize alignment) {
     Chunk &chunk=begin();
@@ -534,14 +539,16 @@ void nvk_image_destroy(NvkImage *image) {
 int nvk_image_upload(NvkImage *image,const void *pixels,size_t pitch) {
     NVK_BEGIN
     require(image && pixels && image->format!=VK_FORMAT_D32_SFLOAT_S8_UINT && pitch>=image->width*4,"Invalid Vulkan color upload");
-    size_t row=image->width*4,bytes=row*image->height*image->layers*image->depth;
+    const size_t row=image->width*4;
+    const size_t rows=(size_t)image->height*image->layers*image->depth;
+    const size_t bytes=row*rows;
     reserve(bytes+3);
-    auto &chunk=begin();VkDeviceSize offset=0;
-    if(pitch==row)offset=upload(pixels,bytes,4);
-    else for(size_t y=0;y<(size_t)image->height*image->layers*image->depth;y++) {
-        VkDeviceSize current=upload(static_cast<const char *>(pixels)+pitch*y,row,4);
-        if(!y)offset=current;
-    }
+    auto &chunk=begin();
+    const VkDeviceSize offset=upload_range(chunk,bytes,4,[&](char *destination) {
+        if(pitch==row)std::memcpy(destination,pixels,bytes);
+        else for(size_t y=0;y<rows;y++)
+            std::memcpy(destination+y*row,static_cast<const char *>(pixels)+y*pitch,row);
+    });
     transition(image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     VkBufferImageCopy copy{};copy.bufferOffset=offset;
     copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,image->layers};copy.imageExtent={image->width,image->height,image->depth};
@@ -553,9 +560,9 @@ int nvk_image_read(NvkImage *image,void *pixels,size_t pitch) {
     NVK_BEGIN
     require(image && pixels && image->format!=VK_FORMAT_D32_SFLOAT_S8_UINT && pitch>=image->width*4,"Invalid Vulkan color readback");
     size_t row=image->width*4,bytes=row*image->height*image->layers*image->depth;
-    /* The original graphics lock serializes reads, and each read waits for
-     * its GPU copy before returning. Reuse storage, never pixel contents. */
-    Buffer &staging=readback_storage(bytes);
+    /* The graphics lock serializes synchronous transfers. Each copy completes
+     * before its caller releases the staging storage. */
+    Buffer &staging=sync_transfer_storage(bytes);
     try {
         transition(image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         VkBufferImageCopy copy{};copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,image->layers};copy.imageExtent={image->width,image->height,image->depth};
@@ -582,9 +589,7 @@ int nvk_depth_transfer(NvkImage *image,void *pixels,int writing,unsigned read_st
     require(image && pixels && !image->volume && image->format==VK_FORMAT_D32_SFLOAT_S8_UINT && image->layers==1,"Invalid Vulkan depth transfer");
     require(read_step && image->width%read_step==0 && image->height%read_step==0 && (!writing || read_step==1),"Invalid Vulkan depth sampling step");
     size_t count=(size_t)image->width*image->height;
-    Buffer upload{};
-    Buffer &staging=writing?upload:readback_storage(count*5);
-    if(writing)staging=buffer_create(count*5,VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    Buffer &staging=sync_transfer_storage(count*5);
     try {
         if(writing) {
             for(size_t i=0;i<count;i++) {
@@ -611,7 +616,7 @@ int nvk_depth_transfer(NvkImage *image,void *pixels,int writing,unsigned read_st
                 static_cast<char *>(pixels)[k*8+4]=static_cast<char *>(staging.mapped)[count*4+i];
             }
         }
-        if(writing)destroy(staging);return 1;
+        return 1;
     }catch(...){destroy(staging);throw;}
     NVK_END(0)
 }
@@ -1029,7 +1034,7 @@ void nvk_shutdown(void) {
             window_close();
             for(auto &p:pipelines)vkDestroyPipeline(context.device,p.second,nullptr);pipelines.clear();
             for(auto &s:samplers)vkDestroySampler(context.device,s.second,nullptr);samplers.clear();
-            destroy(context.readback);
+            destroy(context.sync_transfer);
             for(auto &chunk:context.chunks) {
                 destroy(chunk.upload);
                 if(chunk.descriptors)vkDestroyDescriptorPool(context.device,chunk.descriptors,nullptr);

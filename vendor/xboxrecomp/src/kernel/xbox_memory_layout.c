@@ -2841,6 +2841,8 @@ static int g_heap_alloc_count = 0;
 static struct { uint32_t addr; uint32_t size; uint8_t free; }
     g_heap_blocks[XBOX_HEAP_MAX_BLOCKS];
 static int g_heap_block_count = 0;
+/* Entries before this index are occupied under g_heap_lock. */
+static int g_heap_search_start;
 
 /* Guest threads allocate at once (audio, movie and streaming threads next to
  * the main one), and the table above is shared state. */
@@ -2884,7 +2886,9 @@ static int heap_insert_free(int at, uint32_t addr, uint32_t size)
  * when no free block fits. Caller holds g_heap_lock. */
 static uint32_t heap_carve_free(uint32_t size, uint32_t alignment)
 {
-    for (int i = 0; i < g_heap_block_count; i++) {
+    while (g_heap_search_start < g_heap_block_count && !g_heap_blocks[g_heap_search_start].free)
+        g_heap_search_start++;
+    for (int i = g_heap_search_start; i < g_heap_block_count; i++) {
         uint32_t a, start, end, front, back;
         if (!g_heap_blocks[i].free || g_heap_blocks[i].size < size)
             continue;
@@ -3079,6 +3083,8 @@ static uint32_t g_contig_next = XBOX_CONTIG_BASE + 0x1000u;
 #define CONTIG_MAX_BLOCKS 16384
 static struct { uint32_t addr, size; int free; } g_contig_blocks[CONTIG_MAX_BLOCKS];
 static int g_contig_block_count;
+/* All entries before this index are occupied. Protected by g_contig_lock. */
+static int g_contig_search_start;
 static SRWLOCK g_contig_lock = SRWLOCK_INIT;
 
 static void contig_insert(int at, uint32_t addr, uint32_t size, int is_free)
@@ -3106,7 +3112,10 @@ uint32_t xbox_ContiguousAlloc(uint32_t size, uint32_t alignment)
         if (size == 0) size = 4096;
 
         /* A freed block first: carve the aligned piece, keep what is left free. */
-        for (i = 0; i < g_contig_block_count; i++) {
+        while (g_contig_search_start < g_contig_block_count &&
+                !g_contig_blocks[g_contig_search_start].free)
+            g_contig_search_start++;
+        for (i = g_contig_search_start; i < g_contig_block_count; i++) {
             uint32_t a, end, front, back;
             if (!g_contig_blocks[i].free || g_contig_blocks[i].size < size)
                 continue;
@@ -3156,54 +3165,76 @@ uint32_t xbox_ContiguousAlloc(uint32_t size, uint32_t alignment)
     return result;
 }
 
+/* The caller holds g_contig_lock. Match live blocks in original table order. */
+static int contig_find_live_block(uint32_t xbox_va)
+{
+    int i = 0;
+    for (; i <= g_contig_block_count - 4; i += 4) {
+        int match0 = g_contig_blocks[i].addr == xbox_va;
+        int match1 = g_contig_blocks[i + 1].addr == xbox_va;
+        int match2 = g_contig_blocks[i + 2].addr == xbox_va;
+        int match3 = g_contig_blocks[i + 3].addr == xbox_va;
+        if (!(match0 | match1 | match2 | match3))
+            continue;
+        if (match0 && !g_contig_blocks[i].free)
+            return i;
+        if (match1 && !g_contig_blocks[i + 1].free)
+            return i + 1;
+        if (match2 && !g_contig_blocks[i + 2].free)
+            return i + 2;
+        if (match3 && !g_contig_blocks[i + 3].free)
+            return i + 3;
+    }
+    for (; i < g_contig_block_count; ++i)
+        if (g_contig_blocks[i].addr == xbox_va && !g_contig_blocks[i].free)
+            return i;
+    return -1;
+}
+
 /* Give a block back (RECOMP_HEAP_RECLAIM only). Returns 0 when the address is
  * not one this arena tracks, so the caller can try the general heap. */
 int xbox_ContiguousFree(uint32_t addr)
 {
-    int i, found = 0;
-
     if (!xbox_HeapReclaimEnabled())
         return 0;
     AcquireSRWLockExclusive(&g_contig_lock);
-    for (i = 0; i < g_contig_block_count; i++) {
-        if (g_contig_blocks[i].addr != addr || g_contig_blocks[i].free)
-            continue;
+    int i = contig_find_live_block(addr);
+    if (i >= 0) {
         g_contig_blocks[i].free = 1;
-        found = 1;
+        if (i < g_contig_search_start)
+            g_contig_search_start = i;
+        int first = i, last = i;
         if (i + 1 < g_contig_block_count && g_contig_blocks[i + 1].free
                 && g_contig_blocks[i].addr + g_contig_blocks[i].size == g_contig_blocks[i + 1].addr) {
             g_contig_blocks[i].size += g_contig_blocks[i + 1].size;
-            memmove(&g_contig_blocks[i + 1], &g_contig_blocks[i + 2],
-                    (g_contig_block_count - i - 2) * sizeof g_contig_blocks[0]);
-            g_contig_block_count--;
+            last++;
         }
         if (i > 0 && g_contig_blocks[i - 1].free
                 && g_contig_blocks[i - 1].addr + g_contig_blocks[i - 1].size == g_contig_blocks[i].addr) {
             g_contig_blocks[i - 1].size += g_contig_blocks[i].size;
-            memmove(&g_contig_blocks[i], &g_contig_blocks[i + 1],
-                    (g_contig_block_count - i - 1) * sizeof g_contig_blocks[0]);
-            g_contig_block_count--;
+            first--;
         }
-        break;
+        if (first != last) {
+            memmove(&g_contig_blocks[first + 1], &g_contig_blocks[last + 1],
+                    (g_contig_block_count - last - 1) * sizeof g_contig_blocks[0]);
+            g_contig_block_count -= last - first;
+        }
     }
     ReleaseSRWLockExclusive(&g_contig_lock);
-    return found;
+    return i >= 0;
 }
 
 /* Size of the block at addr (MmQueryAllocationSize), 0 if not tracked. */
 uint32_t xbox_ContiguousBlockSize(uint32_t addr)
 {
     uint32_t r = 0;
-    int i;
 
     if (!xbox_HeapReclaimEnabled())
         return 0;
     AcquireSRWLockShared(&g_contig_lock);
-    for (i = 0; i < g_contig_block_count; i++)
-        if (g_contig_blocks[i].addr == addr && !g_contig_blocks[i].free) {
-            r = g_contig_blocks[i].size;
-            break;
-        }
+    int i = contig_find_live_block(addr);
+    if (i >= 0)
+        r = g_contig_blocks[i].size;
     ReleaseSRWLockShared(&g_contig_lock);
     return r;
 }
@@ -3369,6 +3400,32 @@ uint32_t xbox_HeapBlockSize(uint32_t xbox_va)
     return r;
 }
 
+/* The caller holds g_heap_lock. Keep the first live match in table order. */
+static int heap_find_live_block(uint32_t xbox_va)
+{
+    int i = 0;
+    for (; i <= g_heap_block_count - 4; i += 4) {
+        int match0 = g_heap_blocks[i].addr == xbox_va;
+        int match1 = g_heap_blocks[i + 1].addr == xbox_va;
+        int match2 = g_heap_blocks[i + 2].addr == xbox_va;
+        int match3 = g_heap_blocks[i + 3].addr == xbox_va;
+        if (!(match0 | match1 | match2 | match3))
+            continue;
+        if (match0 && !g_heap_blocks[i].free)
+            return i;
+        if (match1 && !g_heap_blocks[i + 1].free)
+            return i + 1;
+        if (match2 && !g_heap_blocks[i + 2].free)
+            return i + 2;
+        if (match3 && !g_heap_blocks[i + 3].free)
+            return i + 3;
+    }
+    for (; i < g_heap_block_count; ++i)
+        if (g_heap_blocks[i].addr == xbox_va && !g_heap_blocks[i].free)
+            return i;
+    return -1;
+}
+
 void xbox_HeapFree(uint32_t xbox_va)
 {
     static int frees = 0, matched = 0;
@@ -3383,11 +3440,11 @@ void xbox_HeapFree(uint32_t xbox_va)
                 frees, xbox_va, g_heap_block_count);
         fflush(stderr);
     }
-    for (int i = 0; i < g_heap_block_count; i++) {
-        if (g_heap_blocks[i].addr != xbox_va || g_heap_blocks[i].free) {
-            continue;
-        }
+    int i = heap_find_live_block(xbox_va);
+    if (i >= 0) {
         g_heap_blocks[i].free = 1;
+        if (i < g_heap_search_start)
+            g_heap_search_start = i;
         if (++matched % 512 == 0) {
             fprintf(stderr, "  [HEAP] frees=%d matched=%d blocks=%d\n",
                     frees, matched, g_heap_block_count);
@@ -3419,8 +3476,6 @@ void xbox_HeapFree(uint32_t xbox_va)
                 g_heap_blocks[i].addr = 0;
             }
         }
-        ReleaseSRWLockExclusive(&g_heap_lock);
-        return;
     }
     ReleaseSRWLockExclusive(&g_heap_lock);
 }
@@ -3498,7 +3553,9 @@ int xbox_LoadPhysicalMemory(FILE *in)
         if (heap_bytes) memcpy(g_heap_blocks,heap,heap_bytes);
         if (contig_bytes) memcpy(g_contig_blocks,blocks,contig_bytes);
         g_heap_next=state.heap_next;g_heap_block_count=(int)state.heap_count;g_heap_alloc_count=(int)state.heap_alloc_count;
+        g_heap_search_start=0;
         g_contig_next=state.contig_next;g_contig_block_count=(int)state.contig_count;
+        g_contig_search_start=0;
         g_thread_stacks_used=(int)state.thread_stacks;
         g_tls_template_va=state.tls_template;g_tls_total=state.tls_total;g_tls_thread_size=state.tls_thread_size;
         xbox_RestoreWorkerStackUsage(state.worker_stacks);

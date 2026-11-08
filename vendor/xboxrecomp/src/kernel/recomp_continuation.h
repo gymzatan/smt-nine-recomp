@@ -27,6 +27,18 @@ uint64_t recomp_cont_enter(RecompContFrame *, uint32_t,
 void recomp_cont_leave(RecompContFrame *);
 void recomp_cont_site(RecompContFrame *, uint64_t);
 void recomp_cont_invalid(void);
+
+#if defined(_MSC_VER)
+extern __declspec(thread) RecompContFrame *recomp_cont_head;
+#else
+extern __thread RecompContFrame *recomp_cont_head;
+#endif
+
+static inline void recomp_cont_site_inline(RecompContFrame *frame, uint64_t site)
+{
+    if (recomp_cont_head != frame) recomp_cont_invalid();
+    frame->site = site;
+}
 int recomp_cont_active(void);
 int recomp_cont_recovering(uint32_t function);
 int recomp_cont_snapshot_ready(void);

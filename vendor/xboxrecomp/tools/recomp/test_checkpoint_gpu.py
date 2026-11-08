@@ -385,7 +385,7 @@ static void verify_swizzled_regions(void) {
     if(unrelated->native_surface)assert(nvk_image_clear(hw_vk_render(unrelated),rgba));
     else ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),((D3D8Surface *)hw_render_surface(unrelated))->rtv,rgba);
     unrelated->dirty=1;unrelated->dirty_bounds=(RECT){0,0,128,256};
-    hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,NULL);
+    hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,HW_PROTECT_NORMAL);
     method(NV097_SET_SURFACE_COLOR_OFFSET,0x60000);
     method(NV097_SET_SURFACE_FORMAT,0x08070224);
     uint64_t readbacks=s_gpu.hardware_color_readbacks;
@@ -399,7 +399,7 @@ static void verify_swizzled_regions(void) {
 
     /* Dirty pixels must still be encoded using the old swizzled layout. */
     color->dirty=1;color->dirty_bounds=(RECT){0,0,128,256};
-    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,NULL);
+    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,HW_PROTECT_NORMAL);
     readbacks=s_gpu.hardware_color_readbacks;
     method(NV097_SET_SURFACE_FORMAT,0x08070124);assert(hw_color(0)==color);
     assert(s_gpu.hardware_color_readbacks==readbacks+1 && unrelated->dirty);
@@ -412,7 +412,7 @@ static void verify_swizzled_regions(void) {
 
     /* A retained taller allocation keeps the original complete publication. */
     unrelated->dirty=1;
-    hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,NULL);
+    hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,HW_PROTECT_NORMAL);
     readbacks=s_gpu.hardware_color_readbacks;
     method(NV097_SET_SURFACE_CLIP_VERTICAL,128u<<16);
     method(NV097_SET_SURFACE_FORMAT,0x07070224);assert(hw_color(0)==color);
@@ -421,7 +421,7 @@ static void verify_swizzled_regions(void) {
     method(NV097_SET_SURFACE_CLIP_VERTICAL,256u<<16);
     method(NV097_SET_SURFACE_FORMAT,0x08070124);assert(hw_color(0)==color);
     unrelated->dirty=1;
-    hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,NULL);
+    hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,HW_PROTECT_NORMAL);
     uint32_t *output=(uint32_t *)(xbox_GetMemoryOffset()+0x80180000u);
     hw_defer_output((uint8_t *)output,0x12345678);assert(s_hw_query_count==1);
     readbacks=s_gpu.hardware_color_readbacks;
@@ -432,7 +432,7 @@ static void verify_swizzled_regions(void) {
 
     /* A real CPU consumer still publishes the deferred unrelated image. */
     unrelated->dirty=1;unrelated->dirty_bounds=(RECT){0,0,128,256};
-    hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,0);
+    hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,HW_PROTECT_NORMAL);
     readbacks=s_gpu.hardware_color_readbacks;
     assert(BRIDGE_MEM32(unrelated->address)==0xFF665544u);
     assert(s_gpu.hardware_color_readbacks==readbacks+1 && !unrelated->dirty);
@@ -457,14 +457,14 @@ static void verify_swizzled_regions(void) {
         }
         color->dirty=1;color->dirty_bounds=(RECT){0,0,128,256};
         unrelated->dirty=1;unrelated->dirty_bounds=(RECT){0,0,128,256};
-        hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,0);
-        hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,0);
+        hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,HW_PROTECT_NORMAL);
+        hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,HW_PROTECT_NORMAL);
         if(!kind) {
             neighbour->dirty=1;neighbour->dirty_bounds=(RECT){0,0,128,8};
-            hw_protect(neighbour->memory,neighbour->memory_offset,hw_color_bytes(neighbour),PAGE_NOACCESS,0);
+            hw_protect(neighbour->memory,neighbour->memory_offset,hw_color_bytes(neighbour),PAGE_NOACCESS,HW_PROTECT_NORMAL);
         } else {
             shared_depth->dirty=1;
-            hw_protect(shared_depth->memory,shared_depth->memory_offset,hw_depth_bytes(shared_depth),PAGE_NOACCESS,0);
+            hw_protect(shared_depth->memory,shared_depth->memory_offset,hw_depth_bytes(shared_depth),PAGE_NOACCESS,HW_PROTECT_NORMAL);
         }
         readbacks=s_gpu.hardware_color_readbacks;
         method(NV097_SET_SURFACE_FORMAT,0x08070224);assert(hw_color(0)==color);
@@ -478,8 +478,8 @@ static void verify_swizzled_regions(void) {
     /* A clean shared-page alias keeps the normal CPU write invalidation. */
     color->dirty=1;color->dirty_bounds=(RECT){0,0,128,256};
     neighbour->upload_needed=1;
-    unrelated->dirty=1;hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,0);
-    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,0);
+    unrelated->dirty=1;hw_protect(unrelated->memory,unrelated->memory_offset,hw_color_bytes(unrelated),PAGE_NOACCESS,HW_PROTECT_NORMAL);
+    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,HW_PROTECT_NORMAL);
     readbacks=s_gpu.hardware_color_readbacks;
     method(NV097_SET_SURFACE_FORMAT,0x08070224);assert(hw_color(0)==color);
     assert(s_gpu.hardware_color_readbacks==readbacks+1 && unrelated->dirty);
@@ -524,7 +524,7 @@ static void alias_write_render(HwColor *color,const uint32_t *pixels) {
 static void alias_dirty(HwColor *color,RECT bounds) {
     if(color->upload_needed)hw_upload_color(color,0);
     color->dirty=1;color->dirty_bounds=bounds;
-    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,NULL);
+    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,HW_PROTECT_NORMAL);
 }
 static unsigned alias_query_calls,alias_normal_calls;
 static uint32_t *alias_asset_pixels;
@@ -557,7 +557,7 @@ static void verify_swizzled_argb_alias(void) {
     /* Oracle is the original resolve + original dirty RAM publication + original unswizzle. */
     alias_dirty(source,(RECT){0,0,w,h});alias_write_render(source,pattern);hw_copy_color_to_memory(source);
     xbox_unswizzle_rect(reference,ram,w,h,4);
-    hw_protect(source->memory,source->memory_offset,hw_color_bytes(source),PAGE_READWRITE,NULL);memset(ram,0xA5,n*4);
+    hw_protect(source->memory,source->memory_offset,hw_color_bytes(source),PAGE_READWRITE,HW_PROTECT_NORMAL);memset(ram,0xA5,n*4);
     alias_dirty(source,(RECT){0,0,w,h});alias_write_render(source,pattern);
     alias_dirty(unrelated,(RECT){0,0,8,8});
     target->upload_needed=1;
@@ -569,9 +569,9 @@ static void verify_swizzled_argb_alias(void) {
     MEMORY_BASIC_INFORMATION source_page;assert(VirtualQuery((void *)(xbox_GetMemoryOffset()+source->address),&source_page,sizeof source_page));assert(source_page.Protect==PAGE_NOACCESS);
     alias_read_bound(actual,w,h,source);assert(!memcmp(actual,reference,n*4));
     /* Read backing through a temporarily restored protection, without publishing it. */
-    hw_protect(source->memory,source->memory_offset,hw_color_bytes(source),PAGE_READWRITE,NULL);
+    hw_protect(source->memory,source->memory_offset,hw_color_bytes(source),PAGE_READWRITE,HW_PROTECT_NORMAL);
     for(size_t i=0;i<n*4;i++)assert(ram[i]==0xA5);
-    hw_protect(source->memory,source->memory_offset,hw_color_bytes(source),PAGE_NOACCESS,NULL);
+    hw_protect(source->memory,source->memory_offset,hw_color_bytes(source),PAGE_NOACCESS,HW_PROTECT_NORMAL);
     hw_texture_bind(0,target);alias_read_bound(actual,w,h,source);assert(!memcmp(actual,reference,n*4));
     assert(s_gpu.hardware_color_readbacks==reads && source->dirty && unrelated->dirty);
     /* Actual guest read goes through the original fault/publication path. */
@@ -611,7 +611,7 @@ static void verify_swizzled_argb_alias(void) {
     /* Other dirty color or depth in the complete source storage must exclude reuse. */
     for(unsigned kind=0;kind<2;kind++) {
         alias_dirty(source,(RECT){0,0,w,h});
-        if(!kind)alias_dirty(overlap,(RECT){0,0,8,8});else {depth->dirty=1;hw_protect(depth->memory,depth->memory_offset,hw_depth_bytes(depth),PAGE_NOACCESS,NULL);}
+        if(!kind)alias_dirty(overlap,(RECT){0,0,8,8});else {depth->dirty=1;hw_protect(depth->memory,depth->memory_offset,hw_depth_bytes(depth),PAGE_NOACCESS,HW_PROTECT_NORMAL);}
         reads=s_gpu.hardware_color_readbacks;hw_texture_bind(0,target);assert(s_gpu.hardware_color_readbacks>reads && !source->dirty);
         xbox_unswizzle_rect(reference,ram,w,h,4);alias_read_bound(actual,w,h,NULL);assert(!memcmp(actual,reference,n*4));
     }
@@ -788,6 +788,23 @@ static void verify_host_write_scope(const char *path) {
     method(NV097_SET_ZSTENCIL_CLEAR_VALUE,0x12345659);method(NV097_CLEAR_SURFACE,3);assert(depth->dirty);
     assert(xbox_NtReadFile(INVALID_HANDLE_VALUE,NULL,NULL,NULL,&ios,d+1,8,&offset)<0);
     assert(!depth->dirty && depth->upload_needed && dm[0]==0x12345659 && dm[1]==0x12345659 && dm[2]==0x12345659);
+    /* One short read spans one colour and two retained depth owners. The
+     * original depth rule marks the entire destination once per CPU view. */
+    hw_upload_color(color,0);hw_upload_depth(depth);
+    method(NV097_SET_SURFACE_ZETA_OFFSET,0x31000);
+    HwDepth *second=hw_depth();
+    assert(second!=depth && second->memory==depth->memory && second->memory==color->memory);
+    assert(!color->upload_needed && !depth->upload_needed && !second->upload_needed);
+    assert(!color->dirty && !depth->dirty && !second->dirty && !s_hw_query_count);
+    const uint32_t *dm2=(const uint32_t *)(second->memory->host_view+second->memory_offset);
+    uint32_t old_depth[2]={dm[0],dm[1]},old_second=dm2[0];
+    unsigned protects=protection_test_calls;
+    ULONG requested=(ULONG)(second->memory_offset-color->memory_offset);
+    assert(xbox_NtReadFile(file,NULL,NULL,NULL,&ios,c+1,requested,&offset)==STATUS_SUCCESS);
+    assert(protection_test_calls-protects==color->memory->views.view_count);
+    assert(ios.Information==4 && cm[1]==word && cm[2]==0xff334455);
+    assert(dm[0]==old_depth[0] && dm[1]==old_depth[1] && dm2[0]==old_second);
+    assert(color->upload_needed && depth->upload_needed && second->upload_needed);
     CloseHandle(file);
     fprintf(stderr,"[HOST WRITE SCOPE] disjoint no publication, relevant FIFO, alias short/failed read preserves color/depth and untouched bytes passed\n");
 }
@@ -881,6 +898,21 @@ static void verify_texture_content_reuse(const char *snapshot,const char *memory
     source.color=0x0b;source.pitch=64;source.palette=0x80090000u;s_gpu.texs[0]=source;
     hw_texture_bind(0,hw_color(0));HwTexture *paletted=s_hw_textures;
     assert(texture_first_pixel(paletted)==palette[0]);
+    /* A gap output stays pending. A hit in either range collects the
+     * earlier FIFO entries before sampling. */
+    uint32_t *gap=(uint32_t *)(xbox_GetMemoryOffset()+0x80088000u);
+    hw_defer_output((uint8_t *)gap,0x10203040);
+    hw_texture_bind(0,hw_color(0));
+    assert(s_hw_query_count==1 && s_hw_queries[0].pending);
+    hw_defer_output((uint8_t *)palette,0xff446688);
+    hw_texture_bind(0,hw_color(0));
+    assert(!s_hw_query_count && *gap==0x10203040 && texture_first_pixel(paletted)==0xff446688);
+    hw_defer_output((uint8_t *)raw,0x01010101);
+    hw_texture_bind(0,hw_color(0));
+    assert(!s_hw_query_count && texture_first_pixel(paletted)==palette[1]);
+    hw_defer_output((uint8_t *)raw,0);
+    hw_texture_bind(0,hw_color(0));
+    assert(!s_hw_query_count && texture_first_pixel(paletted)==0xff446688);
     source.palette=0x80091000u;s_gpu.texs[0]=source;hw_texture_bind(0,hw_color(0));
     assert(texture_first_pixel(paletted)==palette2[0]);
     palette2[0]=0xff112233;assert(!paletted->content_valid);hw_texture_bind(0,hw_color(0));
@@ -1247,7 +1279,7 @@ static void verify_colour_protection_work(void) {
     assert(!protection_test_calls && !protection_test_identical);
     protection_test_inspect=1;
     HwColor *color=s_hw_colors;assert(color->width==640 && color->height==480 && !color->upload_needed);
-    hw_mark_cpu_write(color->memory,color->memory_offset+4096,4,NULL,0);
+    hw_mark_cpu_write(color->memory,color->memory_offset+4096,4,NULL,0,HW_PROTECT_NORMAL);
     assert(!color->dirty && color->upload_needed);
     unsigned previous_calls=protection_test_calls;hw_publish_all();assert(protection_test_calls>previous_calls);
     protection_pages_for_test(color->memory,color->memory_offset,(unsigned)((hw_color_bytes(color)+4095)/4096),PAGE_READWRITE);
@@ -1261,22 +1293,22 @@ static void verify_colour_protection_work(void) {
     protection_pages_for_test(color->memory,color->memory_offset,(unsigned)((hw_color_bytes(color)+4095)/4096),PAGE_READONLY);
     HwMemory *memory=s_hw_colors->memory;size_t offset=0x50000;
     assert(offset+3*4096<memory->views.view_size);
-    hw_protect_views(memory,offset,3*4096,PAGE_READWRITE);
+    hw_protect_views(memory,offset,3*4096,PAGE_READWRITE,HW_PROTECT_NORMAL);
     DWORD previous;
     assert(VirtualProtect((uint8_t *)memory->views.cpu_views[memory->views.view_count-1]+offset+4096,4096,PAGE_READONLY,&previous));
-    hw_protect_views(memory,offset,3*4096,PAGE_READWRITE);
+    hw_protect_views(memory,offset,3*4096,PAGE_READWRITE,HW_PROTECT_NORMAL);
     protection_pages_for_test(memory,offset,3,PAGE_READWRITE);
-    hw_protect_views(memory,offset+17,4096,PAGE_READONLY);
+    hw_protect_views(memory,offset+17,4096,PAGE_READONLY,HW_PROTECT_NORMAL);
     protection_pages_for_test(memory,offset,2,PAGE_READONLY);
     protection_pages_for_test(memory,offset+2*4096,1,PAGE_READWRITE);
-    hw_protect_views(memory,offset+31,4096,PAGE_NOACCESS);
+    hw_protect_views(memory,offset+31,4096,PAGE_NOACCESS,HW_PROTECT_NORMAL);
     protection_pages_for_test(memory,offset,2,PAGE_NOACCESS);
-    hw_protect_views(memory,offset,3*4096,PAGE_READWRITE);
+    hw_protect_views(memory,offset,3*4096,PAGE_READWRITE,HW_PROTECT_NORMAL);
     protection_pages_for_test(memory,offset,3,PAGE_READWRITE);
     size_t last=memory->views.view_size-4096;
-    hw_protect_views(memory,last+1,4095,PAGE_READONLY);
+    hw_protect_views(memory,last+1,4095,PAGE_READONLY,HW_PROTECT_NORMAL);
     protection_pages_for_test(memory,last,1,PAGE_READONLY);
-    hw_protect_views(memory,last,4096,PAGE_READWRITE);
+    hw_protect_views(memory,last,4096,PAGE_READWRITE,HW_PROTECT_NORMAL);
     protection_pages_for_test(memory,last,1,PAGE_READWRITE);
     fprintf(stderr,"[PROTECTION] clean publication, CPU-dirty full range, GPU-dirty readback, all aliases, mixed-region and partial-page transitions, noaccess and final view boundary passed\n");
 }
@@ -1657,7 +1689,7 @@ static void verify_completed_output_work(void) {
     protection_pages_for_test(memory,views.offset&~(size_t)4095,2,PAGE_READONLY);
     protection_test_calls=0;
     protection_pages_for_test(memory,(views.offset&~(size_t)4095)+8192,1,PAGE_READWRITE);
-    hw_protect(memory,(views.offset&~(size_t)4095)+8192,4096,PAGE_READWRITE,NULL);
+    hw_protect(memory,(views.offset&~(size_t)4095)+8192,4096,PAGE_READWRITE,HW_PROTECT_NORMAL);
     assert(protection_test_calls==views.view_count);
     protection_pages_for_test(memory,views.offset&~(size_t)4095,2,PAGE_READONLY);
     hw_collect_queries(1);
@@ -2401,7 +2433,7 @@ static void test_dirty_colour(HwColor *color,const float rgba[4]) {
     if(d3d8_IsNativeVulkan()) assert(nvk_image_clear(hw_vk_render(color),rgba));
     else ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),((D3D8Surface *)hw_render_surface(color))->rtv,rgba);
     color->dirty=1;color->dirty_bounds=(RECT){0,0,8,8};
-    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,NULL);
+    hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_NOACCESS,HW_PROTECT_NORMAL);
 }
 static void verify_clear_page_ownership(void) {
     seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();

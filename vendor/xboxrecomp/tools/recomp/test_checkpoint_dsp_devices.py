@@ -14,6 +14,7 @@ def native_dsp_devices(tmp_path_factory):
     source=r'''
 #include "kernel/kernel_bridge.c"
 #include "apu/dsp/dsp_jit.c"
+#include "apu/dsp/dsp_dma_regs.h"
 #include <assert.h>
 recomp_func_t recomp_lookup(uint32_t va) { (void)va;return NULL; }
 recomp_func_t recomp_lookup_manual(uint32_t va) { (void)va;return NULL; }
@@ -31,11 +32,76 @@ static DWORD WINAPI device(void *argument) {
     }
     return 0;
 }
+typedef struct DmaProbe {
+    uint8_t bytes[16];
+    uint32_t address[2];
+    size_t chunk[2];
+    unsigned calls, cursor;
+    bool direction, fifo;
+} DmaProbe;
+static void observe_dma(DmaProbe *probe,uint8_t *data,uint32_t address,size_t bytes,bool direction,bool is_fifo) {
+    assert(probe->calls<2 && probe->cursor+bytes<=sizeof probe->bytes);
+    assert(probe->address[probe->calls]==address && probe->chunk[probe->calls]==bytes);
+    assert(probe->direction==direction && probe->fifo==is_fifo);
+    if(direction) assert(!memcmp(data,probe->bytes+probe->cursor,bytes));
+    else memcpy(data,probe->bytes+probe->cursor,bytes);
+    ++probe->calls;
+    probe->cursor+=(unsigned)bytes;
+}
 static void scratch(void *opaque,uint8_t *data,uint32_t address,size_t bytes,bool direction) {
-    (void)opaque;(void)address;if(!direction) memset(data,0,bytes);
+    if(opaque) observe_dma(opaque,data,address,bytes,direction,false);
+    else if(!direction) memset(data,0,bytes);
 }
 static void fifo(void *opaque,uint8_t *data,unsigned index,size_t bytes,bool direction) {
-    (void)opaque;(void)index;if(!direction) memset(data,0,bytes);
+    if(opaque) observe_dma(opaque,data,index,bytes,direction,true);
+    else if(!direction) memset(data,0,bytes);
+}
+static void dma_node(DSPState *dsp,uint32_t control,uint32_t count,uint32_t offset) {
+    const uint32_t node[]={NODE_POINTER_EOL,control,count,0x100,offset,0x1000,15};
+    for(unsigned i=0;i<sizeof node/sizeof *node;i++) dsp_write_memory(dsp,'X',0x80+i,node[i]);
+    dsp_write_memory(dsp,'X',0xffffd4,0x80);
+    dsp_write_memory(dsp,'X',0xffffd6,DMA_CONTROL_ACTION_START);
+    assert(dsp_read_memory(dsp,'X',0xffffd4)==NODE_POINTER_EOL);
+}
+static void verify_dma_staging(DSPState *dsp) {
+    DmaProbe probe={0};
+    dsp->dma.rw_opaque=&probe;
+    for(unsigned i=0;i<6;i++) dsp_write_memory(dsp,'X',0x100+i,(0x10+i)<<8);
+    probe=(DmaProbe){.bytes={0x10,0,0x11,0},.address={0x100e,0x1000},.chunk={2,2},.direction=true};
+    dma_node(dsp,(1u<<10)|(14u<<5)|(1u<<4)|NODE_CONTROL_DIRECTION,2,14);
+    assert(probe.calls==2 && probe.cursor==4 && dsp_read_memory(dsp,'X',0x84)==2);
+    assert(dsp->dma.staging_capacity==4);
+    probe=(DmaProbe){.bytes={0x10,0,0x13,0,0x11,0,0x14,0,0x12,0,0x15,0},.address={2},.chunk={12},.direction=true,.fifo=true};
+    dma_node(dsp,(1u<<10)|(2u<<5)|NODE_CONTROL_DIRECTION|1u,(3u<<4)|1u,0);
+    assert(probe.calls==1 && probe.cursor==12);
+    assert(dsp->dma.staging && dsp->dma.staging_capacity>=12);
+    for(unsigned i=0;i<4;i++) dsp_write_memory(dsp,'X',0x100+i,0x112230+i);
+    probe=(DmaProbe){.bytes={0x30,0x22,0x11,0,0x31,0x22,0x11,0,0x32,0x22,0x11,0},
+        .address={0x1008,0x1000},.chunk={8,4},.direction=true};
+    dma_node(dsp,(2u<<10)|(14u<<5)|(1u<<4)|NODE_CONTROL_DIRECTION,3,8);
+    assert(probe.calls==2 && probe.cursor==12 && dsp_read_memory(dsp,'X',0x84)==4);
+    probe=(DmaProbe){.bytes={0x30,0x22,0x11,0,0x32,0x22,0x11,0,0x31,0x22,0x11,0,0x33,0x22,0x11,0},
+        .address={1},.chunk={16},.direction=true,.fifo=true};
+    dma_node(dsp,(6u<<10)|(1u<<5)|NODE_CONTROL_DIRECTION|1u,(2u<<4)|1u,0);
+    assert(probe.calls==1 && probe.cursor==16);
+    uint8_t *staging=dsp->dma.staging;
+    size_t capacity=dsp->dma.staging_capacity;
+    assert(staging && capacity>=16);
+    probe=(DmaProbe){.address={1},.direction=true,.fifo=true};
+    dma_node(dsp,(1u<<5)|NODE_CONTROL_DIRECTION,0,0);
+    assert(probe.calls==1 && probe.cursor==0);
+    DmaProbe second_probe={.bytes={0x44,0x33,0x22,0x11},.address={0x1000},.chunk={4}};
+    DSPState *second=dsp_init(&second_probe,scratch,fifo,!dsp->is_gp);
+    assert(second);
+    dma_node(second,(6u<<10)|(15u<<5),1,0);
+    assert(second_probe.calls==1 && dsp_read_memory(second,'X',0x100)==0x223344);
+    assert(second->dma.staging && second->dma.staging!=staging && dsp->dma.staging==staging);
+    dsp_destroy(second);
+    probe=(DmaProbe){.bytes={0x66,0x77},.address={0x1000},.chunk={2}};
+    dma_node(dsp,(1u<<10)|(15u<<5),1,0);
+    assert(probe.calls==1 && dsp_read_memory(dsp,'X',0x100)==0x776600);
+    assert(dsp->dma.staging==staging && dsp->dma.staging_capacity==capacity);
+    dsp->dma.rw_opaque=NULL;
 }
 static void seed(DSPState *dsp) {
     Dsp56300State state;memset(&state,0,sizeof state);
@@ -82,6 +148,7 @@ int main(int argc,char **argv) {
     assert(argc==6);cold=strcmp(argv[1],"save")!=0;
     FILE *xbe_file=fopen(argv[2],"rb");assert(xbe_file);fseek(xbe_file,0,SEEK_END);long bytes=ftell(xbe_file);
     rewind(xbe_file);void *xbe=malloc(bytes);assert(xbe && fread(xbe,bytes,1,xbe_file)==1);fclose(xbe_file);
+    xbox_CheckpointDeviceCreating(XBOX_CHECKPOINT_ACK);
     assert(xbox_MemoryLayoutInit(xbe,bytes));free(xbe);_putenv_s("RECOMP_GUEST_LOCK","1");assert(guest_cpu_enabled());
     HANDLE threads[2];for(unsigned i=1;i<=2;i++) {
         request[i]=CreateEvent(NULL,FALSE,FALSE,NULL);done[i]=CreateEvent(NULL,FALSE,FALSE,NULL);
@@ -90,6 +157,7 @@ int main(int argc,char **argv) {
     }
     assert(xbox_CheckpointBootstrapBegin());DSPState *dsp=dsp_init(NULL,scratch,fifo,atoi(argv[5])!=0);assert(dsp);
     if(!cold) {
+        verify_dma_staging(dsp);
         seed(dsp);FILE *file=fopen(argv[3],"wb");assert(file && dsp_save_checkpoint(dsp,file));fclose(file);
         file=fopen(argv[4],"wb");assert(file && xbox_CheckpointWriteDevices(file));fclose(file);verify(dsp);
     } else if(!strcmp(argv[1],"reject")) {
@@ -100,6 +168,7 @@ int main(int argc,char **argv) {
         return 0;
     } else {
         FILE *file=fopen(argv[3],"rb");assert(file && dsp_load_checkpoint(dsp,file));fclose(file);verify(dsp);
+        assert(!dsp->dma.staging && !dsp->dma.staging_capacity);
         file=fopen(argv[4],"rb");assert(file && xbox_CheckpointLoadDevices(file));fclose(file);
         assert(g_checkpoint_device_restore_pending[1] && g_checkpoint_device_restore_pending[2]);
         for(unsigned i=1;i<=2;i++) {SetEvent(request[i]);assert(WaitForSingleObject(done[i],10)==WAIT_TIMEOUT);}
@@ -116,14 +185,14 @@ int main(int argc,char **argv) {
 }
 '''
     (work/'dsp_devices.c').write_text(source,encoding='utf-8')
-    libraries=list((root.parents[1]/'build/xboxrecomp/src').glob('*/*.lib'));assert len(libraries)==8
+    libraries=list((root.parents[1]/'build/native/xboxrecomp/src').glob('*/*.lib'));assert len(libraries)==8
     libraries.append(root.parents[1]/'build_dsp_jit/x86_64-pc-windows-msvc/release/dsp56300_emu_ffi.lib')
     result=subprocess.run([compiler,'/nologo','/O2','/Gy','/MD','/utf-8',
         '/DWIN32_LEAN_AND_MEAN','/DNOMINMAX','/D_CRT_SECURE_NO_WARNINGS','/I'+str(root/'src'),
         '/I'+str(root.parents[1]/'reference/dsp56300_release/dsp56300-0.1.3/crates/emu-ffi/include'),
         str(work/'dsp_devices.c'),'/Fe:'+str(work/'dsp_devices.exe'),'/link','/OPT:REF',*[str(p) for p in libraries],
         'kernel32.lib','user32.lib','gdi32.lib','advapi32.lib','ole32.lib','shell32.lib',
-        'd3d11.lib','dxgi.lib','dxguid.lib','d3dcompiler.lib','winmm.lib','xaudio2_8.lib',
+        'd3d11.lib','d3d12.lib','dxgi.lib','dxguid.lib','d3dcompiler.lib','winmm.lib','xaudio2_8.lib',
         'xinput.lib','bcrypt.lib','ntdll.lib','userenv.lib','ws2_32.lib'],
         cwd=work,capture_output=True,text=True,errors='replace')
     assert result.returncode==0,result.stdout+result.stderr

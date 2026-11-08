@@ -212,9 +212,13 @@ static void irql_holder_drop(void)
     LONG me = (LONG)GetCurrentThreadId();
     int i;
 
-    for (i = 0; i < IRQL_HOLDERS; i++)
-        if (InterlockedCompareExchange(&s_holders[i].tid, 0, me) == me)
-            return;
+    for (i = 0; i < IRQL_HOLDERS; i++) {
+        if (ReadAcquire(&s_holders[i].tid) != me)
+            continue;
+        /* Other threads can claim only an empty slot. Only its owner clears it. */
+        WriteRelease(&s_holders[i].tid, 0);
+        return;
+    }
 }
 
 void xbox_IrqlDumpHolders(void)

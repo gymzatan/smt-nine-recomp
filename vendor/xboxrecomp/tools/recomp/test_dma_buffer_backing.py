@@ -11,11 +11,17 @@ def test_static_buffer_dma_identity_and_strict_spans():
     root = Path(__file__).resolve().parents[2]
     source_text = r'''
 #include "kernel/kernel.h"
-int xbox_CheckpointFrozen(void) {return 0;}
+int xbox_CheckpointFrozen(void) {return 1;}
 #include "kernel/xbox_memory_layout.h"
 #include <assert.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
+/* This fixture exercises DMA addresses only. */
+int nv2a_pb_host_write_begin(void *address, size_t bytes) {
+    (void)address; (void)bytes; abort();
+}
+void nv2a_pb_host_write_end(int held) { (void)held; abort(); }
 static uint8_t cpu[8192];
 static uint32_t allocation = 0x80001000;
 void xbox_log(int a,const char *b,const char *c,...) { }
@@ -40,6 +46,35 @@ int main(int argc,char **argv) {
         (void *)((uintptr_t)xbox_GetMemoryOffset()+0x80004080));
     if(argc>1 && strcmp(argv[1],"cross")==0) xbox_ResolvePhysicalBuffer(0x1FFF,2);
     if(argc>1 && strcmp(argv[1],"span")==0) xbox_ResolvePhysicalBuffer(0x03FFFFFF,2);
+
+    /* Restore an existing archive with aliases in non-physical order. */
+    static const uint32_t records[]={2,0x006DF000,0x03FFF000,0x006E0000,0x3000};
+    FILE *archive=tmpfile();
+    assert(archive && fwrite("XBDMA",5,1,archive)==1);
+    assert(fwrite(records,sizeof records,1,archive)==1);
+    rewind(archive);
+    void *restored=xbox_PrepareDmaPageIdentities(archive);
+    assert(restored && xbox_ResolvePhysicalBuffer(pa,8)==cpu+0x384);
+    xbox_ApplyDmaPageIdentities(restored);
+    free(restored);
+    fclose(archive);
+    assert(xbox_ResolvePhysicalBuffer(0x03FFFFFF,1)==cpu+4095);
+    assert(xbox_ResolvePhysicalBuffer(0x3008,8)==cpu+4096+8);
+    assert(xbox_MmGetPhysicalAddress((void *)(uintptr_t)0x006E0008)==0x3008);
+    assert(xbox_ResolvePhysicalBuffer(pa,8)==
+        (void *)((uintptr_t)xbox_GetMemoryOffset()+XBOX_CONTIG_BASE+pa));
+    assert(xbox_ResolvePhysicalBuffer(XBOX_CONTIG_SIZE,0)==
+        (void *)((uintptr_t)xbox_GetMemoryOffset()+XBOX_CONTIG_BASE+XBOX_CONTIG_SIZE));
+
+    archive=tmpfile();
+    assert(archive && xbox_SaveDmaPageIdentities(archive));
+    rewind(archive);
+    char magic[5];
+    uint32_t written[sizeof records/sizeof records[0]];
+    assert(fread(magic,sizeof magic,1,archive)==1 && !memcmp(magic,"XBDMA",5));
+    assert(fread(written,sizeof written,1,archive)==1 && !memcmp(written,records,sizeof records));
+    assert(fgetc(archive)==EOF);
+    fclose(archive);
     return 0;
 }
 '''

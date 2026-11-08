@@ -886,11 +886,14 @@ void xbox_FileHandleDuplicated(HANDLE, HANDLE, int);
 void xbox_FileHandleClosed(HANDLE);
 uint32_t xbox_FileHandleDevice(HANDLE);
 BOOL xbox_FileObjectPath(PXBOX_OBJECT_ATTRIBUTES,WCHAR*,DWORD);
-NTSTATUS xbox_kernel_prepare_file_open(PXBOX_OBJECT_ATTRIBUTES,WCHAR*,DWORD,uint32_t*,int*);
-NTSTATUS xbox_kernel_create_driver_file(PHANDLE,ACCESS_MASK,PXBOX_OBJECT_ATTRIBUTES,PXBOX_IO_STATUS_BLOCK,PLARGE_INTEGER,ULONG,ULONG,ULONG,ULONG,int*);
+typedef struct XboxFileOpenLookup {
+    uint32_t device;
+    int volume;
+} XboxFileOpenLookup;
+NTSTATUS xbox_kernel_prepare_file_open(PXBOX_OBJECT_ATTRIBUTES,WCHAR*,DWORD,uint32_t*,int*,const XboxFileOpenLookup*);
+NTSTATUS xbox_kernel_create_driver_file(PHANDLE,ACCESS_MASK,PXBOX_OBJECT_ATTRIBUTES,PXBOX_IO_STATUS_BLOCK,PLARGE_INTEGER,ULONG,ULONG,ULONG,ULONG,int*,XboxFileOpenLookup*);
 void xbox_kernel_release_file_device(uint32_t);
-unsigned xbox_kernel_file_device_type(HANDLE);
-NTSTATUS xbox_kernel_file_volume_status(HANDLE);
+NTSTATUS xbox_kernel_file_volume_status(HANDLE, unsigned *device_type);
 NTSTATUS xbox_kernel_dismount_file_volume(HANDLE);
 
 int xbox_CheckpointWriteObjects(FILE *);

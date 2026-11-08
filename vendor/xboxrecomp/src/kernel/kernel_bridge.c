@@ -857,9 +857,8 @@ static void bridge_MmAllocateSystemMemory(void)
         return;
     }
     xbox_va = xbox_HeapAlloc(size, 4096);
-    if (xbox_va)
-        memset((void *)((uintptr_t)xbox_va + g_xbox_mem_offset), 0, size);
-    else
+    /* The guest heap clears both fresh and reused blocks. */
+    if (!xbox_va)
         fprintf(stderr, "  [KERNEL] MmAllocateSystemMemory: %u bytes REFUSED\n",
                 size);
     g_eax = xbox_va;
@@ -1613,11 +1612,11 @@ static int ke_shadow_insert(uint32_t guest_va, HANDLE host);
 static HANDLE bridge_resolve_handle(uint32_t token);
 static HANDLE ke_guest_event(uint32_t guest_va, int *type);
 static void ke_shadow_remove(uint32_t guest_va);
-enum { KE_EVENT_TITLE_HEADER = 2 };
+enum { KE_EVENT_TITLE_HEADER = 2, KE_EVENT_FILE_EMBEDDED = 4 };
 static uint32_t ke_native_event_state(HANDLE event);
 static void ke_prepare_event_wait(uint32_t object, HANDLE event, int type);
 static void ke_finish_event_wait(uint32_t object, HANDLE event, int type);
-static uint32_t ke_change_event(uint32_t object, HANDLE event, unsigned operation);
+static uint32_t ke_change_event(uint32_t object, HANDLE event, int type, unsigned operation);
 
 
 /* Xbox dispatcher Size is in 32-bit words; list links are guest addresses. */
@@ -2176,7 +2175,7 @@ static void io_signal_guest_event(uint32_t event)
     if(!event)return;
     int type;HANDLE host=ke_guest_event(event,&type);
     if(!host) {fprintf(stderr,"[STOP] IRP event %08X is not a dispatcher event\n",event);exit(5);}
-    ke_prepare_event_wait(event,host,type);ke_change_event(event,host,0);
+    ke_prepare_event_wait(event,host,type);ke_change_event(event,host,type,0);
 }
 
 static void io_publish_status(uint32_t irp)
@@ -2960,7 +2959,7 @@ static void bridge_KeSetEvent(void)
         HANDLE ge = ke_guest_event(guest_va, &type);
         if (ge) {
             ke_prepare_event_wait(guest_va, ge, type);
-            g_eax = ke_change_event(guest_va, ge, 0);
+            g_eax = ke_change_event(guest_va, ge, type, 0);
             return;
         }
     }
@@ -3574,6 +3573,12 @@ static PendingDpc *g_dpc_queue;
 static LONG g_dpc_capacity;
 static volatile LONG g_dpc_head, g_dpc_tail;
 
+static inline LONG dpc_next_index(LONG index)
+{
+    LONG next = index + 1;
+    return next == g_dpc_capacity ? 0 : next;
+}
+
 /* The queue is fed from several host threads at once -- the USB and APU
  * controller threads raise interrupts whose ISRs queue DPCs, and the title
  * queues its own -- and was an unlocked ring: two inserts could take the same
@@ -3620,7 +3625,7 @@ static void bridge_KeInsertQueueDpc(void)
         return;
     }
     tail = g_dpc_tail;
-    next = (tail + 1) % g_dpc_capacity;
+    next = dpc_next_index(tail);
     if (next == g_dpc_head) {
         /* KeInsertQueueDpc only rejects an already inserted object. Grow the
          * original queue, preserving the order and identities of its entries. */
@@ -3628,7 +3633,7 @@ static void bridge_KeInsertQueueDpc(void)
         LONG capacity=g_dpc_capacity*2,count=0;
         PendingDpc *queue=calloc((size_t)capacity,sizeof *queue);
         if(!queue) { fprintf(stderr,"[STOP] DPC queue allocation failed\n");exit(5); }
-        for(LONG i=g_dpc_head;i!=g_dpc_tail;i=(i+1)%g_dpc_capacity)
+        for(LONG i=g_dpc_head;i!=g_dpc_tail;i=dpc_next_index(i))
             if(g_dpc_queue[i].dpc) queue[count++]=g_dpc_queue[i];
         free(g_dpc_queue);g_dpc_queue=queue;g_dpc_capacity=capacity;
         g_dpc_head=0;tail=count;next=count+1;
@@ -3654,7 +3659,7 @@ static int kernel_remove_dpc(uint32_t dpc)
         return 0;
     dpc_lock();
     if (BRIDGE_MEM8(dpc + 2)) {
-        for (i = g_dpc_head; i != g_dpc_tail; i = (i + 1) % g_dpc_capacity)
+        for (i = g_dpc_head; i != g_dpc_tail; i = dpc_next_index(i))
             if (g_dpc_queue[i].dpc == dpc)
                 g_dpc_queue[i].dpc = 0;         /* drained as a no-op */
         BRIDGE_MEM8(dpc + 2) = 0;
@@ -3775,7 +3780,7 @@ static void kernel_drain_dpcs(void)
             break;
         }
         d = g_dpc_queue[g_dpc_head];
-        g_dpc_head = (g_dpc_head + 1) % g_dpc_capacity;
+        g_dpc_head = dpc_next_index(g_dpc_head);
         if (d.dpc) BRIDGE_MEM8(d.dpc + 2) = 0;
         LeaveCriticalSection(&g_dpc_lock);
         if (d.dpc) kernel_run_dpc(d.dpc, d.arg1, d.arg2);
@@ -4500,28 +4505,55 @@ static void bridge_write_iostatus(uint32_t ios_va, NTSTATUS status, uint32_t inf
 #define BRIDGE_HANDLE_MAX  16384
 static HANDLE s_handle_table[BRIDGE_HANDLE_MAX];
 static uint8_t s_handle_private[BRIDGE_HANDLE_MAX];
+/* One past the highest occupied token index. Slot zero is reserved. */
+static unsigned s_handle_used_end = 1;
 
-/* Allocate a token for a native handle not already registered in the table. */
-static uint32_t bridge_allocate_handle_token(HANDLE h)
+static void bridge_publish_handle(unsigned index, HANDLE handle, uint8_t private_handle)
 {
-    int i;
-    if (!h || h == INVALID_HANDLE_VALUE) return 0;
-    for (i = 1; i < BRIDGE_HANDLE_MAX; i++)
-        if (s_handle_table[i] == NULL) {
-            s_handle_table[i] = h;
-            s_handle_private[i] = 0;
-            return BRIDGE_HANDLE_TAG | (uint32_t)i;
-        }
-    fprintf(stderr, "  [BRIDGE] handle table full\n");
-    return 0;
+    s_handle_table[index] = handle;
+    s_handle_private[index] = private_handle;
+    if (index >= s_handle_used_end)
+        s_handle_used_end = index + 1;
 }
 
-static uint32_t bridge_handle_token(HANDLE h)
+static uint32_t bridge_publish_handle_token(unsigned index, HANDLE handle)
 {
-    if (!h || h == INVALID_HANDLE_VALUE) return 0;
-    for (int i = 1; i < BRIDGE_HANDLE_MAX; i++)
-        if (s_handle_table[i] == h) return BRIDGE_HANDLE_TAG | (uint32_t)i;
-    return bridge_allocate_handle_token(h);
+    if (index == BRIDGE_HANDLE_MAX) {
+        fprintf(stderr, "  [BRIDGE] handle table full\n");
+        return 0;
+    }
+    bridge_publish_handle(index, handle, 0);
+    return BRIDGE_HANDLE_TAG | (uint32_t)index;
+}
+
+#ifdef _WIN32
+/* DuplicateHandle has already allocated a distinct native identity. */
+static uint32_t bridge_allocate_handle_token(HANDLE handle)
+{
+    if (!handle || handle == INVALID_HANDLE_VALUE) return 0;
+    unsigned index = 1;
+    while (index < s_handle_used_end && s_handle_table[index])
+        ++index;
+    return bridge_publish_handle_token(index, handle);
+}
+#endif
+
+static uint32_t bridge_handle_token(HANDLE handle)
+{
+    if (!handle || handle == INVALID_HANDLE_VALUE) return 0;
+
+    unsigned free_index = 1;
+    for (; free_index < s_handle_used_end; ++free_index) {
+        HANDLE current = s_handle_table[free_index];
+        if (current == handle) return BRIDGE_HANDLE_TAG | (uint32_t)free_index;
+        if (!current) break;
+    }
+
+    /* An existing token after the first hole still takes priority. */
+    for (unsigned index = free_index + 1; index < s_handle_used_end; ++index)
+        if (s_handle_table[index] == handle) return BRIDGE_HANDLE_TAG | (uint32_t)index;
+
+    return bridge_publish_handle_token(free_index, handle);
 }
 
 /* Store a native HANDLE into a 32-bit Xbox memory slot (as a token). */
@@ -4580,6 +4612,9 @@ static HANDLE bridge_take_handle(uint32_t token)
             HANDLE h = s_handle_table[i];
             s_handle_table[i] = NULL;
             s_handle_private[i] = 0;
+            if (i + 1 == s_handle_used_end)
+                while (s_handle_used_end > 1 && !s_handle_table[s_handle_used_end - 1])
+                    --s_handle_used_end;
             return h;
         }
     }
@@ -4590,11 +4625,14 @@ static HANDLE bridge_take_handle(uint32_t token)
  * A caller can reuse the token during that callback; returning NtClose must
  * not erase the new identity. Failed native closes never reach this point. */
 #ifdef _WIN32
-static void bridge_retire_native_handle(HANDLE handle) {
-    for(unsigned i=1;i<BRIDGE_HANDLE_MAX;i++)if(s_handle_table[i]==handle) {
+static int bridge_retire_native_handle(HANDLE handle) {
+    int private_handle=0;
+    for(unsigned i=1;i<s_handle_used_end;i++)if(s_handle_table[i]==handle) {
         uint32_t token=BRIDGE_HANDLE_TAG|i;
+        private_handle|=s_handle_private[i]!=0;
         bridge_take_handle(token);bridge_forget_async_handle(token);
     }
+    return private_handle;
 }
 #endif
 
@@ -4723,10 +4761,28 @@ static void bridge_RtlInitAnsiString(void)
     g_eax = 0;
 }
 
+/* Launch-time diagnostic setting shared by file opens and reads on this thread. */
+static int bridge_load_timing_enabled(void)
+{
+    static RECOMP_TLS int enabled = -1;
+    if (enabled < 0)
+        enabled = getenv("RECOMP_LOAD_TIMING") != NULL;
+    return enabled;
+}
+
+/* The optional host movie player is selected at process launch. */
+static int bridge_host_fmv_enabled(void)
+{
+    static RECOMP_TLS int enabled = -1;
+    if (enabled < 0)
+        enabled = getenv("RECOMP_FMV_HOST") != NULL;
+    return enabled;
+}
+
 /* ── NtCreateFile (ordinal 190, 9 args = 36 bytes) ─────── */
 static void bridge_NtCreateFile(void)
 {
-    int load_timing = getenv("RECOMP_LOAD_TIMING") != NULL;
+    int load_timing = bridge_load_timing_enabled();
     ULONGLONG load_started = load_timing ? GetTickCount64() : 0;
     uint32_t handle_va   = STACK_ARG(0);  /* PHANDLE */
     uint32_t access      = STACK_ARG(1);  /* ACCESS_MASK */
@@ -4760,7 +4816,7 @@ static void bridge_NtCreateFile(void)
      *
      * Off unless RECOMP_FMV_HOST is set: it is a substitute for the title's
      * own output, and that should be a decision rather than a default. */
-    if (g_eax == 0 && getenv("RECOMP_FMV_HOST")) {
+    if (g_eax == 0 && bridge_host_fmv_enabled()) {
         /* Declared here rather than included: the player lives in xbox_video,
          * which links xbox_d3d8, and having the kernel include its header
          * would make the dependency circular for no gain. Both land in the
@@ -5040,32 +5096,47 @@ transfer:
  */
 #define BRIDGE_ASYNC_MAX 64
 static uint32_t g_async_handles[BRIDGE_ASYNC_MAX];
+/* Slots at and beyond this bound are empty. */
+static unsigned g_async_handles_end;
 
 static void bridge_note_async_handle(uint32_t token)
 {
-    int i;
     if (!token)
         return;
-    for (i = 0; i < BRIDGE_ASYNC_MAX; i++)
-        if (g_async_handles[i] == token)
+    unsigned first_empty = g_async_handles_end;
+    for (unsigned i = 0; i < g_async_handles_end; ++i) {
+        uint32_t existing = g_async_handles[i];
+        if (existing == token)
             return;
-    for (i = 0; i < BRIDGE_ASYNC_MAX; i++)
-        if (!g_async_handles[i]) { g_async_handles[i] = token; return; }
+        if (!existing && first_empty == g_async_handles_end)
+            first_empty = i;
+    }
+    if (first_empty == BRIDGE_ASYNC_MAX)
+        return;
+    g_async_handles[first_empty] = token;
+    if (first_empty == g_async_handles_end)
+        ++g_async_handles_end;
 }
 
 static void bridge_forget_async_handle(uint32_t token)
 {
-    int i;
-    for (i = 0; i < BRIDGE_ASYNC_MAX; i++)
-        if (g_async_handles[i] == token) { g_async_handles[i] = 0; return; }
+    if (!token)
+        return;
+    for (unsigned i = 0; i < g_async_handles_end; ++i) {
+        if (g_async_handles[i] == token) {
+            g_async_handles[i] = 0;
+            while (g_async_handles_end && !g_async_handles[g_async_handles_end - 1])
+                --g_async_handles_end;
+            return;
+        }
+    }
 }
 
 static int bridge_handle_is_async(uint32_t token)
 {
-    int i;
     if (!token)
         return 0;
-    for (i = 0; i < BRIDGE_ASYNC_MAX; i++)
+    for (unsigned i = 0; i < g_async_handles_end; ++i)
         if (g_async_handles[i] == token)
             return 1;
     return 0;
@@ -5084,7 +5155,7 @@ static int bridge_async_io_enabled(void)
 /* ── NtReadFile (ordinal 219, 8 args = 32 bytes) ──────── */
 static void bridge_NtReadFile(void)
 {
-    int load_timing = getenv("RECOMP_LOAD_TIMING") != NULL;
+    int load_timing = bridge_load_timing_enabled();
     ULONGLONG load_started = load_timing ? GetTickCount64() : 0;
     HANDLE   handle    = bridge_resolve_handle(STACK_ARG(0));
     uint32_t iostatus  = STACK_ARG(4);
@@ -5092,10 +5163,9 @@ static void bridge_NtReadFile(void)
     uint32_t length    = STACK_ARG(6);
     uint32_t offset_va = STACK_ARG(7);
     XBOX_IO_STATUS_BLOCK ios;
-    LARGE_INTEGER  off = {0};
+    LARGE_INTEGER  off;
     PLARGE_INTEGER poff = NULL;
 
-    memset(&ios, 0, sizeof(ios));
     if (!bridge_buf_ok(buffer_va, length, "NtReadFile")) {
         bridge_write_iostatus(iostatus, (NTSTATUS)0xC0000005, 0);
         g_eax = 0xC0000005u;                 /* STATUS_ACCESS_VIOLATION */
@@ -5173,10 +5243,9 @@ static void bridge_NtWriteFile(void)
     uint32_t length    = STACK_ARG(6);
     uint32_t offset_va = STACK_ARG(7);
     XBOX_IO_STATUS_BLOCK ios;
-    LARGE_INTEGER  off = {0};
+    LARGE_INTEGER  off;
     PLARGE_INTEGER poff = NULL;
 
-    memset(&ios, 0, sizeof(ios));
     if (!bridge_buf_ok(buffer_va, length, "NtWriteFile")) {
         bridge_write_iostatus(iostatus, (NTSTATUS)0xC0000005, 0);
         g_eax = 0xC0000005u;                 /* STATUS_ACCESS_VIOLATION */
@@ -5386,7 +5455,9 @@ static NTSTATUS io_native_control(uint32_t device,uint32_t file,uint32_t ioctl,u
     *information=0;HANDLE native=file?ke_shadow_lookup(file):NULL;
     if(!bridge_buf_ok(input,input_length,"native control input") ||
        !bridge_buf_ok(out_va,out_len,"native control output"))return (NTSTATUS)0xc0000005u;
-    NTSTATUS status=native?xbox_kernel_file_volume_status(native):0;if(status<0)return status;
+    unsigned device_type=0;
+    NTSTATUS status=native?xbox_kernel_file_volume_status(native,filesystem?NULL:&device_type):0;
+    if(status<0)return status;
     if(filesystem) {
         if(ioctl==0x90020u)return xbox_kernel_dismount_file_volume(native);
         if(ioctl==0x9411cu || ioctl==0x98120u) {
@@ -5396,7 +5467,7 @@ static NTSTATUS io_native_control(uint32_t device,uint32_t file,uint32_t ioctl,u
         }
         return STATUS_INVALID_DEVICE_REQUEST;
     }
-    if (xbox_kernel_file_device_type(native) == 2) {
+    if (device_type == 2) {
         uint32_t in_va=input,in_len=input_length,status=(uint32_t)STATUS_INVALID_DEVICE_REQUEST;
         if(ioctl==0x4d014u) {
             status=(uint32_t)STATUS_INVALID_PARAMETER;
@@ -7784,7 +7855,10 @@ typedef struct {
     uint32_t name_parent,name_address,name_length,name_attributes,namespace_root,path_rule;
 } KE_SHADOW_SLOT;
 static KE_SHADOW_SLOT g_ke_shadow[KE_SHADOW_SIZE];
-static unsigned g_ke_shadow_used_end;
+/* Exclusive allocated-slot bound; holes can remain below it. */
+/* New slots publish this prefix after writing their fields. The registry
+ * lock protects updates and checkpoint reset runs with guest users parked. */
+static ULONG g_ke_shadow_used_end;
 static KE_SHADOW_SLOT *ke_object_slot(uint32_t);
 static CRITICAL_SECTION g_ke_shadow_cs;
 static int g_ke_shadow_init;
@@ -7796,7 +7870,7 @@ static void ke_shadow_init(void)
     InitializeCriticalSection(&g_ke_shadow_cs);
     /* Wipe any stale pointers from a prior lifecycle (defensive). */
     memset(g_ke_shadow, 0, sizeof(g_ke_shadow));
-    g_ke_shadow_used_end = 0;
+    WriteRelease((volatile LONG *)&g_ke_shadow_used_end, 0);
     g_ke_shadow_init = 1;
 }
 
@@ -7837,7 +7911,8 @@ static int ke_shadow_insert(uint32_t guest_va, HANDLE host)
             g_ke_shadow[i].in_use      = 1;
             g_ke_shadow[i].guest_va    = guest_va;
             g_ke_shadow[i].host_handle = host;
-            if (i >= g_ke_shadow_used_end) g_ke_shadow_used_end = i + 1;
+            if (i >= g_ke_shadow_used_end)
+                WriteRelease((volatile LONG *)&g_ke_shadow_used_end, (LONG)(i + 1));
             LeaveCriticalSection(&g_ke_shadow_cs);
             return 1;
     }
@@ -7928,37 +8003,46 @@ static HANDLE ke_guest_event(uint32_t guest_va, int *type)
         return NULL;
     *type = (int)(object_type & 1u);
 
-    /* A guest-driver file owns its original FILE_OBJECT.Event through the
-     * same anonymous event that carries its public file-handle identity. */
-    if(guest_va>=0x38) {
-        KE_SHADOW_SLOT *file=ke_object_slot(guest_va-0x38);
-        if(file && file->in_use==4 && file->object_type==XBOX_KERNEL_DATA_BASE+KDATA_FILE_OBJ_TYPE)
-            return file->host_handle;
-    }
+    /* Resolve both identities in the original table. A FILE_OBJECT's embedded
+     * event takes precedence over an independent shadow of the same event VA. */
+    uint32_t file_va = guest_va - 0x38;
+    KE_SHADOW_SLOT *event = NULL;
+    unsigned first_free = KE_SHADOW_SIZE;
     ke_shadow_init();
     EnterCriticalSection(&g_ke_shadow_cs);
     for (i = 0; i < g_ke_shadow_used_end; i++) {
-        if (g_ke_shadow[i].in_use && g_ke_shadow[i].guest_va == guest_va) {
-            h = g_ke_shadow[i].host_handle;
-            if (g_ke_shadow[i].in_use == 2) *type |= KE_EVENT_TITLE_HEADER;
+        KE_SHADOW_SLOT *slot = &g_ke_shadow[i];
+        if (!slot->in_use) {
+            if (first_free == KE_SHADOW_SIZE) first_free = i;
+        } else if (slot->guest_va == guest_va) {
+            event = slot;
+        } else if (slot->guest_va == file_va && slot->in_use == 4 &&
+                   slot->object_type == XBOX_KERNEL_DATA_BASE+KDATA_FILE_OBJ_TYPE) {
+            h = slot->host_handle;
+            *type |= KE_EVENT_FILE_EMBEDDED;
             LeaveCriticalSection(&g_ke_shadow_cs);
             return h;
         }
+    }
+    if (event) {
+        h = event->host_handle;
+        if (event->in_use == 2) *type |= KE_EVENT_TITLE_HEADER;
+        LeaveCriticalSection(&g_ke_shadow_cs);
+        return h;
     }
     if (!enabled || object_type >= 8) {
         LeaveCriticalSection(&g_ke_shadow_cs);
         return NULL;
     }
-    for (i = 0; i < KE_SHADOW_SIZE; i++) {
-        if (!g_ke_shadow[i].in_use) {
-            h = CreateEventA(NULL, *type == 0, BRIDGE_MEM32(guest_va + 4) != 0, NULL);
-            if (h) {
-                g_ke_shadow[i].in_use      = 2;
-                g_ke_shadow[i].guest_va    = guest_va;
-                g_ke_shadow[i].host_handle = h;
-                if (i >= g_ke_shadow_used_end) g_ke_shadow_used_end = i + 1;
-            }
-            break;
+    i = first_free == KE_SHADOW_SIZE ? g_ke_shadow_used_end : first_free;
+    if (i < KE_SHADOW_SIZE) {
+        h = CreateEventA(NULL, *type == 0, BRIDGE_MEM32(guest_va + 4) != 0, NULL);
+        if (h) {
+            g_ke_shadow[i].in_use      = 2;
+            g_ke_shadow[i].guest_va    = guest_va;
+            g_ke_shadow[i].host_handle = h;
+            if (i >= g_ke_shadow_used_end)
+                WriteRelease((volatile LONG *)&g_ke_shadow_used_end, (LONG)(i + 1));
         }
     }
     LeaveCriticalSection(&g_ke_shadow_cs);
@@ -8685,7 +8769,7 @@ static void bridge_KePulseEvent(void)
         HANDLE ge = ke_guest_event(guest_va, &type);
         if (ge) {
             ke_prepare_event_wait(guest_va, ge, type);
-            g_eax = ke_change_event(guest_va, ge, 2);
+            g_eax = ke_change_event(guest_va, ge, type, 2);
             return;
         }
     }
@@ -8752,7 +8836,7 @@ static void bridge_KeResetEvent(void)
         HANDLE ge = ke_guest_event(guest_va, &type);
         if (ge) {
             ke_prepare_event_wait(guest_va, ge, type);
-            g_eax = ke_change_event(guest_va, ge, 1);
+            g_eax = ke_change_event(guest_va, ge, type, 1);
             return;
         }
     }
@@ -10958,7 +11042,7 @@ static void kernel_watch_arm_once(void)
 /* Current dispatching slot */
 static RECOMP_TLS int g_kernel_dispatch_slot = -1;
 
-static void kernel_thunk_dispatch_body(void);
+static void kernel_thunk_dispatch_body(int slot, ULONG ordinal);
 
 /* The guest CPU lock (RECOMP_GUEST_LOCK=1).
  *
@@ -11472,11 +11556,11 @@ static uint32_t ke_native_event_state(HANDLE event) {
     }
     return value.state != 0;
 }
-static uint32_t ke_change_event(uint32_t object, HANDLE event, unsigned operation)
+static uint32_t ke_change_event(uint32_t object, HANDLE event, int type, unsigned operation)
 {
     LONG previous;
     NTSTATUS status;
-    if(object>=0x38 && io_is_guest_file(object-0x38) && ke_shadow_lookup(object-0x38)==event) {
+    if(type & KE_EVENT_FILE_EMBEDDED) {
         /* This is the embedded kernel event, not an Nt event-handle request. */
         extern NTSTATUS NTAPI NtSetEvent(HANDLE,PLONG);
         extern NTSTATUS NTAPI NtResetEvent(HANDLE,PLONG);
@@ -11527,7 +11611,9 @@ static uint32_t ke_object_type_for_kind(uint32_t kind) {
     return kind>0 && kind<=CHECKPOINT_SYMLINK?XBOX_KERNEL_DATA_BASE+offsets[kind]:0;
 }
 static KE_SHADOW_SLOT *ke_object_slot(uint32_t address) {
-    for(unsigned i=0;i<KE_SHADOW_SIZE;i++)
+    if (!address) return NULL;
+    unsigned end = (unsigned)ReadAcquire((const volatile LONG *)&g_ke_shadow_used_end);
+    for(unsigned i=0;i<end;i++)
         if(g_ke_shadow[i].in_use && g_ke_shadow[i].guest_va==address)return &g_ke_shadow[i];
     return NULL;
 }
@@ -11747,7 +11833,7 @@ static uint32_t ke_public_handle_count(const KE_SHADOW_SLOT *slot) {
     struct {ULONG values[12];LARGE_INTEGER creation;} basic;
     if(checkpoint_native.object(slot->host_handle,0,&basic,sizeof basic,NULL)<0)recomp_cont_invalid();
     uint32_t private_handles=1;
-    for(unsigned i=1;i<BRIDGE_HANDLE_MAX;i++)if(s_handle_table[i] && s_handle_private[i] &&
+    for(unsigned i=1;i<s_handle_used_end;i++)if(s_handle_table[i] && s_handle_private[i] &&
         checkpoint_native.compare(slot->host_handle,s_handle_table[i])==0)++private_handles;
     if(basic.values[2]<private_handles)recomp_cont_invalid();
     return basic.values[2]-private_handles;
@@ -11776,7 +11862,7 @@ static NTSTATUS ke_attach_name(uint32_t object,uint32_t parent,const XBOX_ANSI_S
     return 0;
 }
 static NTSTATUS ke_namespace_root(uint32_t root,uint32_t *address) {
-    for(unsigned i=0;i<KE_SHADOW_SIZE;i++)if(g_ke_shadow[i].in_use && g_ke_shadow[i].namespace_root==root) {
+    for(unsigned i=0;i<g_ke_shadow_used_end;i++)if(g_ke_shadow[i].in_use && g_ke_shadow[i].namespace_root==root) {
         *address=g_ke_shadow[i].guest_va;return 0;
     }
     uint32_t parent=0;
@@ -11791,14 +11877,14 @@ static NTSTATUS ke_namespace_root(uint32_t root,uint32_t *address) {
     if(status>=0){ke_object_slot(object)->namespace_root=root;*address=object;}
     xbox_NtClose(handle);if(object)ke_dereference_object(object);return status;
 }
-static uint32_t ke_named_child(uint32_t parent,const XBOX_ANSI_STRING *name) {
-    for(unsigned i=0;i<KE_SHADOW_SIZE;i++) {
+static KE_SHADOW_SLOT *ke_named_child(uint32_t parent,const XBOX_ANSI_STRING *name) {
+    for(unsigned i=0;i<g_ke_shadow_used_end;i++) {
         KE_SHADOW_SLOT *slot=&g_ke_shadow[i];
         if(!slot->in_use || slot->name_parent!=parent || slot->name_length!=name->Length)continue;
         XBOX_ANSI_STRING stored={(USHORT)slot->name_length,(USHORT)slot->name_length,XBOX_TO_NATIVE(slot->name_address)};
-        if(xbox_RtlEqualString(&stored,(PXBOX_ANSI_STRING)name,TRUE))return slot->guest_va;
+        if(xbox_RtlEqualString(&stored,(PXBOX_ANSI_STRING)name,TRUE))return slot;
     }
-    return 0;
+    return NULL;
 }
 /* On a final missing component return its parent and counted leaf for insert.
  * Intermediate components must already be directory objects. */
@@ -11832,22 +11918,25 @@ static NTSTATUS ke_resolve_name(PXBOX_OBJECT_ATTRIBUTES oa,uint32_t expected,uin
         uint32_t end=start;while(end<length && name->Buffer[end]!='\\')++end;
         if(end==start || (end<length && end+1==length))return (NTSTATUS)0xc0000033u;
         XBOX_ANSI_STRING component={(USHORT)(end-start),(USHORT)(end-start),name->Buffer+start};
-        uint32_t child=ke_named_child(directory,&component);
-        if(!child) {
+        KE_SHADOW_SLOT *slot=ke_named_child(directory,&component);
+        if(!slot) {
             if(end!=length)return (NTSTATUS)0xc000003au;
             *parent=directory;*leaf=component;return STATUS_OBJECT_NAME_NOT_FOUND;
         }
+        uint32_t child=slot->guest_va;
         if(end!=length || expected!=XBOX_KERNEL_DATA_BASE+KDATA_OBJ_SYM_LINK_TYPE) {
-            while(ke_object_slot(child)->object_type==XBOX_KERNEL_DATA_BASE+KDATA_OBJ_SYM_LINK_TYPE)
+            while(slot->object_type==XBOX_KERNEL_DATA_BASE+KDATA_OBJ_SYM_LINK_TYPE) {
                 child=BRIDGE_MEM32(child);
+                slot=ke_object_slot(child);
+            }
         }
         if(end==length){*object=child;return 0;}
-        if(ke_object_slot(child)->object_type==XBOX_KERNEL_DATA_BASE+KDATA_FILE_OBJ_TYPE ||
-           ke_object_slot(child)->object_type==XBOX_KERNEL_DATA_BASE+KDATA_IO_DEVICE_TYPE) {
+        uint32_t type=slot->object_type;
+        if(type==XBOX_KERNEL_DATA_BASE+KDATA_FILE_OBJ_TYPE || type==XBOX_KERNEL_DATA_BASE+KDATA_IO_DEVICE_TYPE) {
             *object=child;*leaf=(XBOX_ANSI_STRING){(USHORT)(length-end-1),(USHORT)(length-end-1),name->Buffer+end+1};
             return (NTSTATUS)0xc0000024u;
         }
-        if(ke_object_slot(child)->object_type!=XBOX_KERNEL_DATA_BASE+KDATA_OBJ_DIR_TYPE)return (NTSTATUS)0xc000003au;
+        if(type!=XBOX_KERNEL_DATA_BASE+KDATA_OBJ_DIR_TYPE)return (NTSTATUS)0xc000003au;
         directory=child;start=end+1;
     }
     return (NTSTATUS)0xc0000033u;
@@ -12043,18 +12132,24 @@ static NTSTATUS io_mount_native_volume(uint32_t physical,uint32_t *mounted) {
     *mounted=device;return 0;
 }
 static NTSTATUS io_validate_create_device(uint32_t device,uint32_t related) {
-    if(BRIDGE_MEM8(device+0x1f) || (BRIDGE_MEM32(device+0x14)&0x10u))return (NTSTATUS)0xc000000eu;
-    if((BRIDGE_MEM32(device+0x14)&2) && BRIDGE_MEM32(device+4) && !related)return STATUS_ACCESS_DENIED;
+    if(BRIDGE_MEM8(device+0x1f))return (NTSTATUS)0xc000000eu;
+    uint32_t flags=BRIDGE_MEM32(device+0x14);
+    if(flags&0x10u)return (NTSTATUS)0xc000000eu;
+    if((flags&2) && BRIDGE_MEM32(device+4) && !related)return STATUS_ACCESS_DENIED;
     return 0;
 }
 
-NTSTATUS xbox_kernel_prepare_file_open(PXBOX_OBJECT_ATTRIBUTES input,WCHAR *path,DWORD capacity,uint32_t *output,int *volume) {
-    *output=0;*volume=0;
+NTSTATUS xbox_kernel_prepare_file_open(PXBOX_OBJECT_ATTRIBUTES input,WCHAR *path,DWORD capacity,
+    uint32_t *output,int *volume,const XboxFileOpenLookup *lookup) {
+    *output=0;*volume=lookup ? lookup->volume : 0;
     if(!input || !input->ObjectName || !input->ObjectName->Buffer)return STATUS_OBJECT_PATH_NOT_FOUND;
     int held=guest_cpu_is_held(),was_thread=t_guest_thread;if(!held)guest_cpu_join();
     XBOX_ANSI_STRING name=*input->ObjectName;XBOX_OBJECT_ATTRIBUTES oa=*input;
-    oa.ObjectName=&name;uint32_t device=0,object=0,parent=0;XBOX_ANSI_STRING rest={0};NTSTATUS status=0;
-    if(input->RootDirectory && name.Length && name.Buffer[0]!='\\' &&
+    oa.ObjectName=&name;
+    uint32_t device=lookup ? lookup->device : 0,object=0,parent=0;
+    KE_SHADOW_SLOT *device_slot=NULL;
+    XBOX_ANSI_STRING rest={0};NTSTATUS status=0;
+    if(!device && input->RootDirectory && name.Length && name.Buffer[0]!='\\' &&
        !(name.Length>=2 && name.Buffer[1]==':'))device=xbox_FileHandleDevice(input->RootDirectory);
     if(!device) {
         while(name.Length>1 && name.Buffer[name.Length-1]=='\\')--name.Length;
@@ -12064,24 +12159,29 @@ NTSTATUS xbox_kernel_prepare_file_open(PXBOX_OBJECT_ATTRIBUTES input,WCHAR *path
         if(status<0 && !(status==(NTSTATUS)0xc0000024u && object))goto done;
         KE_SHADOW_SLOT *slot=ke_object_slot(object);
         if(slot && slot->object_type==XBOX_KERNEL_DATA_BASE+KDATA_IO_DEVICE_TYPE) {
-            device=object;*volume=!rest.Length;
+            device=object;device_slot=slot;*volume=!rest.Length;
         } else if(slot && slot->object_type==XBOX_KERNEL_DATA_BASE+KDATA_FILE_OBJ_TYPE) {
             device=BRIDGE_MEM32(object+4);
         }
     }
     if(!device){status=STATUS_INVALID_DEVICE_REQUEST;goto done;}
-    if((BRIDGE_MEM8(device+0x1c)==3 || BRIDGE_MEM8(device+0x1c)==8) &&
-       ke_object_slot(device)->path_rule && !BRIDGE_MEM32(BRIDGE_MEM32(device+0x18))) {
-        status=(NTSTATUS)0xc000026eu;goto done;
+    uint8_t type=BRIDGE_MEM8(device+0x1c);
+    if(type==3 || type==8) {
+        if(!device_slot)device_slot=ke_object_slot(device);
+        if(device_slot->path_rule && !BRIDGE_MEM32(BRIDGE_MEM32(device+0x18))) {
+            status=(NTSTATUS)0xc000026eu;goto done;
+        }
     }
     status=io_validate_create_device(device,input->RootDirectory!=NULL);if(status<0)goto done;
     if(!xbox_FileObjectPath(input,path,capacity)){status=STATUS_OBJECT_PATH_NOT_FOUND;goto done;}
-    if(BRIDGE_MEM8(device+0x1c)==2 || BRIDGE_MEM8(device+0x1c)==7) {
+    type=BRIDGE_MEM8(device+0x1c);
+    if(type==2 || type==7) {
         status=io_mount_native_volume(device,&device);if(status<0)goto done;
     }
     if(!ke_object_slot(device)->path_rule){status=STATUS_INVALID_DEVICE_REQUEST;goto done;}
-    if(BRIDGE_MEM32(device+4)==UINT32_MAX){status=STATUS_INSUFFICIENT_RESOURCES;goto done;}
-    ++BRIDGE_MEM32(device+4);*output=device;status=0;
+    uint32_t references=BRIDGE_MEM32(device+4);
+    if(references==UINT32_MAX){status=STATUS_INSUFFICIENT_RESOURCES;goto done;}
+    BRIDGE_MEM32(device+4)=references+1;*output=device;status=0;
 done:
     if(!held){guest_cpu_part();t_guest_thread=was_thread;}return status;
 }
@@ -12166,9 +12266,13 @@ static void io_create_leave(RecompContFrame *frame) {
 }
 
 NTSTATUS xbox_kernel_create_driver_file(PHANDLE output,ACCESS_MASK access,PXBOX_OBJECT_ATTRIBUTES input,
-    PXBOX_IO_STATUS_BLOCK ios,PLARGE_INTEGER allocation,ULONG attributes,ULONG share,ULONG disposition,ULONG options,int *handled)
+    PXBOX_IO_STATUS_BLOCK ios,PLARGE_INTEGER allocation,ULONG attributes,ULONG share,ULONG disposition,
+    ULONG options,int *handled,XboxFileOpenLookup *lookup)
 {
-    GuestCreateFile call={0};uint32_t phase=0,information=0;
+    *lookup=(XboxFileOpenLookup){0};
+    GuestCreateFile call;
+    call.device=call.file=call.related=call.irp=call.token=0;
+    uint32_t phase=0,information=0;
     NTSTATUS status=0;int held=guest_cpu_is_held(),was_thread=t_guest_thread;
     const RecompContLocal locals[]={{"device",&call.device,4},{"file",&call.file,4},{"related",&call.related,4},
         {"irp",&call.irp,4},{"phase",&phase,4},{"token",&call.token,4},{"information",&information,4},
@@ -12186,6 +12290,7 @@ NTSTATUS xbox_kernel_create_driver_file(PHANDLE output,ACCESS_MASK access,PXBOX_
     if(!output || !input || !input->ObjectName || !input->ObjectName->Buffer) {*handled=0;goto done;}
     XBOX_ANSI_STRING name=*input->ObjectName,rest={0};XBOX_OBJECT_ATTRIBUTES oa=*input;
     oa.ObjectName=&name;uint32_t object=0,parent=0;
+    KE_SHADOW_SLOT *device_slot=NULL;
     if(oa.RootDirectory && name.Length && name.Buffer[0]!='\\' && !(name.Length>=2 && name.Buffer[1]==':')) {
         uint32_t root=ke_object_for_handle(oa.RootDirectory);
         if(root && ke_object_slot(root)->object_type==XBOX_KERNEL_DATA_BASE+KDATA_FILE_OBJ_TYPE) {
@@ -12198,18 +12303,31 @@ NTSTATUS xbox_kernel_create_driver_file(PHANDLE output,ACCESS_MASK access,PXBOX_
         status=ke_resolve_name(&oa,0,&object,&parent,&rest);
         if(status<0 && !(status==(NTSTATUS)0xc0000024u && object)) {*handled=0;status=0;goto done;}
         KE_SHADOW_SLOT *slot=ke_object_slot(object);
-        if(slot && slot->object_type==XBOX_KERNEL_DATA_BASE+KDATA_IO_DEVICE_TYPE)call.device=object;
-        else if(slot && slot->object_type==XBOX_KERNEL_DATA_BASE+KDATA_FILE_OBJ_TYPE) {
+        if(slot && slot->object_type==XBOX_KERNEL_DATA_BASE+KDATA_IO_DEVICE_TYPE) {
+            call.device=object;device_slot=slot;
+        } else if(slot && slot->object_type==XBOX_KERNEL_DATA_BASE+KDATA_FILE_OBJ_TYPE) {
             call.related=object;call.device=BRIDGE_MEM32(object+4);
         }
     }
-    if(!call.device || !ke_object_slot(call.device) || ke_object_slot(call.device)->path_rule) {*handled=0;status=0;goto done;}
+    if(!device_slot && call.device)device_slot=ke_object_slot(call.device);
+    if(!device_slot || device_slot->path_rule) {
+        /* The caller can reuse this identity while its guest lock stays held.
+         * Native preparation has distinct rooted and trailing-separator rules. */
+        if(device_slot && held && !input->RootDirectory && !call.related &&
+           name.Length && name.Buffer[name.Length-1]!='\\') {
+            lookup->device=call.device;
+            lookup->volume=!rest.Length;
+        }
+        *handled=0;status=0;goto done;
+    }
     status=io_validate_create_device(call.device,call.related);if(status<0)goto done;
-    if(!BRIDGE_MEM32(call.device+0xc)) {status=STATUS_INVALID_DEVICE_REQUEST;goto done;}
-    call.device=BRIDGE_MEM32(call.device+0xc);
+    uint32_t attached=BRIDGE_MEM32(call.device+0xc);
+    if(!attached) {status=STATUS_INVALID_DEVICE_REQUEST;goto done;}
+    call.device=attached;
     if(!ke_object_slot(call.device) || !BRIDGE_MEM32(call.device+8) || !BRIDGE_MEM8(call.device+0x1e)) {status=STATUS_INVALID_DEVICE_REQUEST;call.device=0;goto done;}
-    if(BRIDGE_MEM32(call.device+4)==UINT32_MAX) {status=STATUS_INSUFFICIENT_RESOURCES;call.device=0;goto done;}
-    ++BRIDGE_MEM32(call.device+4);
+    uint32_t references=BRIDGE_MEM32(call.device+4);
+    if(references==UINT32_MAX) {status=STATUS_INSUFFICIENT_RESOURCES;call.device=0;goto done;}
+    BRIDGE_MEM32(call.device+4)=references+1;
     if(call.related && ke_reference_pointer(call.related,XBOX_KERNEL_DATA_BASE+KDATA_FILE_OBJ_TYPE)<0)recomp_cont_invalid();
     if(rest.Length && !call.related && rest.Buffer>name.Buffer && rest.Buffer[-1]=='\\') {--rest.Buffer;++rest.Length;}
     call.file=xbox_HeapAlloc(0x68u+rest.Length,16);
@@ -12291,9 +12409,11 @@ void xbox_kernel_release_file_device(uint32_t device) {
     if(!guest_cpu_is_held())guest_cpu_join();
     if(resume)goto delete_device;
     if(!device)goto done;
-    if(!ke_object_slot(device) || !BRIDGE_MEM32(device+4))recomp_cont_invalid();
-    --BRIDGE_MEM32(device+4);
-    if(!BRIDGE_MEM32(device+4) && BRIDGE_MEM8(device+0x1f)) {
+    if(!ke_object_slot(device))recomp_cont_invalid();
+    uint32_t references=BRIDGE_MEM32(device+4);
+    if(!references)recomp_cont_invalid();
+    BRIDGE_MEM32(device+4)=--references;
+    if(!references && BRIDGE_MEM8(device+0x1f)) {
 delete_device:
         io_delete_device(device,0);
     }
@@ -12301,27 +12421,21 @@ done:
     if(tracked)recomp_cont_leave(&frame);
     if(!held){guest_cpu_part();t_guest_thread=was_thread;}
 }
-unsigned xbox_kernel_file_device_type(HANDLE handle) {
-    int held=guest_cpu_is_held(),was_thread=t_guest_thread;if(!held)guest_cpu_join();
-    uint32_t device=xbox_FileHandleDevice(handle);unsigned type=0;
-    if(device) {
-        type=BRIDGE_MEM8(device+0x1c);
-        if((type==3 || type==8) && ke_object_slot(device)->path_rule) {
-            device=BRIDGE_MEM32(BRIDGE_MEM32(device+0x18));type=device?BRIDGE_MEM8(device+0x1c):0;
-        }
-    }
-    if(!held){guest_cpu_part();t_guest_thread=was_thread;}return type;
-}
-
-NTSTATUS xbox_kernel_file_volume_status(HANDLE handle) {
+NTSTATUS xbox_kernel_file_volume_status(HANDLE handle, unsigned *device_type) {
     int held=guest_cpu_is_held(),was_thread=t_guest_thread;if(!held)guest_cpu_join();
     uint32_t device=xbox_FileHandleDevice(handle);NTSTATUS status=0;
+    unsigned type=0;
     if(device) {
-        /* The open-file policy owns the device I/O reference, so its body
-         * remains alive throughout this operation without a namespace scan. */
-        if((BRIDGE_MEM8(device+0x1c)==3 || BRIDGE_MEM8(device+0x1c)==8) &&
-           !BRIDGE_MEM32(BRIDGE_MEM32(device+0x18)))status=(NTSTATUS)0xc000026eu;
+        /* The open-file policy owns the device I/O reference. */
+        type=BRIDGE_MEM8(device+0x1c);
+        if(type==3 || type==8) {
+            uint32_t physical=BRIDGE_MEM32(BRIDGE_MEM32(device+0x18));
+            if(!physical)status=(NTSTATUS)0xc000026eu;
+            else if(device_type && ke_object_slot(device)->path_rule)
+                type=BRIDGE_MEM8(physical+0x1c);
+        }
     }
+    if(device_type)*device_type=type;
     if(!held){guest_cpu_part();t_guest_thread=was_thread;}return status;
 }
 NTSTATUS xbox_kernel_dismount_file_volume(HANDLE handle) {
@@ -12513,10 +12627,6 @@ NTSTATUS xbox_kernel_close_handle(HANDLE handle) {
         if(phase==4)goto release_cleanup_reference;
         recomp_cont_invalid();
     }
-    int private_handle=0;
-    for(unsigned i=1;i<BRIDGE_HANDLE_MAX;i++)if(s_handle_table[i]==handle && s_handle_private[i]) {
-        private_handle=1;break;
-    }
     object=ke_object_for_handle(handle);device=xbox_FileHandleDevice(handle);
     if(device) {
         struct {ULONG values[12];LARGE_INTEGER creation;} basic;
@@ -12524,7 +12634,8 @@ NTSTATUS xbox_kernel_close_handle(HANDLE handle) {
     }
     status=NtClose(handle);
     if(status>=0) {
-        xbox_dir_context_drop(handle);xbox_FileHandleClosed(handle);bridge_retire_native_handle(handle);
+        xbox_dir_context_drop(handle);xbox_FileHandleClosed(handle);
+        int private_handle=bridge_retire_native_handle(handle);
         if(object) {
             EnterCriticalSection(&g_ke_shadow_cs);KE_SHADOW_SLOT *slot=ke_object_slot(object);
             int cleanup=!private_handle && slot && slot->object_type==ke_object_type_for_kind(CHECKPOINT_FILE) &&
@@ -12651,9 +12762,11 @@ static int checkpoint_clear_objects(void) {
             if(xbox_NtClose(handles[i])<0)recomp_cont_invalid();
         }
         memset(s_handle_table,0,sizeof s_handle_table);memset(s_handle_private,0,sizeof s_handle_private);
+        s_handle_used_end = 1;
         memset(g_ke_shadow,0,sizeof g_ke_shadow);
-        g_ke_shadow_used_end = 0;
+        WriteRelease((volatile LONG *)&g_ke_shadow_used_end, 0);
         memset(g_async_handles,0,sizeof g_async_handles);
+        g_async_handles_end = 0;
     } else checkpoint_clear_owner_requests();
     free(handles);free(critical);return ok;
 }
@@ -12829,15 +12942,15 @@ int xbox_CheckpointLoadObjects(FILE *in,const XboxCheckpointRoot *roots,unsigned
         for (unsigned i=0;i<refs;i++) {
             CheckpointObjectRef *ref=&references[i];
             if (ref->space==1) {
-                s_handle_table[ref->index]=aliases[i];
-                s_handle_private[ref->index]=(uint8_t)ref->private_handle;
+                bridge_publish_handle(ref->index, aliases[i], (uint8_t)ref->private_handle);
                 if (ref->async) bridge_note_async_handle(BRIDGE_HANDLE_TAG|ref->index);
             }
             else {
                 g_ke_shadow[ref->index]=(KE_SHADOW_SLOT){ref->address,aliases[i],ref->flag,
                     ref->object_type,ref->references,ref->allocation,ref->name_parent,ref->name_address,
                     ref->name_length,ref->name_attributes,ref->namespace_root,ref->path_rule};
-                if (ref->index >= g_ke_shadow_used_end) g_ke_shadow_used_end = ref->index + 1;
+                if (ref->index >= g_ke_shadow_used_end)
+                    WriteRelease((volatile LONG *)&g_ke_shadow_used_end, (LONG)(ref->index + 1));
             }
             if (ref->attributes&1) SetHandleInformation(aliases[i],HANDLE_FLAG_PROTECT_FROM_CLOSE,HANDLE_FLAG_PROTECT_FROM_CLOSE);
             aliases[i]=NULL;
@@ -13026,11 +13139,10 @@ static void kernel_wait_close_objects(ULONG count,const uint32_t *tokens) {
 static void kernel_wait_leave(RecompContFrame *frame) {
     GuestKernelWait *wait=(GuestKernelWait *)frame;
     if (t_kernel_wait!=wait) recomp_cont_invalid();
-    if(!frame->retained && !checkpoint_root_cancelled()) {
+    if(wait->object_tokens_va && !frame->retained && !checkpoint_root_cancelled()) {
         kernel_wait_close_objects(wait->object_count,XBOX_TO_NATIVE(wait->object_tokens_va));
-        if(wait->object_tokens_va)xbox_HeapFree(wait->object_tokens_va);
+        xbox_HeapFree(wait->object_tokens_va);
     }
-    wait->object_count=wait->object_tokens_va=wait->signal_done=0;
     t_kernel_wait=wait->parent;
     if (wait->dispatch_started) {
         if ((frame->site>>32)==6) t_dispatch_depth=(int)wait->main_saved_depth;
@@ -13064,8 +13176,9 @@ static void kernel_wait_enter(GuestKernelWait *wait,uint32_t slot)
         (uint64_t)wait->object_tokens_va+wait->object_count*4>xbox_GetMappedSize())) ||
        (!wait->object_count && wait->object_tokens_va))recomp_cont_invalid();
     wait->restoring=resume?(resume>>32)==11?5:(resume>>32)==9?4:(resume>>32)==8?3:(resume>>32)==6?2:1:0;
-    wait->resume_esp=g_esp;wait->apc_started=0;wait->dispatch_started=0;
+    wait->apc_started=0;wait->dispatch_started=0;
     if(resume) {
+        if(wait->restoring==3)wait->resume_esp=g_esp;
         if(wait->restoring==1 || wait->restoring==3)g_esp=wait->entry_esp;
         if(slot!=UINT32_MAX)g_kernel_dispatch_slot=(int)slot;
     }
@@ -13171,18 +13284,29 @@ void xbox_kernel_wait_boundary(uint32_t remaining) {
     if (!wait) return;
     wait->remaining_ms=remaining;
     recomp_cont_site(&wait->frame, (5ULL<<32) | wait->frame.function);
-    ULONGLONG now=GetTickCount64();
+    ULONGLONG now=0;
+    int have_apc_time=0;
     for(GuestKernelWait *parent=wait->parent;parent;parent=parent->parent) {
         if((parent->frame.site>>32)!=8)continue;
+        if(!have_apc_time) {
+            now=GetTickCount64();
+            have_apc_time=1;
+        }
         ULONGLONG elapsed=now-parent->apc_started;parent->apc_started=now;
         if(parent->remaining_ms!=INFINITE)
             parent->remaining_ms=elapsed>=parent->remaining_ms?0:parent->remaining_ms-(uint32_t)elapsed;
     }
     checkpoint_poll();
     if (g_checkpoint_hook) g_checkpoint_hook();
-    now=GetTickCount64();
-    for(GuestKernelWait *parent=wait->parent;parent;parent=parent->parent)
-        if((parent->frame.site>>32)==8)parent->apc_started=now;
+    have_apc_time=0;
+    for(GuestKernelWait *parent=wait->parent;parent;parent=parent->parent) {
+        if((parent->frame.site>>32)!=8)continue;
+        if(!have_apc_time) {
+            now=GetTickCount64();
+            have_apc_time=1;
+        }
+        parent->apc_started=now;
+    }
     recomp_cont_site(&wait->frame,0);
 }
 static void bridge_run_main_inline(recomp_func_t fn,uint32_t routine,uint32_t ctx1,uint32_t ctx2)
@@ -13376,15 +13500,18 @@ static void kernel_thunk_dispatch(void)
 {
     GuestKernelWait wait;
     int tracked = recomp_cont_active();
-    if(tracked)kernel_wait_enter(&wait,(uint32_t)g_kernel_dispatch_slot);
+    const int slot = g_kernel_dispatch_slot;
+    if(tracked)kernel_wait_enter(&wait,(uint32_t)slot);
     int held = t_guest_held;
     if(tracked && wait.restoring==4)goto final_apcs;
+    const int valid_slot = (unsigned)slot < XBOX_KERNEL_THUNK_TABLE_SIZE;
+    const ULONG ordinal = valid_slot ? g_slot_ordinals[slot] : 0;
     /* Object mutations and original callbacks are part of the guest CPU
      * operation. Releasing before them races workers using those same objects.
      * Critical-section entry already releases only on its blocking path. */
     int retain_cpu = 0;
-    if (g_kernel_dispatch_slot >= 0 && g_kernel_dispatch_slot < XBOX_KERNEL_THUNK_TABLE_SIZE) {
-        switch (g_slot_ordinals[g_kernel_dispatch_slot]) {
+    if (valid_slot) {
+        switch (ordinal) {
         case 44:                         /* interrupt vector result */
         case 65: case 68:                /* device object lifecycle */
         case 59: case 60: case 61: case 62: case 72: case 73: case 74: case 77:
@@ -13422,15 +13549,20 @@ static void kernel_thunk_dispatch(void)
     if (tracked) wait.dispatch_started=1;
     uint64_t start = guest_timing_clock();
     uint32_t load_caller = t_guest_cpu_timing && g_esp ? BRIDGE_MEM32(g_esp) : 0;
-    int load_slot = g_kernel_dispatch_slot;
     ULONGLONG load_started = t_guest_cpu_timing ? GetTickCount64() : 0;
-    kernel_thunk_dispatch_body();
+    if (valid_slot) {
+        kernel_thunk_dispatch_body(slot, ordinal);
+    } else {
+        fprintf(stderr, "  [KERNEL] bad slot %d\n", slot);
+        g_eax = 0;
+        g_esp += 4;  /* pop dummy return address */
+    }
     if (t_guest_cpu_timing) {
         ULONGLONG load_elapsed = GetTickCount64()-load_started;
         if (load_elapsed >= 100)
             fprintf(stderr, "  [KWAIT] t_ms=%llu tid=%lu ordinal=%u from=%08X elapsed_ms=%llu result=%08X\n",
                     (unsigned long long)load_started, (unsigned long)GetCurrentThreadId(),
-                    load_slot >= 0 && load_slot < XBOX_KERNEL_THUNK_TABLE_SIZE ? g_slot_ordinals[load_slot] : 0,
+                    ordinal,
                     load_caller, (unsigned long long)load_elapsed, g_eax);
         t_guest_cpu_timing->dispatch_ticks += guest_timing_clock() - start;
         t_guest_cpu_timing->dispatch_count++;
@@ -13451,22 +13583,10 @@ final_apcs:
     (void)held;
 }
 
-static void kernel_thunk_dispatch_body(void)
+static void kernel_thunk_dispatch_body(int slot, ULONG ordinal)
 {
-    int slot = g_kernel_dispatch_slot;
-    bridge_func_t bridge;
-    ULONG ordinal;
+    const bridge_func_t bridge = g_slot_bridges[slot];
     uint32_t _watch_before = 0;
-
-    if (slot < 0 || slot >= XBOX_KERNEL_THUNK_TABLE_SIZE) {
-        fprintf(stderr, "  [KERNEL] bad slot %d\n", slot);
-        g_eax = 0;
-        g_esp += 4;  /* pop dummy return address */
-        return;
-    }
-
-    ordinal = g_slot_ordinals[slot];
-    bridge = g_slot_bridges[slot];
     if(t_kernel_wait && t_kernel_wait->restoring==5) {
         _watch_before=t_kernel_wait->watch_before;t_kernel_wait->restoring=0;
         goto bridge_invoke;

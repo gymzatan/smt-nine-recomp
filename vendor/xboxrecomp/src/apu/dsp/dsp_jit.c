@@ -46,6 +46,14 @@ static JitBackend *jit_be(DSPState *dsp)
     return (JitBackend *)dsp->backend;
 }
 
+enum { DSP_XRAM_MIXBUFFER_OFFSET = DSP_XRAM_SIZE - DSP_MIXBUFFER_SIZE };
+
+uint32_t *dsp_jit_gp_mixbuffer(DSPState *dsp)
+{
+    assert(dsp->is_gp);
+    return jit_be(dsp)->xram + DSP_XRAM_MIXBUFFER_OFFSET;
+}
+
 static uint32_t jit_dma_mem_read(void *opaque, int space, uint32_t addr)
 {
     return dsp56300_read_memory((const Dsp56300Jit *)opaque,
@@ -184,7 +192,7 @@ static void dsp_jit_sync_to_vm(DSPState *dsp)
     memcpy(vm->xram, be->xram, DSP_XRAM_SIZE * sizeof(uint32_t));
     memcpy(vm->yram, be->yram, DSP_YRAM_SIZE * sizeof(uint32_t));
     /* Mixbuffer is aliased at xram[0xC00] */
-    memcpy(vm->mixbuffer, be->xram + 0xC00,
+    memcpy(vm->mixbuffer, be->xram + DSP_XRAM_MIXBUFFER_OFFSET,
            DSP_MIXBUFFER_SIZE * sizeof(uint32_t));
     /* Peripheral state: read current values via callbacks */
     for (int i = 0; i < DSP_PERIPH_SIZE; i++) {
@@ -207,7 +215,7 @@ static void dsp_jit_sync_from_vm(DSPState *dsp)
     memcpy(be->xram, vm->xram, DSP_XRAM_SIZE * sizeof(uint32_t));
     memcpy(be->yram, vm->yram, DSP_YRAM_SIZE * sizeof(uint32_t));
     /* Mixbuffer is aliased at xram[0xC00] */
-    memcpy(be->xram + 0xC00, vm->mixbuffer,
+    memcpy(be->xram + DSP_XRAM_MIXBUFFER_OFFSET, vm->mixbuffer,
            DSP_MIXBUFFER_SIZE * sizeof(uint32_t));
 
     /* Scalar state via bulk struct */
@@ -279,10 +287,10 @@ static JitBackend *dsp_create_jit_backend(DSPState *dsp)
           .end = 0x1000,
           .kind = DSP56300_REGION_BUFFER,
           .data = { .buffer = { .base = be->xram, .offset = 0 } } },
-        { .start = 0x1400,
-          .end = 0x1800,
+        { .start = DSP_MIXBUFFER_BASE,
+          .end = DSP_MIXBUFFER_BASE + DSP_MIXBUFFER_SIZE,
           .kind = DSP56300_REGION_BUFFER,
-          .data = { .buffer = { .base = be->xram, .offset = 0xC00 } } },
+          .data = { .buffer = { .base = be->xram, .offset = DSP_XRAM_MIXBUFFER_OFFSET } } },
         { .start = 0xFFFF80,
           .end = 0x1000000,
           .kind = DSP56300_REGION_CALLBACK,
