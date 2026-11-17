@@ -212,14 +212,14 @@ NTSTATUS __stdcall xbox_NtCreateFile(
     if (!FileHandle || !ObjectAttributes)
         return STATUS_INVALID_PARAMETER;
 
-    int handled=0;
-    XboxFileOpenLookup lookup;
-    NTSTATUS driver_status=xbox_kernel_create_driver_file(FileHandle,DesiredAccess,ObjectAttributes,IoStatusBlock,
-        AllocationSize,FileAttributes,ShareAccess,CreateDisposition,CreateOptions,&handled,&lookup);
-    if(handled)return driver_status;
-    uint32_t device=0;int volume=0;
-    NTSTATUS prepared=xbox_kernel_prepare_file_open(ObjectAttributes,win_path,MAX_PATH,&device,&volume,&lookup);
-    if(prepared<0)return prepared;
+    int handled = 0, volume = 0;
+    uint32_t device = 0;
+    NTSTATUS prepared = xbox_kernel_begin_file_open(
+        FileHandle, DesiredAccess, ObjectAttributes, IoStatusBlock,
+        AllocationSize, FileAttributes, ShareAccess, CreateDisposition, CreateOptions,
+        &handled, win_path, MAX_PATH, &device, &volume);
+    if (handled || prepared < 0)
+        return prepared;
 
     const DWORD access = xbox_access_to_win32(DesiredAccess);
     const DWORD share = xbox_share_to_win32(ShareAccess);
@@ -283,10 +283,9 @@ NTSTATUS __stdcall xbox_NtCreateFile(
     return STATUS_SUCCESS;
 }
 
-NTSTATUS __stdcall xbox_NtReadFile(
-    HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
-    PXBOX_IO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length,
-    PLARGE_INTEGER ByteOffset)
+NTSTATUS xbox_kernel_read_file(
+    HANDLE FileHandle, HANDLE Event, PXBOX_IO_STATUS_BLOCK IoStatusBlock,
+    PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset, int release_guest_cpu)
 {
     NTSTATUS volume_status=file_volume_status(FileHandle,IoStatusBlock,NULL);
     if(volume_status<0)return volume_status;
@@ -294,11 +293,14 @@ NTSTATUS __stdcall xbox_NtReadFile(
     DWORD bytes_read = 0;
     BOOL result;
     OVERLAPPED ov;
-    (void)ApcRoutine; (void)ApcContext;
 
     if (!IoStatusBlock)
         return STATUS_INVALID_PARAMETER;
 
+    /* The import dispatcher reacquires after publishing the read result.
+     * Release before the GPU guard, which can wait for pending output. */
+    if (release_guest_cpu)
+        xbox_kernel_wait_release_cpu();
     int gpu_write = nv2a_pb_host_write_begin(Buffer, Length);
     const LONGLONG offset = ByteOffset ? ByteOffset->QuadPart : -1;
     if (offset >= 0) {
@@ -327,6 +329,15 @@ NTSTATUS __stdcall xbox_NtReadFile(
     IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
     IoStatusBlock->Information = 0;
     return STATUS_UNSUCCESSFUL;
+}
+
+NTSTATUS __stdcall xbox_NtReadFile(
+    HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
+    PXBOX_IO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length,
+    PLARGE_INTEGER ByteOffset)
+{
+    (void)ApcRoutine; (void)ApcContext;
+    return xbox_kernel_read_file(FileHandle, Event, IoStatusBlock, Buffer, Length, ByteOffset, 0);
 }
 
 NTSTATUS __stdcall xbox_NtWriteFile(
@@ -659,12 +670,13 @@ NTSTATUS __stdcall xbox_NtQueryFullAttributesFile(
     return STATUS_SUCCESS;
 }
 
-#define MAX_DIR_CONTEXTS 64
+#define MAX_DIR_CONTEXTS XBOX_DIRECTORY_CURSOR_CAPACITY
 typedef struct {
     HANDLE file_handle;
     HANDLE find_handle;
     BOOL   first_done;
     WIN32_FIND_DATAW find_data;
+    WCHAR pattern[MAX_PATH];
 } DIR_CONTEXT;
 
 static DIR_CONTEXT s_dir_contexts[MAX_DIR_CONTEXTS];
@@ -676,13 +688,6 @@ int xbox_CaptureFileOpenState(HANDLE handle,XboxFileOpenState *state) {
     for (unsigned i=0;i<s_file_policy_end;i++) if (s_file_open_policy[i].handle==handle) { policy=s_file_open_policy[i];break; }
     ReleaseSRWLockShared(&s_file_policy_lock);
     if (!policy.handle) return 0;
-    if (s_dir_cs_init) {
-        int searching=0;EnterCriticalSection(&s_dir_cs);
-        for (unsigned i=0;i<MAX_DIR_CONTEXTS;i++)
-            searching|=s_dir_contexts[i].file_handle==handle && s_dir_contexts[i].find_handle!=NULL;
-        LeaveCriticalSection(&s_dir_cs);
-        if (searching) return 0;
-    }
     memset(state,0,sizeof *state);state->access=policy.access;state->share=policy.share;state->flags=policy.flags;state->options=policy.options;state->device=policy.device;
     DWORD count=GetFinalPathNameByHandleW(handle,state->path,MAX_PATH,FILE_NAME_NORMALIZED|VOLUME_NAME_DOS);
     if (!count || count>=MAX_PATH) return 0;
@@ -728,6 +733,58 @@ static DIR_CONTEXT* find_or_create_dir_context(HANDLE FileHandle, BOOL create)
     }
     LeaveCriticalSection(&s_dir_cs);
     return NULL;
+}
+
+static int directory_search_path(const WCHAR *directory, const WCHAR *pattern, WCHAR *search)
+{
+    if (!wcsncmp(directory, L"\\\\?\\", 4))
+        directory+=4;
+    return _snwprintf_s(search, MAX_PATH, _TRUNCATE, L"%s\\%s", directory, pattern)>=0;
+}
+
+int xbox_CaptureDirectoryCursor(HANDLE handle, XboxDirectoryCursor *cursor)
+{
+    DIR_CONTEXT *context=s_dir_cs_init?find_or_create_dir_context(handle,FALSE):NULL;
+    if (!context) return 0;
+    wcscpy_s(cursor->pattern,MAX_PATH,context->pattern);
+    wcscpy_s(cursor->last_name,MAX_PATH,context->find_data.cFileName);
+    return 1;
+}
+
+int xbox_PrepareDirectoryCursor(const XboxFileOpenState *file, const XboxDirectoryCursor *cursor,
+                                XboxPreparedDirectoryCursor *prepared)
+{
+    WCHAR search[MAX_PATH];
+    if (!(file->flags & FILE_FLAG_BACKUP_SEMANTICS) || !xbox_ValidateFileOpenState(file) ||
+        !cursor->pattern[0] || cursor->pattern[MAX_PATH-1] ||
+        !cursor->last_name[0] || cursor->last_name[MAX_PATH-1] ||
+        !wcscmp(cursor->last_name,L".") || !wcscmp(cursor->last_name,L"..") ||
+        !directory_search_path(file->path,cursor->pattern,search))
+        return 0;
+
+    HANDLE handle=FindFirstFileW(search,&prepared->last_entry);
+    if (handle==INVALID_HANDLE_VALUE) return 0;
+    while (wcscmp(prepared->last_entry.cFileName,cursor->last_name)) {
+        if (!FindNextFileW(handle,&prepared->last_entry)) {
+            FindClose(handle);
+            return 0;
+        }
+    }
+    prepared->search=handle;
+    wcscpy_s(prepared->pattern,MAX_PATH,cursor->pattern);
+    return 1;
+}
+
+int xbox_ApplyDirectoryCursor(HANDLE handle, XboxPreparedDirectoryCursor *prepared)
+{
+    DIR_CONTEXT *context=find_or_create_dir_context(handle,TRUE);
+    if (!context || context->find_handle) return 0;
+    context->find_data=prepared->last_entry;
+    wcscpy_s(context->pattern,MAX_PATH,prepared->pattern);
+    context->first_done=TRUE;
+    context->find_handle=prepared->search;
+    prepared->search=NULL;
+    return 1;
 }
 
 /* A closed directory handle takes its enumeration with it. Host handle values
@@ -790,17 +847,17 @@ NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
             IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
             return STATUS_UNSUCCESSFUL;
         }
-        WCHAR* clean_path = dir_path;
-        if (wcsncmp(clean_path, L"\\\\?\\", 4) == 0)
-            clean_path += 4;
+        WCHAR pattern_wide[MAX_PATH];
         if (FileName && FileName->Buffer) {
-            WCHAR pattern_wide[MAX_PATH];
-            MultiByteToWideChar(CP_ACP, 0, FileName->Buffer, FileName->Length,
-                                pattern_wide, MAX_PATH);
-            pattern_wide[FileName->Length] = L'\0';
-            swprintf_s(search_path, MAX_PATH, L"%s\\%s", clean_path, pattern_wide);
+            int count=MultiByteToWideChar(CP_ACP,0,FileName->Buffer,FileName->Length,
+                                          pattern_wide,MAX_PATH-1);
+            pattern_wide[count]=L'\0';
         } else {
-            swprintf_s(search_path, MAX_PATH, L"%s\\*", clean_path);
+            wcscpy_s(pattern_wide,MAX_PATH,L"*");
+        }
+        if (!directory_search_path(dir_path,pattern_wide,search_path)) {
+            IoStatusBlock->Status=STATUS_UNSUCCESSFUL;
+            return STATUS_UNSUCCESSFUL;
         }
         ctx->find_handle = FindFirstFileW(search_path, &ctx->find_data);
         if (ctx->find_handle == INVALID_HANDLE_VALUE) {
@@ -808,6 +865,7 @@ NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
             IoStatusBlock->Status = STATUS_NO_MORE_FILES;
             return STATUS_NO_MORE_FILES;
         }
+        wcscpy_s(ctx->pattern,MAX_PATH,pattern_wide);
         ctx->first_done = TRUE;
     } else {
         if (!FindNextFileW(ctx->find_handle, &ctx->find_data)) {

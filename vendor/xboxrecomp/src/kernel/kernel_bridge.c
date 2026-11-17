@@ -47,6 +47,7 @@
 #include <ctype.h>
 #include <wctype.h>
 #include <setjmp.h>
+#include "apu/apu.h"
 #include "apu/apu_xaudio2.h"
 
 /* Access to recompiled code registers. Per-thread: RECOMP_TLS comes from
@@ -434,22 +435,11 @@ static long long g_kernel_call_count = 0;
  * RECOMP_KERNEL_LOG_BUDGET, the same way RECOMP_TRACE_BUDGET works for the
  * function tracer. 0 silences the log entirely.
  */
-static long kernel_log_budget(void)
-{
-    static long budget = -1;
+static long g_kernel_log_budget = 200;
 
-    if (budget < 0) {
-        const char *env = getenv("RECOMP_KERNEL_LOG_BUDGET");
-        budget = env ? strtol(env, NULL, 0) : 200;
-        if (budget < 0)
-            budget = 0;
-    }
-    return budget;
-}
-
-#define KERNEL_LOG_ON()      (kernel_log_budget() > 0 && g_kernel_call_count <= kernel_log_budget())
+#define KERNEL_LOG_ON()      (g_kernel_log_budget > 0 && g_kernel_call_count <= g_kernel_log_budget)
 /* Some sites logged at a tighter cap than the rest; keep them proportional. */
-#define KERNEL_LOG_ON_HALF() (kernel_log_budget() > 0 && g_kernel_call_count <= kernel_log_budget() / 2)
+#define KERNEL_LOG_ON_HALF() (g_kernel_log_budget > 0 && g_kernel_call_count <= g_kernel_log_budget / 2)
 
 /* Read Xbox stack arg as uint32_t.
  * After kernel_thunk_dispatch pops the dummy return address (g_esp += 4),
@@ -1980,19 +1970,27 @@ normal_callback: ;
     return state.delivered;
 }
 
+static __forceinline int ke_apc_delivery_thread(BOOLEAN user_apcs, uint32_t *selected)
+{
+    if (recomp_cont_recovering(KERNEL_CONT_APC)) {
+        *selected = 0;
+        return 1;
+    }
+    uint32_t thread=ke_apc_enabled_thread();
+    if(!thread)return 0;
+    if(xbox_CurrentIrql()>=APC_LEVEL || !xbox_CpuInterruptFlag())return 0;
+    if(!guest_cpu_is_held())thread=ke_current_thread();
+    if(!thread || !BRIDGE_MEM8(thread+0x4b))return 0;
+    if(!BRIDGE_MEM8(thread+0x49) && (!user_apcs || BRIDGE_MEM32(thread+0x3c)==thread+0x3c))return 0;
+    *selected = thread;
+    return 1;
+}
+
 __forceinline int xbox_DeliverThreadApcs(BOOLEAN user_apcs)
 {
-    int recovering=recomp_cont_recovering(KERNEL_CONT_APC);
-    uint32_t thread=0;
-    if(!recovering) {
-        thread=ke_apc_enabled_thread();
-        if(!thread)return 0;
-        if(xbox_CurrentIrql()>=APC_LEVEL || !xbox_CpuInterruptFlag())return 0;
-        if(!guest_cpu_is_held())thread=ke_current_thread();
-        if(!thread || !BRIDGE_MEM8(thread+0x4b))return 0;
-        if(!BRIDGE_MEM8(thread+0x49) && (!user_apcs || BRIDGE_MEM32(thread+0x3c)==thread+0x3c))return 0;
-    }
-    return ke_deliver_thread_apcs(user_apcs,thread);
+    uint32_t thread;
+    if (!ke_apc_delivery_thread(user_apcs, &thread)) return 0;
+    return ke_deliver_thread_apcs(user_apcs, thread);
 }
 
 /* Xbox IRP and IO_STACK_LOCATION are guest structures, including every
@@ -4045,17 +4043,16 @@ static void kernel_trim_timer_scan(void) {
 static CRITICAL_SECTION g_timer_lock;
 static int g_timer_started;
 static HANDLE g_timer_irq_event;
-static void kernel_gpu_irq_notify(void *opaque, int level)
+static void kernel_irq_notify(void *opaque, int level)
 {
     if (level && !SetEvent((HANDLE)opaque)) {
-        fprintf(stderr, "[STOP] GPU IRQ worker notification failed\n");
+        fprintf(stderr, "[STOP] Device IRQ worker notification failed\n");
         exit(5);
     }
 }
 
 static void kernel_apu_tick(void)
 {
-    extern int mcpx_apu_irqs_pending(void);
     if (xbox_IrqlBlocksInterrupts() || !mcpx_apu_irqs_pending()) return;
     /* Own the existing guest CPU before the device lock, through every
      * service of this held level. Guest voice retirement must wait until
@@ -4064,7 +4061,6 @@ static void kernel_apu_tick(void)
     guest_cpu_join();
     InterlockedDecrement(&g_dpc_cpu_waiters);
     if (!xbox_IrqlBlocksInterrupts()) {
-        extern void mcpx_apu_service_irqs(int (*deliver)(uint32_t));
         mcpx_apu_service_irqs(kernel_raise_interrupt);
     }
     guest_cpu_part();
@@ -4184,9 +4180,10 @@ static BOOL CALLBACK kernel_start_timer_once(PINIT_ONCE once, PVOID parameter, P
     NV2AState *gpu = nv2a_get_state();
     if (gpu) {
         gpu->parent_obj.irq_opaque = g_timer_irq_event;
-        gpu->parent_obj.irq_notify = kernel_gpu_irq_notify;
-        kernel_gpu_irq_notify(g_timer_irq_event, gpu->parent_obj.irq_level);
+        gpu->parent_obj.irq_notify = kernel_irq_notify;
+        kernel_irq_notify(g_timer_irq_event, gpu->parent_obj.irq_level);
     }
+    mcpx_apu_set_irq_wake(kernel_irq_notify, g_timer_irq_event);
     xbox_CheckpointDeviceCreating(XBOX_CHECKPOINT_TIMER);
     HANDLE worker = CreateThread(NULL, 0, kernel_timer_thread, NULL, 0, NULL);
     if (!worker) {
@@ -4676,9 +4673,14 @@ static NTSTATUS bridge_create_file_impl(
     st=xbox_NtCreateFile(&h,access,&oa,&ios,allocation_va?XBOX_TO_NATIVE(allocation_va):NULL,
         file_attrs,share,disposition,options);
     if(NT_SUCCESS(st)) {
+        /* The host open may block outside the guest CPU. Serialize its
+         * handle publication with private waits and all other guest handles. */
+        int held=guest_cpu_is_held(),was_thread=t_guest_thread;
+        if(!held)guest_cpu_join();
         bridge_write_handle(handle_va,h);
         if((options&0x30u)==0u)bridge_note_async_handle(BRIDGE_MEM32(handle_va));
         bridge_write_iostatus(iostatus_va,ios.Status,(uint32_t)ios.Information);
+        if(!held){guest_cpu_part();t_guest_thread=was_thread;}
     }
 done:
     if(st<0 && bridge_va_mapped(iostatus_va,8))bridge_write_iostatus(iostatus_va,st,0);
@@ -5176,8 +5178,14 @@ static void bridge_NtReadFile(void)
         off.HighPart = (LONG)BRIDGE_MEM32(offset_va + 4);
         poff = &off;
     }
+#ifdef _WIN32
+    g_eax = (uint32_t)xbox_kernel_read_file(handle, NULL, &ios,
+                XBOX_TO_NATIVE(buffer_va), length, poff,
+                xbox_CurrentIrql() < DISPATCH_LEVEL);
+#else
     g_eax = (uint32_t)xbox_NtReadFile(handle, NULL, NULL, NULL, &ios,
                 XBOX_TO_NATIVE(buffer_va), length, poff);
+#endif
 
     if (load_timing)
         fprintf(stderr, "  [READ TIME] t_ms=%llu tid=%lu from=%08X handle=%08X buffer=%08X elapsed_ms=%llu\n",
@@ -8857,7 +8865,7 @@ static void bridge_KeResumeThread(void)
         hThread = XBOX_TO_NATIVE(STACK_ARG(0));
 
     if (hThread)
-        g_eax = (uint32_t)ResumeThread(hThread);
+        g_eax = (uint32_t)xbox_ThreadChangeSuspendCount(hThread, 0);
     else
         g_eax = 0;
 }
@@ -8870,7 +8878,7 @@ static void bridge_KeSuspendThread(void)
         hThread = XBOX_TO_NATIVE(STACK_ARG(0));
 
     if (hThread)
-        g_eax = (uint32_t)SuspendThread(hThread);
+        g_eax = (uint32_t)xbox_ThreadChangeSuspendCount(hThread, 1);
     else
         g_eax = 0;
 }
@@ -11017,26 +11025,18 @@ static uint8_t g_slot_arg_unknown[XBOX_KERNEL_THUNK_TABLE_SIZE];
 /* Xbox VA to sample around each bridge call; 0 = off. See dispatch. */
 uint32_t g_kernel_watch_va = 0;
 
-/* Arm the watch from the environment.
- *
- * The facility existed but nothing set it, so it was unreachable.
- * RECOMP_KERNEL_WATCH=<guest addr> samples that dword either side of every
- * bridge call and names the ordinal that changed it -- which is the one fact
- * a hardware watchpoint cannot give, because a bridge corrupting Xbox memory
- * faults inside ntdll with no recompiled frame to blame.
- *
- * A change seen between the previous call's "after" and this call's "before"
- * is guest code, not a bridge, which is just as useful to know. */
-static void kernel_watch_arm_once(void)
+/* RECOMP_KERNEL_WATCH reports changes to the selected guest dword at
+ * bridge boundaries, including the ordinal that produced the write. */
+static void kernel_diagnostics_init(void)
 {
-    static int done;
-    const char *env;
-    if (done)
-        return;
-    done = 1;
-    env = getenv("RECOMP_KERNEL_WATCH");
-    if (env)
-        g_kernel_watch_va = (uint32_t)strtoul(env, NULL, 0);
+    const char *budget = getenv("RECOMP_KERNEL_LOG_BUDGET");
+    g_kernel_log_budget = budget ? strtol(budget, NULL, 0) : 200;
+    if (g_kernel_log_budget < 0)
+        g_kernel_log_budget = 0;
+
+    const char *watch = getenv("RECOMP_KERNEL_WATCH");
+    if (watch)
+        g_kernel_watch_va = (uint32_t)strtoul(watch, NULL, 0);
 }
 
 /* Current dispatching slot */
@@ -11075,7 +11075,6 @@ typedef struct GuestKernelWait {
     uint32_t main_routine, main_saved_depth, watch_before;
     uint32_t object_count,object_tokens_va,signal_done;
     uint32_t resume_esp,native_held;
-    RecompContLocal locals[10];
     ULONGLONG apc_started;
     int restoring, dispatch_started;
     struct GuestKernelWait *parent;
@@ -11098,6 +11097,10 @@ typedef struct GuestCheckpointThread {
     volatile LONG owner_done;
     int owner_release,root_ready,hot_command,hot_stop,hot_loaded;
     volatile LONG hot_ready;
+#ifdef _WIN32
+    int self_suspending;
+    uint8_t suspend_count;
+#endif
 } GuestCheckpointThread;
 static GuestCheckpointThread g_checkpoint_threads[CHECKPOINT_THREADS];
 static RECOMP_TLS GuestCheckpointThread *t_checkpoint_thread;
@@ -11188,11 +11191,33 @@ unsigned xbox_CheckpointGuestRootCount(void) {
     ReleaseSRWLockShared(&g_checkpoint_lock);
     return count;
 }
+#ifdef _WIN32
+/* Existing wait continuations supply the suspended import's return point.
+ * Only self-suspended leaf packets append a single byte with the count at
+ * the checkpoint barrier, after every guest thread has stopped. */
+static int checkpoint_suspend_leaf(uint64_t site)
+{
+    uint32_t address=(uint32_t)site;
+    if((site>>32)!=5 || address<KERNEL_VA_BASE || address>=KERNEL_VA_END || (address&3)) return 0;
+    ULONG ordinal=g_slot_ordinals[(address-KERNEL_VA_BASE)/4];
+    return ordinal==231 || ordinal==152;
+}
+#endif
+
 static int checkpoint_read_thread_packet(FILE *packet) {
     uint32_t identity[4];XboxGuestRegisters registers;rewind(packet);
     if(fread(identity,sizeof identity,1,packet)!=1 || fread(&registers,sizeof registers,1,packet)!=1 ||
        !xbox_RestoreGuestRegisters(&registers) || !recomp_cont_load(packet)) return 0;
-    if(t_checkpoint_thread)t_checkpoint_thread->pcr=g_fs_base;
+    if(t_checkpoint_thread) {
+        t_checkpoint_thread->pcr=g_fs_base;
+#ifdef _WIN32
+        int suspend_count=fgetc(packet);
+        if(ferror(packet))return 0;
+        t_checkpoint_thread->self_suspending=suspend_count!=EOF;
+        t_checkpoint_thread->suspend_count=suspend_count==EOF?0:(uint8_t)suspend_count;
+        if(suspend_count!=EOF && fseek(packet,-1,SEEK_CUR))return 0;
+#endif
+    }
     g_thread_stack_top=identity[1];g_is_spawned_thread=(int)identity[2];
     t_checkpoint_root_function=checkpoint_lookup_root(identity[3]);return t_checkpoint_root_function!=NULL;
 }
@@ -11327,7 +11352,7 @@ void *xbox_CheckpointPrepareThreads(FILE *in,unsigned capacity) {
     struct CheckpointThreadEntry *staged=prepared->entries;
     int ok=1;
     for (unsigned i=0;ok && i<count;i++) {
-        uint32_t bytes;XboxGuestRegisters registers;uint32_t root_function;
+        uint32_t bytes;XboxGuestRegisters registers;uint32_t root_function;uint64_t leaf_site;
         ok=fread(&bytes,sizeof bytes,1,in)==1 && bytes>sizeof staged[i].identity+sizeof registers;
         if (!ok) break;
         FILE *packet=staged[i].packet=tmpfile();
@@ -11346,8 +11371,14 @@ void *xbox_CheckpointPrepareThreads(FILE *in,unsigned capacity) {
            staged[i].identity[2]<=1 && registers.esp>=4 &&
            (uint64_t)registers.esp+4<=xbox_GetMappedSize() &&
            (!staged[i].identity[2] || (staged[i].identity[1] && staged[i].identity[1]<=xbox_GetMappedSize())) &&
-           recomp_cont_validate(packet,&root_function) && root_function==staged[i].identity[3] &&
-           fgetc(packet)==EOF && !ferror(packet);
+           recomp_cont_validate(packet,&root_function,&leaf_site) && root_function==staged[i].identity[3];
+#ifdef _WIN32
+        if(ok && checkpoint_suspend_leaf(leaf_site)) {
+            int suspend_count=fgetc(packet);
+            ok=suspend_count>=0 && suspend_count<=MAXIMUM_SUSPEND_COUNT;
+        }
+#endif
+        ok=ok && fgetc(packet)==EOF && !ferror(packet);
         if (ok) {
             staged[i].fn=checkpoint_lookup_root(root_function);ok=staged[i].fn!=NULL;
             for (unsigned j=0;ok && j<i;j++)
@@ -12265,11 +12296,11 @@ static void io_create_leave(RecompContFrame *frame) {
         io_create_finish(call);
 }
 
-NTSTATUS xbox_kernel_create_driver_file(PHANDLE output,ACCESS_MASK access,PXBOX_OBJECT_ATTRIBUTES input,
+NTSTATUS xbox_kernel_begin_file_open(PHANDLE output,ACCESS_MASK access,PXBOX_OBJECT_ATTRIBUTES input,
     PXBOX_IO_STATUS_BLOCK ios,PLARGE_INTEGER allocation,ULONG attributes,ULONG share,ULONG disposition,
-    ULONG options,int *handled,XboxFileOpenLookup *lookup)
+    ULONG options,int *handled,WCHAR *path,DWORD capacity,uint32_t *device,int *volume)
 {
-    *lookup=(XboxFileOpenLookup){0};
+    XboxFileOpenLookup lookup = {0};
     GuestCreateFile call;
     call.device=call.file=call.related=call.irp=call.token=0;
     uint32_t phase=0,information=0;
@@ -12311,12 +12342,12 @@ NTSTATUS xbox_kernel_create_driver_file(PHANDLE output,ACCESS_MASK access,PXBOX_
     }
     if(!device_slot && call.device)device_slot=ke_object_slot(call.device);
     if(!device_slot || device_slot->path_rule) {
-        /* The caller can reuse this identity while its guest lock stays held.
-         * Native preparation has distinct rooted and trailing-separator rules. */
-        if(device_slot && held && !input->RootDirectory && !call.related &&
+        /* Native preparation can reuse this identity while we hold the
+         * guest CPU. Rooted paths and trailing separators use its own rules. */
+        if(device_slot && guest_cpu_is_held() && !input->RootDirectory && !call.related &&
            name.Length && name.Buffer[name.Length-1]!='\\') {
-            lookup->device=call.device;
-            lookup->volume=!rest.Length;
+            lookup.device=call.device;
+            lookup.volume=!rest.Length;
         }
         *handled=0;status=0;goto done;
     }
@@ -12397,6 +12428,10 @@ done:
         if(ios){ios->Status=status;ios->Information=status<0?0:information;}
     }
     if(tracked){call.frame.on_leave=NULL;call.frame.on_unwind=NULL;recomp_cont_leave(&call.frame);}
+    /* Keep device lookup and native path preparation in the same guest CPU
+     * interval. The host file backend opens the prepared path after we return. */
+    if (!*handled)
+        status = xbox_kernel_prepare_file_open(input, path, capacity, device, volume, &lookup);
     if(!held){guest_cpu_part();t_guest_thread=was_thread;}
     return status;
 }
@@ -12770,6 +12805,23 @@ static int checkpoint_clear_objects(void) {
     } else checkpoint_clear_owner_requests();
     free(handles);free(critical);return ok;
 }
+typedef struct CheckpointDirectoryEntry {
+    uint32_t reference;
+    XboxDirectoryCursor cursor;
+} CheckpointDirectoryEntry;
+typedef struct CheckpointDirectoryFooter {
+    char magic[8];
+    uint32_t count;
+} CheckpointDirectoryFooter;
+struct XboxCheckpointDirectories {
+    long offset;
+    unsigned count;
+    struct {
+        uint32_t reference;
+        XboxPreparedDirectoryCursor cursor;
+    } entries[XBOX_DIRECTORY_CURSOR_CAPACITY];
+};
+
 int xbox_CheckpointWriteObjects(FILE *out) {
     if (!t_checkpoint_controller || !checkpoint_native_init()) return 0;
     uint32_t refs=0,groups=0;
@@ -12780,7 +12832,8 @@ int xbox_CheckpointWriteObjects(FILE *out) {
     HANDLE *handles=calloc(refs?refs:1,sizeof *handles);
     XboxCriticalSectionState *critical=calloc(4096,sizeof *critical);unsigned critical_count=0;
     int ok=references && objects && handles && critical && xbox_CaptureCriticalSections(critical,4096,&critical_count);
-    unsigned next=0;
+    unsigned next=0, directory_count=0;
+    CheckpointDirectoryEntry *directories=NULL;
     for (unsigned space=1;ok && space<=2;space++) {
         unsigned end=space==1?BRIDGE_HANDLE_MAX:KE_SHADOW_SIZE;
         for (unsigned i=space==1?1:0;ok && i<end;i++) {
@@ -12804,13 +12857,29 @@ int xbox_CheckpointWriteObjects(FILE *out) {
                 handles[groups]=handle;ok=checkpoint_capture_object(handle,kind,&objects[groups]);groups++;
             }
             ref->group=group;
+            if (ok && kind==CHECKPOINT_FILE) {
+                CheckpointDirectoryEntry entry={0};
+                if (xbox_CaptureDirectoryCursor(handle,&entry.cursor)) {
+                    if (!directories) directories=malloc(XBOX_DIRECTORY_CURSOR_CAPACITY*sizeof *directories);
+                    ok=directories && directory_count<XBOX_DIRECTORY_CURSOR_CAPACITY;
+                    if (ok) {
+                        entry.reference=next-1;
+                        directories[directory_count++]=entry;
+                    }
+                }
+            }
         }
     }
     ok=ok && fwrite("XBKOBJ",6,1,out)==1 && fwrite(&groups,4,1,out)==1 && fwrite(&refs,4,1,out)==1 &&
        (!groups || fwrite(objects,sizeof *objects,groups,out)==groups) &&
        (!refs || fwrite(references,sizeof *references,refs,out)==refs) && fwrite(&critical_count,4,1,out)==1 &&
        (!critical_count || fwrite(critical,sizeof *critical,critical_count,out)==critical_count) && xbox_SaveIoNamespace(out);
-    free(references);free(objects);free(handles);free(critical);return ok;
+    if (ok && directory_count) {
+        CheckpointDirectoryFooter footer={"XBDIRCUR",directory_count};
+        ok=fwrite(directories,sizeof *directories,directory_count,out)==directory_count &&
+           fwrite(&footer,sizeof footer,1,out)==1;
+    }
+    free(directories);free(references);free(objects);free(handles);free(critical);return ok;
 }
 static int checkpoint_root_index(const uint32_t *identity,const XboxCheckpointRoot *roots,unsigned count) {
     for (unsigned i=0;i<count;i++) {
@@ -12820,15 +12889,96 @@ static int checkpoint_root_index(const uint32_t *identity,const XboxCheckpointRo
     return -1;
 }
 static DWORD WINAPI checkpoint_completed_thread(LPVOID value) {return (DWORD)(uintptr_t)value;}
-int xbox_CheckpointLoadObjects(FILE *in,const XboxCheckpointRoot *roots,unsigned root_count) {
+static int checkpoint_object_header(FILE *in, uint32_t *groups, uint32_t *refs)
+{
+    char magic[6];
+    return fread(magic,6,1,in)==1 && !memcmp(magic,"XBKOBJ",6) &&
+        fread(groups,4,1,in)==1 && fread(refs,4,1,in)==1 &&
+        *groups<=BRIDGE_HANDLE_MAX+KE_SHADOW_SIZE && *refs<=BRIDGE_HANDLE_MAX+KE_SHADOW_SIZE &&
+        *groups<=*refs;
+}
+
+void xbox_CheckpointDiscardDirectories(XboxCheckpointDirectories *directories)
+{
+    if (!directories) return;
+    for (unsigned i=0;i<directories->count;i++)
+        if (directories->entries[i].cursor.search)
+            FindClose(directories->entries[i].cursor.search);
+    free(directories);
+}
+
+/* A cursor is saved per reference, since separate file handles can enumerate
+ * the same native directory independently. Preopen searches before replacing
+ * the running game, so a missing directory or entry rejects the load safely. */
+int xbox_CheckpointPrepareDirectories(FILE *in, XboxCheckpointDirectories **prepared)
+{
+    *prepared=NULL;
+    CheckpointDirectoryFooter footer;
+    if (fseek(in,0,SEEK_END)) return 0;
+    long end=ftell(in);
+    if (end<0) return 0;
+    if (end<(long)sizeof footer) return fseek(in,0,SEEK_SET)==0;
+    if (fseek(in,end-(long)sizeof footer,SEEK_SET) || fread(&footer,sizeof footer,1,in)!=1)
+        return 0;
+    if (memcmp(footer.magic,"XBDIRCUR",8)) return fseek(in,0,SEEK_SET)==0;
+    if (!footer.count || footer.count>XBOX_DIRECTORY_CURSOR_CAPACITY || fseek(in,0,SEEK_SET))
+        return 0;
+
+    uint32_t groups,refs;
+    if (!checkpoint_object_header(in,&groups,&refs)) return 0;
+    long objects=ftell(in);
+    if (objects<0) return 0;
+    long references=objects+(long)(groups*sizeof(CheckpointObject));
+    long offset=end-(long)sizeof footer-(long)(footer.count*sizeof(CheckpointDirectoryEntry));
+    if (offset<references+(long)(refs*sizeof(CheckpointObjectRef))) return 0;
+
+    XboxCheckpointDirectories *directories=calloc(1,sizeof *directories);
+    if (!directories) return 0;
+    directories->offset=offset;
+    unsigned previous=0;
+    for (unsigned i=0;i<footer.count;i++) {
+        CheckpointDirectoryEntry entry;
+        CheckpointObjectRef ref;
+        CheckpointObject object;
+        if (fseek(in,offset+(long)(i*sizeof entry),SEEK_SET) || fread(&entry,sizeof entry,1,in)!=1 ||
+            entry.reference>=refs || (i && entry.reference<=previous) ||
+            fseek(in,references+(long)(entry.reference*sizeof ref),SEEK_SET) ||
+            fread(&ref,sizeof ref,1,in)!=1 || ref.group>=groups ||
+            fseek(in,objects+(long)(ref.group*sizeof object),SEEK_SET) ||
+            fread(&object,sizeof object,1,in)!=1 || object.kind!=CHECKPOINT_FILE ||
+            !xbox_PrepareDirectoryCursor(&object.file,&entry.cursor,&directories->entries[i].cursor)) {
+            xbox_CheckpointDiscardDirectories(directories);
+            return 0;
+        }
+        previous=entry.reference;
+        directories->entries[i].reference=entry.reference;
+        directories->count++;
+    }
+    if (fseek(in,0,SEEK_SET)) {
+        xbox_CheckpointDiscardDirectories(directories);
+        return 0;
+    }
+    *prepared=directories;
+    return 1;
+}
+
+int xbox_CheckpointLoadObjects(FILE *in,const XboxCheckpointRoot *roots,unsigned root_count)
+{
+    XboxCheckpointDirectories *directories=NULL;
+    int ok=in && xbox_CheckpointPrepareDirectories(in,&directories) &&
+        xbox_CheckpointLoadPreparedObjects(in,roots,root_count,directories);
+    xbox_CheckpointDiscardDirectories(directories);
+    return ok;
+}
+
+int xbox_CheckpointLoadPreparedObjects(FILE *in,const XboxCheckpointRoot *roots,unsigned root_count,
+                                       XboxCheckpointDirectories *directories) {
     if (!t_checkpoint_controller || !in || (root_count && !roots) || root_count>CHECKPOINT_THREADS) return 0;
     if(!checkpoint_native_init())return 0;
     for (unsigned i=1;i<BRIDGE_HANDLE_MAX;i++) if (s_handle_table[i]) return 0;
     for (unsigned i=0;i<KE_SHADOW_SIZE;i++) if (g_ke_shadow[i].in_use) return 0;
-    char magic[6];uint32_t groups,refs,critical_count=0;
-    if (fread(magic,6,1,in)!=1 || memcmp(magic,"XBKOBJ",6) || fread(&groups,4,1,in)!=1 ||
-        fread(&refs,4,1,in)!=1 || groups>BRIDGE_HANDLE_MAX+KE_SHADOW_SIZE ||
-        refs>BRIDGE_HANDLE_MAX+KE_SHADOW_SIZE || groups>refs) return 0;
+    uint32_t groups,refs,critical_count=0;
+    if (!checkpoint_object_header(in,&groups,&refs)) return 0;
     CheckpointObject *objects=calloc(groups?groups:1,sizeof *objects);
     CheckpointObjectRef *references=calloc(refs?refs:1,sizeof *references);
     HANDLE *handles=calloc(groups?groups:1,sizeof *handles),*aliases=calloc(refs?refs:1,sizeof *aliases);
@@ -12838,6 +12988,10 @@ int xbox_CheckpointLoadObjects(FILE *in,const XboxCheckpointRoot *roots,unsigned
        (!refs || fread(references,sizeof *references,refs,in)==refs) && fread(&critical_count,4,1,in)==1 &&
        critical_count<=4096 && (!critical_count || fread(critical,sizeof *critical,critical_count,in)==critical_count);
     void *namespace_state=ok?xbox_PrepareIoNamespace(in):NULL;ok=ok && namespace_state!=NULL;
+    if (ok && directories)
+        ok=ftell(in)==directories->offset && fseek(in,0,SEEK_END)==0;
+    else if (ok)
+        ok=fgetc(in)==EOF && !ferror(in);
     for (unsigned i=0;ok && i<groups;i++) {
         CheckpointObject *object=&objects[i];
         switch (object->kind) {
@@ -12932,6 +13086,8 @@ int xbox_CheckpointLoadObjects(FILE *in,const XboxCheckpointRoot *roots,unsigned
                            (ref->attributes&2)!=0,0)!=0;
         if (ok && objects[ref->group].kind==CHECKPOINT_FILE) xbox_FileHandleDuplicated(handles[ref->group],aliases[i],0);
     }
+    for (unsigned i=0;ok && directories && i<directories->count;i++)
+        ok=xbox_ApplyDirectoryCursor(aliases[directories->entries[i].reference],&directories->entries[i].cursor);
     if (ok) ok=xbox_PrepareCriticalSections(critical,critical_count);
     for (unsigned i=0;ok && i<groups;i++) if (objects[i].kind==CHECKPOINT_MUTANT && objects[i].depth)
         ok=checkpoint_queue_owner(objects[i].owner,handles[i],0,objects[i].depth,0);
@@ -13036,6 +13192,15 @@ static int checkpoint_begin(DWORD timeout,int bootstrap) {
         InterlockedExchange(&g_checkpoint_busy,0);return 0;
     }
     ResetEvent(g_checkpoint_release);InterlockedExchange(&g_checkpoint_requested,1);
+#ifdef _WIN32
+    AcquireSRWLockShared(&g_checkpoint_lock);
+    for(unsigned i=0;i<CHECKPOINT_THREADS;i++) {
+        GuestCheckpointThread *thread=&g_checkpoint_threads[i];
+        if(thread->active && thread->self_suspending && !thread->parked && !SetEvent(thread->restore_control))
+            recomp_cont_invalid();
+    }
+    ReleaseSRWLockShared(&g_checkpoint_lock);
+#endif
     ULONGLONG started=GetTickCount64();int devices=0,cpu=0;
     for (;;) {
         int count=0,all=1,failed=0;AcquireSRWLockShared(&g_checkpoint_lock);
@@ -13076,17 +13241,25 @@ int xbox_CheckpointWriteThreads(FILE *out) {
     for (unsigned i=0;i<CHECKPOINT_THREADS;i++) count+=g_checkpoint_threads[i].active!=0;
     int ok=fwrite("XBTHREAD",8,1,out)==1 && fwrite(&count,sizeof count,1,out)==1;
     for (unsigned i=0;ok && i<CHECKPOINT_THREADS;i++) if (g_checkpoint_threads[i].active) {
-        FILE *packet=g_checkpoint_threads[i].packet;
+        GuestCheckpointThread *thread=&g_checkpoint_threads[i];
+        FILE *packet=thread->packet;
         long size=packet?ftell(packet):-1;
-        if (size<=0 || (unsigned long)size>UINT32_MAX) return 0;
-        uint32_t bytes=(uint32_t)size;ok=fwrite(&bytes,sizeof bytes,1,out)==1;rewind(packet);
+        if (size<=0 || (unsigned long)size>=UINT32_MAX) return 0;
+        uint32_t bytes=(uint32_t)size, stored_bytes=bytes;
+#ifdef _WIN32
+        if(thread->self_suspending) ++stored_bytes;
+#endif
+        ok=fwrite(&stored_bytes,sizeof stored_bytes,1,out)==1;rewind(packet);
         unsigned char buffer[4096];
         while (ok && bytes) {
             size_t chunk=bytes<sizeof buffer?bytes:sizeof buffer;
             ok=fread(buffer,chunk,1,packet)==1 && fwrite(buffer,chunk,1,out)==1;
             bytes-=(uint32_t)chunk;
         }
-        fseek(packet,0,SEEK_END);
+        if(fseek(packet,size,SEEK_SET))return 0;
+#ifdef _WIN32
+        if(ok && thread->self_suspending) ok=fputc(thread->suspend_count,out)!=EOF;
+#endif
     }
     return ok;
 }
@@ -13150,39 +13323,128 @@ static void kernel_wait_leave(RecompContFrame *frame) {
         if (t_guest_thread && !t_guest_held && t_dispatch_depth==0) guest_cpu_join();
     }
 }
+static const RecompContLocalOffset kernel_wait_locals[] = {
+    {"slot", offsetof(GuestKernelWait, slot), sizeof(((GuestKernelWait *)0)->slot)},
+    {"entry_esp", offsetof(GuestKernelWait, entry_esp), sizeof(((GuestKernelWait *)0)->entry_esp)},
+    {"remaining_ms", offsetof(GuestKernelWait, remaining_ms), sizeof(((GuestKernelWait *)0)->remaining_ms)},
+    {"main_routine", offsetof(GuestKernelWait, main_routine), sizeof(((GuestKernelWait *)0)->main_routine)},
+    {"main_saved_depth", offsetof(GuestKernelWait, main_saved_depth), sizeof(((GuestKernelWait *)0)->main_saved_depth)},
+    {"watch_before", offsetof(GuestKernelWait, watch_before), sizeof(((GuestKernelWait *)0)->watch_before)},
+    {"object_count", offsetof(GuestKernelWait, object_count), sizeof(((GuestKernelWait *)0)->object_count)},
+    {"object_tokens_va", offsetof(GuestKernelWait, object_tokens_va), sizeof(((GuestKernelWait *)0)->object_tokens_va)},
+    {"signal_done", offsetof(GuestKernelWait, signal_done), sizeof(((GuestKernelWait *)0)->signal_done)},
+    {"native_held", offsetof(GuestKernelWait, native_held), sizeof(((GuestKernelWait *)0)->native_held)},
+};
+
 static void kernel_wait_enter(GuestKernelWait *wait,uint32_t slot)
 {
-    wait->locals[0]=(RecompContLocal){"slot",&wait->slot,sizeof wait->slot};
-    wait->locals[1]=(RecompContLocal){"entry_esp",&wait->entry_esp,sizeof wait->entry_esp};
-    wait->locals[2]=(RecompContLocal){"remaining_ms",&wait->remaining_ms,sizeof wait->remaining_ms};
-    wait->locals[3]=(RecompContLocal){"main_routine",&wait->main_routine,sizeof wait->main_routine};
-    wait->locals[4]=(RecompContLocal){"main_saved_depth",&wait->main_saved_depth,sizeof wait->main_saved_depth};
-    wait->locals[5]=(RecompContLocal){"watch_before",&wait->watch_before,sizeof wait->watch_before};
-    wait->locals[6]=(RecompContLocal){"object_count",&wait->object_count,sizeof wait->object_count};
-    wait->locals[7]=(RecompContLocal){"object_tokens_va",&wait->object_tokens_va,sizeof wait->object_tokens_va};
-    wait->locals[8]=(RecompContLocal){"signal_done",&wait->signal_done,sizeof wait->signal_done};
-    wait->locals[9]=(RecompContLocal){"native_held",&wait->native_held,sizeof wait->native_held};
     uint32_t function=slot==UINT32_MAX?KERNEL_CONT_NATIVE_WAIT:KERNEL_VA_BASE+slot*4;
     wait->slot=slot;wait->entry_esp=g_esp;wait->remaining_ms=0;
     wait->main_routine=wait->main_saved_depth=wait->watch_before=wait->object_count=wait->object_tokens_va=wait->signal_done=0;
     wait->native_held=slot==UINT32_MAX?guest_cpu_is_held():0;
-    uint64_t resume=recomp_cont_enter(&wait->frame,function,wait->locals,sizeof wait->locals/sizeof wait->locals[0]);
-    if(resume && resume!=((5ULL<<32)|function) && resume!=((8ULL<<32)|function) &&
-       (slot==UINT32_MAX || (resume!=((6ULL<<32)|function) && resume!=((9ULL<<32)|function) &&
-                            resume!=((11ULL<<32)|function))))recomp_cont_invalid();
-    if(wait->slot!=slot || (slot!=UINT32_MAX && slot>=XBOX_KERNEL_THUNK_TABLE_SIZE))recomp_cont_invalid();
-    if(wait->signal_done>1 || wait->native_held>1 || wait->object_count>MAXIMUM_WAIT_OBJECTS ||
-       (wait->object_count && (!wait->object_tokens_va ||
-        (uint64_t)wait->object_tokens_va+wait->object_count*4>xbox_GetMappedSize())) ||
-       (!wait->object_count && wait->object_tokens_va))recomp_cont_invalid();
-    wait->restoring=resume?(resume>>32)==11?5:(resume>>32)==9?4:(resume>>32)==8?3:(resume>>32)==6?2:1:0;
-    wait->apc_started=0;wait->dispatch_started=0;
-    if(resume) {
-        if(wait->restoring==3)wait->resume_esp=g_esp;
-        if(wait->restoring==1 || wait->restoring==3)g_esp=wait->entry_esp;
-        if(slot!=UINT32_MAX)g_kernel_dispatch_slot=(int)slot;
+    int restored = recomp_cont_enter_relative(&wait->frame, function,
+        kernel_wait_locals, sizeof kernel_wait_locals / sizeof kernel_wait_locals[0]);
+    if (slot != UINT32_MAX && slot >= XBOX_KERNEL_THUNK_TABLE_SIZE)
+        recomp_cont_invalid();
+    wait->restoring = 0;
+    wait->apc_started = 0;
+    wait->dispatch_started = 0;
+    if (restored) {
+        uint64_t resume = wait->frame.site;
+        /* Only recovery can replace the initialized locals. In-memory frame
+         * transfers can restore a zero site and still replace those locals. */
+        if(resume && resume!=((5ULL<<32)|function) && resume!=((8ULL<<32)|function) &&
+           (slot==UINT32_MAX || (resume!=((6ULL<<32)|function) && resume!=((9ULL<<32)|function) &&
+                                resume!=((11ULL<<32)|function))))recomp_cont_invalid();
+        if(wait->slot!=slot || wait->signal_done>1 || wait->native_held>1 ||
+           wait->object_count>MAXIMUM_WAIT_OBJECTS || (wait->object_count && (!wait->object_tokens_va ||
+            (uint64_t)wait->object_tokens_va+wait->object_count*4>xbox_GetMappedSize())) ||
+           (!wait->object_count && wait->object_tokens_va))recomp_cont_invalid();
+        if (resume) {
+            wait->restoring=(resume>>32)==11?5:(resume>>32)==9?4:(resume>>32)==8?3:(resume>>32)==6?2:1;
+            if(wait->restoring==3)wait->resume_esp=g_esp;
+            if(wait->restoring==1 || wait->restoring==3)g_esp=wait->entry_esp;
+            if(slot!=UINT32_MAX)g_kernel_dispatch_slot=(int)slot;
+        }
     }
     wait->parent=t_kernel_wait;t_kernel_wait=wait;wait->frame.on_leave=kernel_wait_leave;
+}
+
+#ifdef _WIN32
+static void checkpoint_wait_self_suspended(GuestCheckpointThread *thread, GuestKernelWait *wait)
+{
+    recomp_cont_site(&wait->frame,(5ULL<<32)|wait->frame.function);
+    for (;;) {
+        AcquireSRWLockExclusive(&g_checkpoint_lock);
+        if(!thread->suspend_count) {
+            thread->self_suspending=0;
+            ReleaseSRWLockExclusive(&g_checkpoint_lock);
+            break;
+        }
+        ReleaseSRWLockExclusive(&g_checkpoint_lock);
+        if(ReadAcquire(&g_checkpoint_requested) && recomp_cont_snapshot_ready()) {
+            checkpoint_poll();
+            continue;
+        }
+        if(WaitForSingleObject(thread->restore_control,INFINITE)!=WAIT_OBJECT_0) recomp_cont_invalid();
+    }
+    recomp_cont_site(&wait->frame,0);
+}
+#endif
+
+DWORD xbox_ThreadChangeSuspendCount(HANDLE handle, int suspend)
+{
+#ifdef _WIN32
+    GuestCheckpointThread *self=t_checkpoint_thread;
+    GuestKernelWait *wait=t_kernel_wait;
+    const int self_import=suspend && self && wait && checkpoint_suspend_leaf((5ULL<<32)|wait->frame.function);
+    if(self_import && wait->restoring==1) {
+        if(!self->self_suspending) recomp_cont_invalid();
+        wait->restoring=0;
+        checkpoint_wait_self_suspended(self,wait);
+        return 0;
+    }
+
+    DWORD id=GetThreadId(handle);
+    if(id) {
+        AcquireSRWLockExclusive(&g_checkpoint_lock);
+        if(self_import && id==self->host_id && t_checkpoint_root_valid && !t_guest_held && guest_cpu_enabled()) {
+            if(self->self_suspending) recomp_cont_invalid();
+            self->self_suspending=1;
+            self->suspend_count=1;
+            ReleaseSRWLockExclusive(&g_checkpoint_lock);
+            checkpoint_wait_self_suspended(self,wait);
+            return 0;
+        }
+        for(unsigned i=0;i<CHECKPOINT_THREADS;i++) {
+            GuestCheckpointThread *thread=&g_checkpoint_threads[i];
+            if(!thread->active || thread->host_id!=id) continue;
+            if(thread->self_suspending) {
+                DWORD previous=thread->suspend_count;
+                if(suspend && previous==MAXIMUM_SUSPEND_COUNT) {
+                    ReleaseSRWLockExclusive(&g_checkpoint_lock);
+                    SetLastError(ERROR_SIGNAL_REFUSED);
+                    return (DWORD)-1;
+                }
+                if(suspend) ++thread->suspend_count;
+                else if(previous && !--thread->suspend_count && !SetEvent(thread->restore_control))
+                    recomp_cont_invalid();
+                ReleaseSRWLockExclusive(&g_checkpoint_lock);
+                return previous;
+            }
+            if(id!=GetCurrentThreadId()) {
+                /* Serialize an external native suspend against the target
+                 * switching to its own cooperative wait. */
+                DWORD previous=suspend?SuspendThread(handle):ResumeThread(handle);
+                ReleaseSRWLockExclusive(&g_checkpoint_lock);
+                return previous;
+            }
+            break;
+        }
+        ReleaseSRWLockExclusive(&g_checkpoint_lock);
+    }
+#endif
+    return suspend?SuspendThread(handle):ResumeThread(handle);
 }
 
 /* Native I/O and queue callers use the same wait aliases, snapshot state and
@@ -13495,6 +13757,41 @@ void guest_cpu_yield(void)
     guest_cpu_join();
 }
 
+/* Object mutations and original callbacks are part of the guest CPU
+ * operation. Releasing before them races workers using those same objects.
+ * Critical-section entry already releases only on its blocking path. */
+static const uint8_t kernel_retain_cpu[XBOX_KERNEL_THUNK_TABLE_SIZE] = {
+    [44] = 1, /* interrupt vector result */
+    [65] = 1, [68] = 1, /* device object lifecycle */
+    [59] = 1, [60] = 1, [61] = 1, [62] = 1, [72] = 1, [73] = 1, [74] = 1, [77] = 1,
+    [84] = 1, [85] = 1, [86] = 1, [87] = 1, [359] = 1, /* IRP state and dispatch */
+    [81] = 1, [82] = 1, [83] = 1, /* driver packet queues and callbacks */
+    [185] = 1, [194] = 1, [216] = 1, [229] = 1, /* handle timers share the scheduler and APC lists */
+    [97] = 1, [98] = 1, [100] = 1, /* timer cancel, interrupt ownership */
+    [106] = 1, [107] = 1, [108] = 1, [109] = 1, [113] = 1, /* object initialization */
+    [101] = 1, [105] = 1, [118] = 1, [122] = 1, /* APC state */
+    [79] = 1, [111] = 1, [116] = 1, [117] = 1, [136] = 1, [141] = 1, [191] = 1, [223] = 1, [227] = 1, /* completion queues */
+    [187] = 1, [197] = 1, [206] = 1, /* queue handles and cross-thread APCs */
+    [67] = 1, [69] = 1, [203] = 1, [215] = 1, /* symbolic-link namespace and target lifetime */
+    [188] = 1, [189] = 1, [192] = 1, [193] = 1, [201] = 1, /* object names and directory identity */
+    [242] = 1, [243] = 1, [244] = 1, [247] = 1,
+    [246] = 1, [248] = 1, [250] = 1, [251] = 1, /* object reference lifetime */
+    [124] = 1, [143] = 1, [144] = 1, /* thread object properties */
+    [158] = 1, [159] = 1, [230] = 1, [233] = 1, [234] = 1, [235] = 1, /* retain objects before releasing to wait */
+    [254] = 1, [255] = 1, [258] = 1, /* thread creation and root transfer */
+    [119] = 1, [137] = 1, /* DPC queue ownership */
+    [114] = 1, [115] = 1, [133] = 1, [134] = 1, [135] = 1, /* device queues */
+    [123] = 1, [138] = 1, [145] = 1, [186] = 1, [205] = 1, [225] = 1, /* event signal state */
+#ifdef _WIN32
+    [219] = 1, /* file read releases before the host write guard */
+#endif
+    [128] = 1, /* host clock query does not wait on guest work */
+    [129] = 1, [160] = 1, [161] = 1, /* IRQL transitions */
+    [149] = 1, [150] = 1, [153] = 1, /* timers and synchronized callback */
+    [277] = 1, [278] = 1, [291] = 1, [294] = 1, [295] = 1, /* critical sections */
+    [26] = 1, [27] = 1, [265] = 1, [302] = 1, [303] = 1, [312] = 1, /* original exception dispatch */
+};
+
 /* A guest thread can yield at a kernel call only below DISPATCH_LEVEL. */
 static void kernel_thunk_dispatch(void)
 {
@@ -13506,42 +13803,8 @@ static void kernel_thunk_dispatch(void)
     if(tracked && wait.restoring==4)goto final_apcs;
     const int valid_slot = (unsigned)slot < XBOX_KERNEL_THUNK_TABLE_SIZE;
     const ULONG ordinal = valid_slot ? g_slot_ordinals[slot] : 0;
-    /* Object mutations and original callbacks are part of the guest CPU
-     * operation. Releasing before them races workers using those same objects.
-     * Critical-section entry already releases only on its blocking path. */
-    int retain_cpu = 0;
-    if (valid_slot) {
-        switch (ordinal) {
-        case 44:                         /* interrupt vector result */
-        case 65: case 68:                /* device object lifecycle */
-        case 59: case 60: case 61: case 62: case 72: case 73: case 74: case 77:
-        case 84: case 85: case 86: case 87: case 359: /* IRP state and dispatch */
-        case 81: case 82: case 83:       /* driver packet queues and callbacks */
-        case 185: case 194: case 216: case 229: /* handle timers share the scheduler and APC lists */
-        case 97: case 98: case 100:       /* timer cancel, interrupt ownership */
-        case 106: case 107: case 108: case 109: case 113: /* object initialization */
-        case 101: case 105: case 118: case 122: /* APC state */
-        case 79: case 111: case 116: case 117: case 136: case 141: case 191: case 223: case 227: /* completion queues */
-        case 187: case 197: case 206:     /* queue handles and cross-thread APCs */
-        case 67: case 69: case 203: case 215: /* symbolic-link namespace and target lifetime */
-        case 188: case 189: case 192: case 193: case 201: /* object names and directory identity */
-        case 242: case 243: case 244: case 247:
-        case 246: case 248: case 250: case 251: /* object reference lifetime */
-        case 124: case 143: case 144:     /* thread object properties */
-        case 158: case 159: case 230: case 233: case 234: case 235: /* retain objects before releasing to wait */
-        case 254: case 255: case 258:     /* thread creation and root transfer */
-        case 119: case 137:              /* DPC queue ownership */
-        case 114: case 115: case 133: case 134: case 135: /* device queues */
-        case 123: case 138: case 145: case 186: case 205: case 225: /* event signal state */
-        case 129: case 160: case 161:     /* IRQL transitions */
-        case 149: case 150: case 153:     /* timers and synchronized callback */
-        case 277: case 278: case 291: case 294: case 295: /* critical sections */
-        case 26: case 27: case 265: case 302: case 303: case 312:              /* original exception dispatch */
-            retain_cpu = 1;
-            break;
-        }
-    }
-    if (held && !retain_cpu && xbox_CurrentIrql() < DISPATCH_LEVEL) {
+    if (held && (ordinal >= sizeof(kernel_retain_cpu) || !kernel_retain_cpu[ordinal]) &&
+        xbox_CurrentIrql() < DISPATCH_LEVEL) {
         t_guest_held = 0;
         LeaveCriticalSection(&g_guest_cpu);
     }
@@ -13574,36 +13837,30 @@ static void kernel_thunk_dispatch(void)
      * the thread's own code -- and only if the thread still exists as one. */
     if (t_guest_thread && !t_guest_held && t_dispatch_depth == 0)
         guest_cpu_join();
-final_apcs:
-    if (!t_dispatch_depth && t_guest_thread) {
+final_apcs: ;
+    uint32_t apc_thread;
+    if (!t_dispatch_depth && t_guest_thread && ke_apc_delivery_thread(FALSE, &apc_thread)) {
+        /* The saved return boundary is needed when a callback can suspend. */
         if(tracked)recomp_cont_site(&wait.frame,(9ULL<<32)|wait.frame.function);
-        xbox_DeliverThreadApcs(FALSE);
+        ke_deliver_thread_apcs(FALSE, apc_thread);
     }
     if (tracked) recomp_cont_leave(&wait.frame);
     (void)held;
 }
 
-static void kernel_thunk_dispatch_body(int slot, ULONG ordinal)
+/* Keep the optional summary buffer off the normal dispatch stack. */
+static
+#ifdef _MSC_VER
+__declspec(noinline)
+#else
+__attribute__((noinline))
+#endif
+void kernel_thunk_log_call(int slot, ULONG ordinal, long log_budget)
 {
-    const bridge_func_t bridge = g_slot_bridges[slot];
-    uint32_t _watch_before = 0;
-    if(t_kernel_wait && t_kernel_wait->restoring==5) {
-        _watch_before=t_kernel_wait->watch_before;t_kernel_wait->restoring=0;
-        goto bridge_invoke;
-    }
-    if (t_kernel_wait && t_kernel_wait->restoring==2) {
-        if (ordinal!=255 || !t_kernel_wait->main_routine) recomp_cont_invalid();
-        _watch_before=t_kernel_wait->watch_before;
-        bridge_PsCreateSystemThreadEx();
-        goto bridge_completed;
-    }
-
-    const int log_enabled = kernel_log_budget() > 0;
-    g_kernel_call_count++;
-    if (log_enabled && ordinal < XBOX_KERNEL_THUNK_TABLE_SIZE)
+    if (ordinal < XBOX_KERNEL_THUNK_TABLE_SIZE)
         g_ordinal_calls[ordinal]++;
 
-    if (KERNEL_LOG_ON()) {
+    if (g_kernel_call_count <= log_budget) {
         /* The guest return address sits at the top of the guest stack: the
          * caller pushed it before dispatching here. Logging it turns "some
          * function is calling this" into "this call site is", which is the
@@ -13615,42 +13872,60 @@ static void kernel_thunk_dispatch_body(int slot, ULONG ordinal)
         fflush(stderr);
     }
 
-    if (log_enabled) {
-        static DWORD last_summary_tick = 0;
-        DWORD now = GetTickCount();
-        if (last_summary_tick == 0) last_summary_tick = now;
-        if (now - last_summary_tick >= 2000 && g_kernel_call_count > 200) {
-            char summary[1024];
-            int length=snprintf(summary,sizeof summary, "  [KERNEL] summary: %lld total calls, latest ordinal %u (slot %d) esp=0x%08X ret=0x%08X\n",
-                    g_kernel_call_count, ordinal, slot, g_esp,
-                    g_esp ? BRIDGE_MEM32(g_esp) : 0);
-            /* And which ones, ranked. "Latest" names whatever the sample
-             * happened to land on; the question behind this line is what a
-             * title sitting still is actually asking the kernel for, and
-             * that wants counting rather than sampling. */
-            {
-                static unsigned char shown_ord[XBOX_KERNEL_THUNK_TABLE_SIZE];
-                int r, shown;
+    static DWORD last_summary_tick = 0;
+    DWORD now = GetTickCount();
+    if (last_summary_tick == 0) last_summary_tick = now;
+    if (now - last_summary_tick >= 2000 && g_kernel_call_count > 200) {
+        char summary[1024];
+        int length=snprintf(summary,sizeof summary, "  [KERNEL] summary: %lld total calls, latest ordinal %u (slot %d) esp=0x%08X ret=0x%08X\n",
+                g_kernel_call_count, ordinal, slot, g_esp,
+                g_esp ? BRIDGE_MEM32(g_esp) : 0);
+        /* And which ones, ranked. "Latest" names whatever the sample
+         * happened to land on; the question behind this line is what a
+         * title sitting still is actually asking the kernel for, and
+         * that wants counting rather than sampling. */
+        {
+            static unsigned char shown_ord[XBOX_KERNEL_THUNK_TABLE_SIZE];
+            int r, shown;
 
-                memset(shown_ord, 0, sizeof shown_ord);
-                for (shown = 0; shown < 6; shown++) {
-                    int best = -1;
-                    for (r = 0; r < XBOX_KERNEL_THUNK_TABLE_SIZE; r++)
-                        if (g_ordinal_calls[r] && !shown_ord[r]
-                            && (best < 0 || g_ordinal_calls[r] > g_ordinal_calls[best]))
-                            best = r;
-                    if (best < 0)
-                        break;
-                    shown_ord[best] = 1;
-                    length+=snprintf(summary+length,sizeof summary-(size_t)length, "  [KERNEL]   ordinal %3d x%llu\n", best,
-                            (unsigned long long)g_ordinal_calls[best]);
-                }
+            memset(shown_ord, 0, sizeof shown_ord);
+            for (shown = 0; shown < 6; shown++) {
+                int best = -1;
+                for (r = 0; r < XBOX_KERNEL_THUNK_TABLE_SIZE; r++)
+                    if (g_ordinal_calls[r] && !shown_ord[r]
+                        && (best < 0 || g_ordinal_calls[r] > g_ordinal_calls[best]))
+                        best = r;
+                if (best < 0)
+                    break;
+                shown_ord[best] = 1;
+                length+=snprintf(summary+length,sizeof summary-(size_t)length, "  [KERNEL]   ordinal %3d x%llu\n", best,
+                        (unsigned long long)g_ordinal_calls[best]);
             }
-            fwrite(summary,1,(size_t)length,stderr);
-            fflush(stderr);
-            last_summary_tick = now;
         }
+        fwrite(summary,1,(size_t)length,stderr);
+        fflush(stderr);
+        last_summary_tick = now;
     }
+}
+
+static void kernel_thunk_dispatch_body(int slot, ULONG ordinal)
+{
+    const bridge_func_t bridge = g_slot_bridges[slot];
+    uint32_t _watch_before = 0;
+    const long log_budget = g_kernel_log_budget;
+    if(t_kernel_wait && t_kernel_wait->restoring==5) {
+        _watch_before=t_kernel_wait->watch_before;t_kernel_wait->restoring=0;
+        goto bridge_invoke;
+    }
+    if (t_kernel_wait && t_kernel_wait->restoring==2) {
+        if (ordinal!=255 || !t_kernel_wait->main_routine) recomp_cont_invalid();
+        _watch_before=t_kernel_wait->watch_before;
+        bridge_PsCreateSystemThreadEx();
+        goto bridge_completed;
+    }
+
+    g_kernel_call_count++;
+    if (log_budget > 0) kernel_thunk_log_call(slot, ordinal, log_budget);
 
     /* Pop the dummy return address that PUSH32(esp, 0) pushed before RECOMP_ICALL.
      * On real x86, "call [thunk]" pushes a real return address and "ret" pops it.
@@ -13671,7 +13946,6 @@ static void kernel_thunk_dispatch_body(int slot, ULONG ordinal)
      * ordinal directly, which is the one fact those tools cannot give.
      *
      * Set g_kernel_watch_va to arm; zero (the default) costs one compare. */
-    kernel_watch_arm_once();
     if (g_kernel_watch_va) {
         _watch_before = BRIDGE_MEM32(g_kernel_watch_va);
         /* Reporting only on change misses the case that matters most: a value
@@ -13720,7 +13994,7 @@ bridge_completed: ;
         }
     }
 
-    if (KERNEL_LOG_ON()) {
+    if (log_budget > 0 && g_kernel_call_count <= log_budget) {
         fprintf(stderr, "  [KERNEL] → returned 0x%08X\n", g_eax);
         fflush(stderr);
     }
@@ -13820,6 +14094,7 @@ void xbox_kernel_bridge_init(void)
     int unbridged = 0;
     DWORD old_protect;
 
+    kernel_diagnostics_init();
     guest_cpu_join();          /* the caller goes on to run the title's entry point */
     fprintf(stderr, "  Kernel thunk bridge: resolving %d entries at 0x%08X\n",
             g_thunk_table_count, g_thunk_table_base);

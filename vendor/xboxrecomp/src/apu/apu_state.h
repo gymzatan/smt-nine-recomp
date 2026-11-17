@@ -176,14 +176,37 @@ static inline int adpcm_decode_block(int16_t *outbuf, const uint8_t *inbuf,
         if ((data) > (mx)) data = mx; \
         else if ((data) < (mn)) data = mn;
 
-    static const uint16_t step_table[89] = {
-        7,8,9,10,11,12,13,14,16,17,19,21,23,25,28,31,
-        34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,143,
-        157,173,190,209,230,253,279,307,337,371,408,449,494,544,598,658,
-        724,796,876,963,1060,1166,1282,1411,1552,1707,1878,2066,2272,2499,2749,3024,
-        3327,3660,4026,4428,4871,5358,5894,6484,7132,7845,8630,9493,10442,11487,12635,13899,
-        15289,16818,18500,20350,22385,24623,27086,29794,32767
+    #define ADPCM_MAG(s, n) (((s) >> 3) + (((n) & 1) ? ((s) >> 2) : 0) + \
+                             (((n) & 2) ? ((s) >> 1) : 0) + (((n) & 4) ? (s) : 0))
+    #define ADPCM_DELTAS(s) {ADPCM_MAG(s, 0), ADPCM_MAG(s, 1), ADPCM_MAG(s, 2), ADPCM_MAG(s, 3), \
+                            ADPCM_MAG(s, 4), ADPCM_MAG(s, 5), ADPCM_MAG(s, 6), ADPCM_MAG(s, 7)}
+    static const uint16_t delta_table[89][8] = {
+        ADPCM_DELTAS(7), ADPCM_DELTAS(8), ADPCM_DELTAS(9), ADPCM_DELTAS(10),
+        ADPCM_DELTAS(11), ADPCM_DELTAS(12), ADPCM_DELTAS(13), ADPCM_DELTAS(14),
+        ADPCM_DELTAS(16), ADPCM_DELTAS(17), ADPCM_DELTAS(19), ADPCM_DELTAS(21),
+        ADPCM_DELTAS(23), ADPCM_DELTAS(25), ADPCM_DELTAS(28), ADPCM_DELTAS(31),
+        ADPCM_DELTAS(34), ADPCM_DELTAS(37), ADPCM_DELTAS(41), ADPCM_DELTAS(45),
+        ADPCM_DELTAS(50), ADPCM_DELTAS(55), ADPCM_DELTAS(60), ADPCM_DELTAS(66),
+        ADPCM_DELTAS(73), ADPCM_DELTAS(80), ADPCM_DELTAS(88), ADPCM_DELTAS(97),
+        ADPCM_DELTAS(107), ADPCM_DELTAS(118), ADPCM_DELTAS(130), ADPCM_DELTAS(143),
+        ADPCM_DELTAS(157), ADPCM_DELTAS(173), ADPCM_DELTAS(190), ADPCM_DELTAS(209),
+        ADPCM_DELTAS(230), ADPCM_DELTAS(253), ADPCM_DELTAS(279), ADPCM_DELTAS(307),
+        ADPCM_DELTAS(337), ADPCM_DELTAS(371), ADPCM_DELTAS(408), ADPCM_DELTAS(449),
+        ADPCM_DELTAS(494), ADPCM_DELTAS(544), ADPCM_DELTAS(598), ADPCM_DELTAS(658),
+        ADPCM_DELTAS(724), ADPCM_DELTAS(796), ADPCM_DELTAS(876), ADPCM_DELTAS(963),
+        ADPCM_DELTAS(1060), ADPCM_DELTAS(1166), ADPCM_DELTAS(1282), ADPCM_DELTAS(1411),
+        ADPCM_DELTAS(1552), ADPCM_DELTAS(1707), ADPCM_DELTAS(1878), ADPCM_DELTAS(2066),
+        ADPCM_DELTAS(2272), ADPCM_DELTAS(2499), ADPCM_DELTAS(2749), ADPCM_DELTAS(3024),
+        ADPCM_DELTAS(3327), ADPCM_DELTAS(3660), ADPCM_DELTAS(4026), ADPCM_DELTAS(4428),
+        ADPCM_DELTAS(4871), ADPCM_DELTAS(5358), ADPCM_DELTAS(5894), ADPCM_DELTAS(6484),
+        ADPCM_DELTAS(7132), ADPCM_DELTAS(7845), ADPCM_DELTAS(8630), ADPCM_DELTAS(9493),
+        ADPCM_DELTAS(10442), ADPCM_DELTAS(11487), ADPCM_DELTAS(12635), ADPCM_DELTAS(13899),
+        ADPCM_DELTAS(15289), ADPCM_DELTAS(16818), ADPCM_DELTAS(18500), ADPCM_DELTAS(20350),
+        ADPCM_DELTAS(22385), ADPCM_DELTAS(24623), ADPCM_DELTAS(27086), ADPCM_DELTAS(29794),
+        ADPCM_DELTAS(32767),
     };
+    #undef ADPCM_DELTAS
+    #undef ADPCM_MAG
     static const int index_table[] = { -1, -1, -1, -1, 2, 4, 6, 8 };
 
     int samples = 1, chunks;
@@ -199,7 +222,7 @@ static inline int adpcm_decode_block(int16_t *outbuf, const uint8_t *inbuf,
          * (Jet Set Radio Future ends every ADPCM buffer in a 0x08 pad, and
          * 3.5-4.4% of its blocks were silenced by this test). The step index
          * is clamped for the same reason -- and it must be clamped, not
-         * trusted, because step_table has 89 entries. Refusing either returned
+         * trusted, because delta_table has 89 entries. Refusing either returned
          * 0 AFTER the first sample of each channel had been written. */
         index[ch] = (int8_t)inbuf[2];
         ADPCM_CLIP(index[ch], 0, 88);
@@ -213,24 +236,20 @@ static inline int adpcm_decode_block(int16_t *outbuf, const uint8_t *inbuf,
     while (chunks--) {
         for (int ch = 0; ch < channels; ++ch) {
             for (int i = 0; i < 4; ++i) {
-                int step = step_table[index[ch]], delta = step >> 3;
-                if (*inbuf & 1) delta += (step >> 2);
-                if (*inbuf & 2) delta += (step >> 1);
-                if (*inbuf & 4) delta += step;
-                if (*inbuf & 8) delta = -delta;
+                int code = *inbuf & 0xf;
+                int delta = delta_table[index[ch]][code & 7];
+                if (code & 8) delta = -delta;
                 pcmdata[ch] += delta;
-                index[ch] += index_table[*inbuf & 0x7];
+                index[ch] += index_table[code & 7];
                 ADPCM_CLIP(index[ch], 0, 88);
                 ADPCM_CLIP(pcmdata[ch], -32768, 32767);
                 outbuf[i * 2 * channels] = (int16_t)pcmdata[ch];
 
-                step = step_table[index[ch]]; delta = step >> 3;
-                if (*inbuf & 0x10) delta += (step >> 2);
-                if (*inbuf & 0x20) delta += (step >> 1);
-                if (*inbuf & 0x40) delta += step;
-                if (*inbuf & 0x80) delta = -delta;
+                code = *inbuf >> 4;
+                delta = delta_table[index[ch]][code & 7];
+                if (code & 8) delta = -delta;
                 pcmdata[ch] += delta;
-                index[ch] += index_table[(*inbuf >> 4) & 0x7];
+                index[ch] += index_table[code & 7];
                 ADPCM_CLIP(index[ch], 0, 88);
                 ADPCM_CLIP(pcmdata[ch], -32768, 32767);
                 outbuf[(i * 2 + 1) * channels] = (int16_t)pcmdata[ch];

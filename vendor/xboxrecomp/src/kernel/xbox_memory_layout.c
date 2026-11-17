@@ -3161,7 +3161,14 @@ uint32_t xbox_ContiguousAlloc(uint32_t size, uint32_t alignment)
     if (reclaim)
         ReleaseSRWLockExclusive(&g_contig_lock);
 
-    memset((void *)((uintptr_t)result + g_memory_offset), 0, size);
+    void *native = (void *)((uintptr_t)result + g_memory_offset);
+#if defined(_WIN32)
+    int gpu_write = nv2a_pb_host_write_begin(native, size);
+#endif
+    memset(native, 0, size);
+#if defined(_WIN32)
+    nv2a_pb_host_write_end(gpu_write);
+#endif
     return result;
 }
 

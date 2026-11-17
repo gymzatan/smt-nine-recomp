@@ -62,6 +62,7 @@ typedef struct {
     uint32_t            layout_masks[16];  /* inputs_read | (texcoord-field<<16) */
     int                 layout_count;
     uint16_t            inputs_read;  /* Which v registers are read */
+    uint16_t            constant_count, diffuse_constant;
 } VshCacheEntry;
 
 static VshCacheEntry g_vsh_cache[NV2A_VS_CACHE_SIZE];
@@ -110,6 +111,11 @@ void d3d8_vsh_parse(const DWORD *microcode, int num_insns, NV2AVshProgram *progr
             dest->negate=source->neg;
             memcpy(&dest->swizzle,source->swizzle,sizeof dest->swizzle);
             dest->rel_addr=decoded.relative && dest->reg_type==NV2A_VSH_REG_CONST;
+            if((decoded.sources_used&(1u<<which)) && dest->reg_type==NV2A_VSH_REG_CONST) {
+                const unsigned count=decoded.relative || decoded.constant>=NV2A_VS_MAX_CONSTANTS
+                    ? NV2A_VS_MAX_CONSTANTS : (unsigned)decoded.constant+1;
+                if(count>program->constant_count)program->constant_count=(uint16_t)count;
+            }
         }
         inst->ilu_src=inst->mac_src[2];
         inst->mac_dst.temp_reg=decoded.temp<=12?decoded.temp:-1;
@@ -123,6 +129,15 @@ void d3d8_vsh_parse(const DWORD *microcode, int num_insns, NV2AVshProgram *progr
         inst->out_address=decoded.out_address;
         inst->out_to_register=decoded.out_to_register;
         inst->out_from_ilu=decoded.out_from_ilu;
+        if(inst->out_to_register && inst->out_address==NV2A_VSH_OUT_D0 && inst->out_mask) {
+            const NV2AVshSrcOperand *operand=inst->out_from_ilu?&inst->ilu_src:&inst->mac_src[0];
+            int move=inst->out_from_ilu?inst->ilu_op==NV2A_VSH_ILU_MOV:inst->mac_op==NV2A_VSH_MAC_MOV;
+            program->diffuse_constant=0;
+            if(inst->out_mask==15 && move && operand->reg_type==NV2A_VSH_REG_CONST &&
+               !operand->negate && !operand->rel_addr && operand->reg_index<NV2A_VS_MAX_CONSTANTS &&
+               operand->swizzle.x==0 && operand->swizzle.y==1 && operand->swizzle.z==2 && operand->swizzle.w==3)
+                program->diffuse_constant=(uint16_t)(operand->reg_index+1);
+        }
         inst->sources_used=decoded.sources_used;
         inst->is_final=decoded.final;
         program->length=i+1;
@@ -740,12 +755,16 @@ static ID3D11InputLayout *create_vsh_input_layout(
  * Shader Compilation and Caching
  * ================================================================ */
 
+/* Probe order is modulo the power-of-two shader cache capacity. */
+#if NV2A_VS_CACHE_SIZE < 1 || (NV2A_VS_CACHE_SIZE & (NV2A_VS_CACHE_SIZE - 1))
+#error NV2A_VS_CACHE_SIZE must be a power of two
+#endif
 static VshCacheEntry *cache_lookup(uint32_t hash)
 {
-    int idx = (int)(hash % NV2A_VS_CACHE_SIZE);
-    int i;
+    unsigned idx = hash & (NV2A_VS_CACHE_SIZE - 1);
+    unsigned i;
     for (i = 0; i < NV2A_VS_CACHE_SIZE; i++) {
-        int probe = (idx + i) % NV2A_VS_CACHE_SIZE;
+        unsigned probe = (idx + i) & (NV2A_VS_CACHE_SIZE - 1);
         if (!g_vsh_cache[probe].in_use)
             return NULL;
         if (g_vsh_cache[probe].hash == hash)
@@ -756,12 +775,12 @@ static VshCacheEntry *cache_lookup(uint32_t hash)
 
 static VshCacheEntry *cache_insert(uint32_t hash)
 {
-    int idx = (int)(hash % NV2A_VS_CACHE_SIZE);
-    int i;
+    unsigned idx = hash & (NV2A_VS_CACHE_SIZE - 1);
+    unsigned i;
 
     /* Find an empty slot or reuse the probed slot */
     for (i = 0; i < NV2A_VS_CACHE_SIZE; i++) {
-        int probe = (idx + i) % NV2A_VS_CACHE_SIZE;
+        unsigned probe = (idx + i) & (NV2A_VS_CACHE_SIZE - 1);
         if (!g_vsh_cache[probe].in_use) {
             g_vsh_cache[probe].hash   = hash;
             g_vsh_cache[probe].in_use = 1;
@@ -823,7 +842,10 @@ static VshCacheEntry *compile_shader(const DWORD *microcode, int num_insns,
         NvkShader *shader=nvk_shader_create(hlsl_buf,"main",VK_SHADER_STAGE_VERTEX_BIT);
         if(!shader)return NULL;
         entry=cache_insert(hash);if(!entry){nvk_shader_destroy(shader);return NULL;}
-        entry->vulkan=shader;entry->inputs_read=program.inputs_read;return entry;
+        entry->vulkan=shader;entry->inputs_read=program.inputs_read;
+        entry->constant_count=program.constant_count;
+        entry->diffuse_constant=program.diffuse_constant;
+        return entry;
     }
     /* Compile HLSL to bytecode */
     hr = D3DCompile(hlsl_buf, (SIZE_T)hlsl_len, "nv2a_vsh",
@@ -1070,16 +1092,36 @@ static HRESULT vsh_upload_constants(ID3D11DeviceContext *ctx)
 #include "d3d8_nv2a_geometry.inc"
 
 const char *d3d8_vsh_geometry_source(void) { return nv2a_geometry_source; }
-NvkShader *d3d8_vsh_vulkan_program(const DWORD *microcode,int length,uint32_t *inputs)
+const char *d3d8_vsh_smooth_triangle_source(void) { return nv2a_smooth_triangle_source; }
+char *d3d8_vsh_depth_guard_source(void)
 {
-    VshCacheEntry *entry=native_program(microcode,length);
-    if(!entry)return NULL;
-    *inputs=entry->inputs_read;return entry->vulkan;
+    const size_t base_bytes=sizeof nv2a_geometry_source-1;
+    char *source=malloc(base_bytes+sizeof nv2a_depth_guard_source);
+    if(source) {
+        memcpy(source,nv2a_geometry_source,base_bytes);
+        memcpy(source+base_bytes,nv2a_depth_guard_source,sizeof nv2a_depth_guard_source);
+    }
+    return source;
 }
-char *d3d8_vsh_fixed_source(void) {
-    size_t first=sizeof nv2a_geometry_source-1,second=sizeof nv2a_fixed_vertex_source;
-    char *source=(char *)malloc(first+second);
-    if(source) { memcpy(source,nv2a_geometry_source,first);memcpy(source+first,nv2a_fixed_vertex_source,second); }
+NvkShader *d3d8_vsh_vulkan_program(const DWORD *microcode,int length,uint64_t revision,uint32_t *inputs,unsigned *constant_count,unsigned *diffuse_constant)
+{
+    VshCacheEntry *entry=native_program(microcode,length,revision);
+    if(!entry)return NULL;
+    *inputs=entry->inputs_read;*constant_count=entry->constant_count;
+    *diffuse_constant=entry->diffuse_constant;return entry->vulkan;
+}
+char *d3d8_vsh_fixed_source(int direct_fill)
+{
+    const size_t geometry_bytes=sizeof nv2a_geometry_source-1;
+    const size_t fixed_bytes=sizeof nv2a_fixed_vertex_source-1;
+    const char *entry=direct_fill?nv2a_direct_fill_source:"";
+    const size_t entry_bytes=direct_fill?sizeof nv2a_direct_fill_source:1;
+    char *source=(char *)malloc(geometry_bytes+fixed_bytes+entry_bytes);
+    if(source) {
+        memcpy(source,nv2a_geometry_source,geometry_bytes);
+        memcpy(source+geometry_bytes,nv2a_fixed_vertex_source,fixed_bytes);
+        memcpy(source+geometry_bytes+fixed_bytes,entry,entry_bytes);
+    }
     return source;
 }
 

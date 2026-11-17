@@ -467,9 +467,17 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
     uint32_t *const mixbuffer = dsp_jit_gp_mixbuffer(d->gp.dsp);
     uint32_t *output = mixbuffer;
     for (int mixbin = 0; mixbin < NUM_MIXBINS; mixbin++) {
+#if defined(_MSC_VER) && defined(_M_X64)
+        _Static_assert(NUM_SAMPLES_PER_FRAME % 4 == 0, "GP mixbin uses complete sample groups");
+        for (int sample = 0; sample < NUM_SAMPLES_PER_FRAME; sample += 4) {
+            float_quad_to_24b(output, &mixbins[mixbin][sample]);
+            output += 4;
+        }
+#else
         for (int sample = 0; sample < NUM_SAMPLES_PER_FRAME; sample++) {
             *output++ = float_to_24b(mixbins[mixbin][sample]);
         }
+#endif
     }
 
     bool ep_enabled = (d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPRST) &&

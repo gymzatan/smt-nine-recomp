@@ -53,12 +53,17 @@ NTSTATUS xbox_kernel_prepare_file_open(PXBOX_OBJECT_ATTRIBUTES oa,WCHAR *path,DW
     *device=0;*volume=0;return xbox_FileObjectPath(oa,path,size)?0:STATUS_OBJECT_PATH_NOT_FOUND;
 }
 void xbox_kernel_release_file_device(uint32_t device) { assert(!device); }
-NTSTATUS xbox_kernel_create_driver_file(PHANDLE a,ACCESS_MASK b,PXBOX_OBJECT_ATTRIBUTES c,PXBOX_IO_STATUS_BLOCK d,PLARGE_INTEGER e,ULONG f,ULONG g,ULONG h,ULONG i,int *handled,XboxFileOpenLookup *lookup) {*handled=0;return 0;}
+NTSTATUS xbox_kernel_begin_file_open(PHANDLE a,ACCESS_MASK b,PXBOX_OBJECT_ATTRIBUTES c,
+    PXBOX_IO_STATUS_BLOCK d,PLARGE_INTEGER e,ULONG f,ULONG g,ULONG h,ULONG i,
+    int *handled,WCHAR *path,DWORD size,uint32_t *device,int *volume) {
+    *handled=0;return xbox_kernel_prepare_file_open(c,path,size,device,volume,NULL);
+}
 NTSTATUS xbox_kernel_file_volume_status(HANDLE handle,unsigned *device_type) {
     if(device_type)*device_type=0;
     return 0;
 }
 NTSTATUS xbox_kernel_dismount_file_volume(HANDLE handle) { return STATUS_INVALID_DEVICE_REQUEST; }
+int xbox_kernel_wait_release_cpu(void) { abort(); }
 
 
 /* This isolated filesystem fixture observes the renderer write boundary;

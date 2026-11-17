@@ -20,8 +20,13 @@
 extern int nv2a_pb_exec_method(uint32_t, uint32_t, uint32_t, uint8_t *);
 extern void nv2a_pb_index_words(const uint32_t *,uint32_t);
 
-extern void nv2a_pb_progress(void);
+extern void nv2a_pb_progress(int submit_pending);
 static HANDLE s_fifo_ready, s_fifo_wake;
+
+static void nv2a_fifo_post(NV2AState *d,LONG request)
+{
+    if (!InterlockedOr(&d->pfifo.fifo_kick, request)) SetEvent(s_fifo_wake);
+}
 
 /* The original PFIFO queue is the work queue. Submission only wakes its
  * single consumer; GET still advances inside the original parser. */
@@ -31,7 +36,12 @@ void nv2a_fifo_kick(NV2AState *d)
         nv2a_fifo_run(d);
         return;
     }
-    if (!InterlockedOr(&d->pfifo.fifo_kick, 1)) SetEvent(s_fifo_wake);
+    nv2a_fifo_post(d,NV2A_FIFO_WORK_PENDING);
+}
+
+void nv2a_fifo_request_progress(NV2AState *d)
+{
+    nv2a_fifo_post(d,NV2A_FIFO_PROGRESS_PENDING);
 }
 
 static DWORD WINAPI nv2a_fifo_worker(LPVOID opaque)
@@ -56,11 +66,13 @@ static DWORD WINAPI nv2a_fifo_worker(LPVOID opaque)
         /* Never hold the device lock while waiting for checkpoint thaw. */
         xbox_CheckpointDeviceEnter(XBOX_CHECKPOINT_GPU);
         qemu_mutex_lock(&d->pfifo.lock);
-        InterlockedExchange(&d->pfifo.fifo_kick, 2);
+        LONG requests=InterlockedExchange(&d->pfifo.fifo_kick,NV2A_FIFO_ACTIVE);
         nv2a_fifo_run(d);
-        nv2a_pb_progress();
-        /* A request during this pass retains 3 for the next pass. */
-        InterlockedCompareExchange(&d->pfifo.fifo_kick, 0, 2);
+        /* A normal command wake may retire completed work. A guest or timer
+         * progress request can also submit work that has not reached Vulkan. */
+        nv2a_pb_progress((requests&NV2A_FIFO_PROGRESS_PENDING)!=0);
+        /* Requests posted during this pass survive for the next pass. */
+        InterlockedCompareExchange(&d->pfifo.fifo_kick,0,NV2A_FIFO_ACTIVE);
         qemu_cond_broadcast(&d->pfifo.fifo_idle_cond);
         qemu_mutex_unlock(&d->pfifo.lock);
         xbox_CheckpointDeviceLeave(XBOX_CHECKPOINT_GPU);

@@ -8,7 +8,24 @@
 
 extern unsigned smt9_game_refresh_hz(void);
 extern uint64_t xbox_ReadTimeStampCounter(void);
-extern void guest_cpu_join(void);
+/* The host process owns this timer for the original game frame loop,
+ * including the main guest root started by a cold checkpoint. */
+static HANDLE s_frame_wait_timer;
+
+int smt9_frame_wait_init(void)
+{
+    s_frame_wait_timer = CreateWaitableTimerW(NULL, FALSE, NULL);
+    if (!s_frame_wait_timer)
+        fprintf(stderr, "[BOOT] frame timer creation failed: %lu\n", GetLastError());
+    return s_frame_wait_timer != NULL;
+}
+
+void smt9_frame_wait_shutdown(void)
+{
+    CloseHandle(s_frame_wait_timer);
+    s_frame_wait_timer = NULL;
+}
+
 void smt9_game_frame_begin(void)
 {
     uint64_t previous=(uint64_t)MEM32(0x00557228u)|((uint64_t)MEM32(0x0055722Cu)<<32);
@@ -18,8 +35,13 @@ void smt9_game_frame_begin(void)
     if(now>=deadline)return;
     guest_cpu_part();
     do{
-        DWORD milliseconds=(DWORD)((deadline-now)*1000ull/733333333ull);
-        Sleep(milliseconds);
+        LARGE_INTEGER delay;
+        delay.QuadPart = -(LONGLONG)(((deadline - now) * 10000000ull + 733333332ull) / 733333333ull);
+        if (!SetWaitableTimer(s_frame_wait_timer, &delay, 0, NULL, NULL, FALSE) ||
+            WaitForSingleObject(s_frame_wait_timer, INFINITE) != WAIT_OBJECT_0) {
+            xbox_ReportFatalError("Frame timer wait", GetLastError());
+            ExitProcess(5);
+        }
         now=xbox_ReadTimeStampCounter();
     }while(now<deadline);
     guest_cpu_join();
@@ -194,12 +216,21 @@ static void prepare_original_ui_quad(void)
      * Full-screen fills cover the selected aspect; other UI keeps its shape. */
     /* 145A39 also draws standing portraits as full-height, narrow quads. */
     int fullscreen=ymax-ymin>=480 && (!texel_endpoints || xmax-xmin>=640);
+    int status_backdrop=0;
     /* 112B74 registers its two backdrop sprites with list base 3B2480.
      * 145A39 saves that original manager at draw-stack +5C, even when
      * 1463D7 queues an inline sprite copy. Keep both background tiles wide;
      * the character list remains proportional, including shared atlases. */
     if(texel_endpoints){
         uint32_t list=MEM32(MEM32(g_esp+0x5C)+4);
+        /* 13EA8A registers the status menu and its two 512-high background
+         * tiles. The status manager submits them as X=0..512 and 512..640.
+         * Keep their authored width and the existing atlas sampling. */
+        if(list==0x003BFE40u && ymin==0 && ymax==512 && MEM32(g_esi+0x20)==512){
+            uint32_t texture_id=MEM32(g_esi+4), width=MEM32(g_esi+0x1C);
+            status_backdrop=(texture_id==3 && width==512 && xmin==0 && xmax==512) ||
+                            (texture_id==0 && width==128 && xmin==512 && xmax==640);
+        }
         /* 215180 registers title list 530408. Its texture0/1 records with
          * source height480 are the two backdrop tiles; the same list's
          * Press Start and menu records keep their proportional UI mapping.
@@ -230,7 +261,7 @@ static void prepare_original_ui_quad(void)
     for(unsigned i=0;i<4;i++){
         uint32_t vertex=buffer+i*28;
         if(background)MEMF(vertex+20)=(umin+umax)*0.5f+(MEMF(vertex+20)-(umin+umax)*0.5f)/factor;
-        else if(!fullscreen || video)MEMF(vertex)=ui_origin+(MEMF(vertex)-ui_origin)*factor;
+        else if((!fullscreen || video) && !status_backdrop)MEMF(vertex)=ui_origin+(MEMF(vertex)-ui_origin)*factor;
         if(fullscreen && texture && !texel_endpoints)MEMF(vertex+4)=240+(MEMF(vertex+4)-240)/factor;
         if(texture && !fullscreen){
             if(umax-umin>inset_u+trim_u)MEMF(vertex+20)=umin+inset_u+(MEMF(vertex+20)-umin)*(umax-umin-inset_u-trim_u)/(umax-umin);
@@ -390,6 +421,14 @@ void recomp_call_arguments(uint32_t target)
      * coordinates. It is the pan controller, not the display projection. */
     if(aspect==0x3FAAAAABu && MEM32(g_esp)!=0x000EE3B9u)MEMF(g_esp+12)=smt9_game_aspect();
 }
+
+#ifdef RECOMP_CALL_ARGUMENT_TARGET
+__declspec(noinline) void recomp_check_call_arguments(uint32_t target)
+{
+    if (RECOMP_ARGUMENT_TARGET_MATCH(target))
+        recomp_call_arguments(target);
+}
+#endif
 
 recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
 {

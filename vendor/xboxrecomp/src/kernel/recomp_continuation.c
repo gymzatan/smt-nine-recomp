@@ -54,24 +54,36 @@ static void discard_recovery(SavedFrame *frames, uint32_t count) {
     }
     free(frames);
 }
-static CONT_NOINLINE uint64_t restore_frame(RecompContFrame *f, uint32_t function,
-                                             const RecompContLocal *locals, size_t count) {
+static inline RecompContLocal cont_local_at(const RecompContFrame *frame, size_t index)
+{
+    if (!frame->relative_locals)
+        return frame->locals.absolute[index];
+    const RecompContLocalOffset *local = &frame->locals.relative[index];
+    return (RecompContLocal){
+        local->name, (void *)((uintptr_t)frame + local->offset), local->size
+    };
+}
+
+static CONT_NOINLINE uint64_t restore_frame(RecompContFrame *f, uint32_t function, size_t count) {
     SavedFrame *saved=&recovery[recovery_next];
     if (saved->function!=function || saved->count!=count)
         recomp_cont_invalid();
     for (size_t i=0; i<count; ++i) {
-        if (saved->locals[i].size!=locals[i].size ||
-            strcmp(saved->locals[i].name,locals[i].name))
+        RecompContLocal local = cont_local_at(f, i);
+        if (saved->locals[i].size!=local.size ||
+            strcmp(saved->locals[i].name,local.name))
             recomp_cont_invalid();
-        memcpy(locals[i].address,saved->locals[i].data,locals[i].size);
+        memcpy(local.address,saved->locals[i].data,local.size);
     }
     f->site=saved->site;
     f->jumps=saved->jumps; saved->jumps=0;
     for (SavedJump *j=f->jumps; j; j=j->next) {
         if (j->count!=count) recomp_cont_invalid();
-        for (size_t i=0; i<count; ++i)
-            if (j->locals[i].size!=locals[i].size ||
-                strcmp(j->locals[i].name,locals[i].name)) recomp_cont_invalid();
+        for (size_t i=0; i<count; ++i) {
+            RecompContLocal local = cont_local_at(f, i);
+            if (j->locals[i].size!=local.size ||
+                strcmp(j->locals[i].name,local.name)) recomp_cont_invalid();
+        }
     }
     if (++recovery_next==recovery_count) {
         discard_recovery(recovery,recovery_count);
@@ -79,12 +91,37 @@ static CONT_NOINLINE uint64_t restore_frame(RecompContFrame *f, uint32_t functio
     }
     return f->site;
 }
+static inline void cont_link(RecompContFrame *f, uint32_t function,
+                             RecompContLocalList locals, size_t count, int relative)
+{
+    f->function = function;
+    f->site = 0;
+    f->locals = locals;
+    f->local_count = count;
+    f->parent = recomp_cont_head;
+    f->jumps = NULL;
+    f->on_leave = NULL;
+    f->on_unwind = NULL;
+    f->retained = 0;
+    f->relative_locals = relative;
+    recomp_cont_head = f;
+}
+
 uint64_t recomp_cont_enter(RecompContFrame *f, uint32_t function,
-                          const RecompContLocal *locals, size_t count) {
-    f->function=function; f->site=0;
-    f->locals=locals; f->local_count=count; f->parent=recomp_cont_head; f->jumps=0; f->on_leave=0; f->on_unwind=0; f->retained=0; recomp_cont_head=f;
-    if (recovery) return restore_frame(f,function,locals,count);
-    return f->site;
+                          const RecompContLocal *locals, size_t count)
+{
+    cont_link(f, function, (RecompContLocalList){.absolute = locals}, count, 0);
+    return recovery ? restore_frame(f, function, count) : 0;
+}
+
+int recomp_cont_enter_relative(RecompContFrame *f, uint32_t function,
+                               const RecompContLocalOffset *locals, size_t count)
+{
+    cont_link(f, function, (RecompContLocalList){.relative = locals}, count, 1);
+    if (!recovery)
+        return 0;
+    restore_frame(f, function, count);
+    return 1;
 }
 void recomp_cont_leave(RecompContFrame *f) {
     if (recomp_cont_head!=f) recomp_cont_invalid();
@@ -114,13 +151,13 @@ void recomp_cont_jump_bind(RecompContFrame *f, uint32_t buffer, uint64_t site) {
     }
     j->site=site;
     for (size_t i=0;i<f->local_count;++i) {
-        const RecompContLocal *v=&f->locals[i];
-        size_t len=strlen(v->name);
-        if (!len || len>=sizeof j->locals[i].name || !v->size || v->size>8)
+        const RecompContLocal v = cont_local_at(f, i);
+        size_t len=strlen(v.name);
+        if (!len || len>=sizeof j->locals[i].name || !v.size || v.size>8)
             recomp_cont_invalid();
-        memcpy(j->locals[i].name,v->name,len+1);
-        j->locals[i].size=(uint32_t)v->size;
-        memcpy(j->locals[i].data,v->address,v->size);
+        memcpy(j->locals[i].name,v.name,len+1);
+        j->locals[i].size=(uint32_t)v.size;
+        memcpy(j->locals[i].data,v.address,v.size);
     }
 }
 size_t recomp_cont_jump_count(const RecompContFrame *f) {
@@ -182,8 +219,10 @@ uint64_t recomp_cont_jump_restore(RecompContFrame *f,uint32_t buffer) {
     if (recomp_cont_head!=f) recomp_cont_invalid();
     SavedJump *j=find_jump(f,buffer);
     if (!j) recomp_cont_invalid();
-    for (size_t i=0;i<f->local_count;++i)
-        memcpy(f->locals[i].address,j->locals[i].data,j->locals[i].size);
+    for (size_t i=0;i<f->local_count;++i) {
+        RecompContLocal local = cont_local_at(f, i);
+        memcpy(local.address,j->locals[i].data,j->locals[i].size);
+    }
     f->site=0; return j->site;
 }
 uint64_t recomp_cont_jump_return(RecompContFrame *f) {
@@ -196,9 +235,9 @@ RecompContFrame *recomp_cont_transfer_owner(uint32_t frame_ebp) {
     RecompContFrame *owner=0;
     for (RecompContFrame *f=recomp_cont_head;f;f=f->parent) {
         for (size_t i=0;i<f->local_count;++i) {
-            const RecompContLocal *v=&f->locals[i];
-            if (v->size==4 && !strcmp(v->name,"ebp") &&
-                *(const uint32_t *)v->address==frame_ebp) owner=f;
+            const RecompContLocal v = cont_local_at(f, i);
+            if (v.size==4 && !strcmp(v.name,"ebp") &&
+                *(const uint32_t *)v.address==frame_ebp) owner=f;
         }
     }
     /* Tail fragments inherit their caller's EBP. The oldest matching frame
@@ -227,12 +266,12 @@ void recomp_cont_prepare_transfer(uint32_t frame_ebp, uint32_t target) {
         saved->locals=calloc(saved->count,sizeof *saved->locals);
         if (saved->count && !saved->locals) recomp_cont_invalid();
         for (size_t i=0;i<f->local_count;++i) {
-            const RecompContLocal *v=&f->locals[i];
-            size_t len=strlen(v->name);
-            if (!len || len>=64 || !v->size || v->size>8) recomp_cont_invalid();
-            memcpy(saved->locals[i].name,v->name,len+1);
-            saved->locals[i].size=(uint32_t)v->size;
-            memcpy(saved->locals[i].data,v->address,v->size);
+            const RecompContLocal v = cont_local_at(f, i);
+            size_t len=strlen(v.name);
+            if (!len || len>=64 || !v.size || v.size>8) recomp_cont_invalid();
+            memcpy(saved->locals[i].name,v.name,len+1);
+            saved->locals[i].size=(uint32_t)v.size;
+            memcpy(saved->locals[i].data,v.address,v.size);
         }
         saved->jumps=f->jumps;f->jumps=0;
     }
@@ -290,11 +329,11 @@ int recomp_cont_save(FILE *out) {
         ok=write_u32(out,f->function) && write_u64(out,f->site) &&
            write_u32(out,(uint32_t)f->local_count);
         for (size_t j=0; ok && j<f->local_count; ++j) {
-            const RecompContLocal *v=&f->locals[j];
-            size_t len=strlen(v->name);
-            if (!len || len>=64 || !v->size || v->size>8) { ok=0; break; }
-            ok=write_u32(out,(uint32_t)len) && fwrite(v->name,len,1,out)==1 &&
-               write_u32(out,(uint32_t)v->size) && fwrite(v->address,v->size,1,out)==1;
+            const RecompContLocal v = cont_local_at(f, j);
+            size_t len=strlen(v.name);
+            if (!len || len>=64 || !v.size || v.size>8) { ok=0; break; }
+            ok=write_u32(out,(uint32_t)len) && fwrite(v.name,len,1,out)==1 &&
+               write_u32(out,(uint32_t)v.size) && fwrite(v.address,v.size,1,out)==1;
         }
         ok=ok && write_u32(out,(uint32_t)recomp_cont_jump_count(f));
         for (SavedJump *j=f->jumps;ok && j;j=j->next) {
@@ -358,10 +397,11 @@ static int read_recovery(FILE *in,SavedFrame **result,uint32_t *result_count) {
     if (!ok) { discard_recovery(frames,count); return 0; }
     *result=frames; *result_count=count; return 1;
 }
-int recomp_cont_validate(FILE *in,uint32_t *root_function) {
+int recomp_cont_validate(FILE *in,uint32_t *root_function,uint64_t *leaf_site) {
     SavedFrame *frames;uint32_t count;
     if (!read_recovery(in,&frames,&count)) return 0;
     if (root_function) *root_function=frames[0].function;
+    if (leaf_site) *leaf_site=frames[count-1].site;
     discard_recovery(frames,count);return 1;
 }
 int recomp_cont_load(FILE *in) {

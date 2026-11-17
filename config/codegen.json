@@ -6338,6 +6338,13 @@
           "\n    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0"
         ],
         [
+          2444,
+          "    _cf = 0; /* xor clears CF */\n    ecx = 0; /* xor self */\n    _fa = (uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */\n    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fb = (uint32_t)(esi) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test esi, esi (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    g_eflags = (g_eflags & ~0x8C5u) | ((CMP_B(_fa & _fb, 0)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) & (_fb))) ? 0x4u : 0u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n    if ((((g_eflags & 0x1u) != 0) || ((g_eflags & 0x40u) != 0))) goto loc_00016977; /* jbe: below or equal (unsigned <=) */\n",
+          "    /* The preceding TEST left CF clear and the nonzero path left ZF clear. */\n    ecx = 0; /* xor self */\n",
+          "lags & 0x40u) != 0)) goto loc_00016977; /* je: equal / zero */\n\nloc_00016911: ;\n",
+          "\nloc_00016917: ;\n    ebx = MEM32(eax + 0x10);\n    edi = ebx;\n    /* nop */\n\nloc_"
+        ],
+        [
           3254,
           "uint32_t _block_00016920_eax = eax;\n    _block_00016920_",
           "",
@@ -6695,6 +6702,13 @@
           "eax), 0x41 (8-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    g_eflags = (g_eflags & ~0"
         ],
         [
+          9791,
+          "    g_eflags = (g_eflags & ~0x8C5u) | ((CMP_B(_fa & _fb, 0)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) & (_fb))) ? 0x4u : 0u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u)",
+          "    do {\n        const uint32_t tested = _fa & 0x41u;\n        /* Two tested bits: zero sets ZF and PF, both set only PF. */\n        const uint32_t flags = tested == 0 ? 0x44u : (tested == 0x41u ? 0x04u : 0u);\n        g_eflags = (g_eflags & ~0x8C5u) | flags;\n    } while (0)",
+          "ock_0001695F_eax), 0x41 (8-bit) */\n    _cf = 0; /* nothing borrows from zero */\n",
+          ";\n    eax = _block_0001695F_eax; esp = _block_0001695F_esp; g_fp_top = _block_00"
+        ],
+        [
           10008,
           ";\n    eax = _block_0001695F_eax; esp = _block_0001695F_esp; g_fp_top = _block_0001695F_g_fp_top",
           "",
@@ -7022,6 +7036,13 @@
           "\n    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);",
           "void sub_00016A40(void)\n{",
           "\n    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    int32_t _fas = 0"
+        ],
+        [
+          2390,
+          "    _cf = 0; /* xor clears CF */\n    ecx = 0; /* xor self */\n    _fa = (uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */\n    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fb = (uint32_t)(esi) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test esi, esi (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    g_eflags = (g_eflags & ~0x8C5u) | ((CMP_B(_fa & _fb, 0)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) & (_fb))) ? 0x4u : 0u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n    if ((((g_eflags & 0x1u) != 0) || ((g_eflags & 0x40u) != 0))) goto loc_00016AB7; /* jbe: below or equal (unsigned <=) */\n",
+          "    /* The preceding TEST left CF clear and the nonzero path left ZF clear. */\n    ecx = 0; /* xor self */\n",
+          "lags & 0x40u) != 0)) goto loc_00016AB7; /* je: equal / zero */\n\nloc_00016A50: ;\n",
+          "\nloc_00016A56: ;\n    ebx = MEM32(eax + 0xC);\n    edi = ebx;\n    goto loc_00016A6"
         ],
         [
           3223,
@@ -7379,6 +7400,13 @@
           "",
           "t)(0x41) & 0xFFu;\n    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* test HI8(",
           "eax), 0x41 (8-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    g_eflags = (g_eflags & ~0"
+        ],
+        [
+          9760,
+          "    g_eflags = (g_eflags & ~0x8C5u) | ((CMP_B(_fa & _fb, 0)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) & (_fb))) ? 0x4u : 0u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u)",
+          "    do {\n        const uint32_t tested = _fa & 0x41u;\n        /* Two tested bits: zero sets ZF and PF, both set only PF. */\n        const uint32_t flags = tested == 0 ? 0x44u : (tested == 0x41u ? 0x04u : 0u);\n        g_eflags = (g_eflags & ~0x8C5u) | flags;\n    } while (0)",
+          "ock_00016A9F_eax), 0x41 (8-bit) */\n    _cf = 0; /* nothing borrows from zero */\n",
+          ";\n    eax = _block_00016A9F_eax; esp = _block_00016A9F_esp; g_fp_top = _block_00"
         ],
         [
           9977,
@@ -11999,6 +12027,13 @@
           "\n    ecx = MEM32(0x54636C);\n    PUSH32(esp, ebx);\n    PUSH32(esp, esi);\n    PUSH"
         ],
         [
+          9917,
+          "    { uint64_t _n = (uint64_t)ecx * 4u;\n    if (!g_df && esi < 0xFD000000u && edi < 0xFD000000u && (uint64_t)esi + _n <= 0xFD000000u && (uint64_t)edi + _n <= 0xFD000000u) {\n      uint8_t *_d = (uint8_t*)XBOX_PTR(edi), *_s = (uint8_t*)XBOX_PTR(esi);\n      if ((uint64_t)edi + _n <= esi || (uint64_t)esi + _n <= edi) memcpy(_d, _s, (size_t)_n);\n      else { uint32_t _i; for (_i = 0; _i < ecx; _i++) MEM32(edi + _i*4u) = MEM32(esi + _i*4u); }\n      esi += ecx * 4u; edi += ecx * 4u; }\n",
+          "    {\n        /* The immediately preceding original instruction sets ECX to 16 dwords. */\n        const uint32_t bytes = 16u * 4u;\n        if (!g_df && esi <= 0xFD000000u - bytes && edi <= 0xFD000000u - bytes) {\n            uint8_t *_d = (uint8_t*)XBOX_PTR(edi), *_s = (uint8_t*)XBOX_PTR(esi);\n            if (edi + bytes <= esi || esi + bytes <= edi) memcpy(_d, _s, bytes);\n            else {\n                for (uint32_t i = 0; i < 16; i++)\n                    MEM32(edi + i * 4u) = MEM32(esi + i * 4u);\n            }\n            esi += bytes;\n            edi += bytes;\n        }\n",
+          "_fas = (int32_t)(int32_t)(_fa); /* add result */\n    esi = eax;\n    ecx = 0x10;\n",
+          "    else { uint32_t _i; int32_t _st = RECOMP_DF_STEP(4);\n      for (_i = 0; _i <"
+        ],
+        [
           12960,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
@@ -12159,7 +12194,15 @@
       "address": 97472,
       "name": "sub_00017CC0",
       "file": "recomp_0000.c",
-      "edits": []
+      "edits": [
+        [
+          3622,
+          "    { uint64_t _n = (uint64_t)ecx * 4u;\n    if (!g_df && esi < 0xFD000000u && edi < 0xFD000000u && (uint64_t)esi + _n <= 0xFD000000u && (uint64_t)edi + _n <= 0xFD000000u) {\n      uint8_t *_d = (uint8_t*)XBOX_PTR(edi), *_s = (uint8_t*)XBOX_PTR(esi);\n      if ((uint64_t)edi + _n <= esi || (uint64_t)esi + _n <= edi) memcpy(_d, _s, (size_t)_n);\n      else { uint32_t _i; for (_i = 0; _i < ecx; _i++) MEM32(edi + _i*4u) = MEM32(esi + _i*4u); }\n      esi += ecx * 4u; edi += ecx * 4u; }\n",
+          "    {\n        /* The immediately preceding original instruction sets ECX to 16 dwords. */\n        const uint32_t bytes = 16u * 4u;\n        if (!g_df && esi <= 0xFD000000u - bytes && edi <= 0xFD000000u - bytes) {\n            uint8_t *_d = (uint8_t*)XBOX_PTR(edi), *_s = (uint8_t*)XBOX_PTR(esi);\n            if (edi + bytes <= esi || esi + bytes <= edi) memcpy(_d, _s, bytes);\n            else {\n                for (uint32_t i = 0; i < 16; i++)\n                    MEM32(edi + i * 4u) = MEM32(esi + i * 4u);\n            }\n            esi += bytes;\n            edi += bytes;\n        }\n",
+          "u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n    ecx = 0x10;\n    esi = esp + 0x10;\n",
+          "    else { uint32_t _i; int32_t _st = RECOMP_DF_STEP(4);\n      for (_i = 0; _i <"
+        ]
+      ]
     },
     {
       "address": 97552,
@@ -105401,10 +105444,10 @@
         ],
         [
           2434,
-          "    { uint32_t _v=(uint32_t)(MEM32(ebp + -8)), _c=(uint32_t)(1) & 31u; if(_c) {\n    _cf=(int)((_c <= 32u ? (_v >> (_c-1u)) & 1u : (g_eflags & 1u)));\n    MEM32(ebp + -8) = _v >> _c;\n    _fa = (uint32_t)(MEM32(ebp + -8)) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* shr result */",
-          "    { volatile uint32_t *const _operand = &MEM32(ebp + -8);\n    uint32_t _v=*_operand, _c=(uint32_t)(1) & 31u; if(_c) {\n    _cf=(int)((_c <= 32u ? (_v >> (_c-1u)) & 1u : (g_eflags & 1u)));\n    const uint32_t _result = _v >> _c;\n    *_operand = _result;\n    _fa = _result; _fas = (int32_t)(int32_t)(_fa); /* shr result */",
-          "M32(ebp + -12) = eax;\n    ecx = 0xFEE;\n    MEM32(ebp + -8) = edx;\n    esi = 0xFFF;\n\nloc_000EB549: ;\n",
-          "\n    g_eflags=(g_eflags & ~0xC5u) | (uint32_t)_cf | (RECOMP_PARITY8(_fa)?4u:0u) | (_fa==0?0x40u:0u) "
+          "    { uint32_t _v=(uint32_t)(MEM32(ebp + -8)), _c=(uint32_t)(1) & 31u; if(_c) {\n    _cf=(int)((_c <= 32u ? (_v >> (_c-1u)) & 1u : (g_eflags & 1u)));\n    MEM32(ebp + -8) = _v >> _c;\n    _fa = (uint32_t)(MEM32(ebp + -8)) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* shr result */\n    g_eflags=(g_eflags & ~0xC5u) | (uint32_t)_cf | (RECOMP_PARITY8(_fa)?4u:0u) | (_fa==0?0x40u:0u) | ((_fa >> 31) << 7);\n    if(_c==1)g_eflags=(g_eflags & ~0x800u) | (((_v >> 31) & 1u) << 11);\n    } }\n",
+          "    {\n        volatile uint32_t *const control = &MEM32(ebp + -8);\n        const uint32_t shifted = *control >> 1;\n        *control = shifted;\n        _fa = shifted;\n    }\n",
+          ";\n    ecx = 0xFEE;\n    MEM32(ebp + -8) = edx;\n    esi = 0xFFF;\n\nloc_000EB549: ;\n",
+          "    _fa = (uint32_t)(MEM8(ebp + -7)) & 0xFFu; _fb = (uint32_t)(1) & 0xFFu;\n    _"
         ],
         [
           2918,
@@ -105477,11 +105520,18 @@
           "\n    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF/OF; CF unchanged *"
         ],
         [
+          6531,
+          "    ecx++;\n    _fa = (uint32_t)(ecx) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF/OF; CF unchanged */\n    g_eflags = (g_eflags & ~0x10u) | ((_fa ^ (_fa - 1u) ^ 1u) & 0x10u);\n    _cf = 0; /* logical op clears CF */\n    ecx = ecx & esi;\n    _fa = (uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* and result */\n    g_eflags = (g_eflags & ~0x8C5u) | ((0) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
+          "    {\n        const uint32_t incremented = ecx + 1u;\n        ecx = incremented & esi;\n        _fa = ecx;\n        _fas = (int32_t)_fa;\n        _fb = (incremented == 0x80000000u);\n        _cf = 0;\n        g_eflags = (g_eflags & ~0x8D5u) | ((incremented & 15u) ? 0u : 0x10u) |\n                   (RECOMP_PARITY8(_fa) ? 4u : 0u) | (_fa == 0 ? 0x40u : 0u) | ((_fa >> 31) << 7);\n    }\n",
+          "changed */\n    MEM8(ebx + edi) = LO8(eax);\n    MEM8(ecx + 0x54CA90) = LO8(eax);\n",
+          "    { recomp_cont_site(&_cont_frame, 0x2000EB549ULL); guest_cpu_yield(); goto lo"
+        ],
+        [
           7090,
-          "recomp_cont_site(&_cont_frame, 0x2000EB549ULL);",
-          "recomp_cont_site_inline(&_cont_frame, 0x2000EB549ULL);",
+          "recomp_cont_site(&_cont_frame, 0x2000EB549ULL); guest_cpu_yield(); goto loc_000EB549;",
+          "/* Each dictionary slot advances by one output byte. */ if ((ecx & 31u) == 0) {\n            recomp_cont_site_inline(&_cont_frame, 0x2000EB549ULL);\n            guest_cpu_yield();\n        } else _cont_frame.site = 0x2000EB549ULL;\n        goto loc_000EB549;",
           "== 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n    { ",
-          " guest_cpu_yield(); goto loc_000EB549; }\n\nloc_000EB597: ;\n    edi = ZX8(MEM8(edx"
+          " }\n\nloc_000EB597: ;\n    edi = ZX8(MEM8(edx + eax));\n    edx++;\n    _fa = (uint32"
         ],
         [
           7580,
@@ -105498,11 +105548,18 @@
           "\n    if ((!((g_eflags & 0x1u) != 0) && !((g_eflags & 0x40u) != 0))) goto loc_000"
         ],
         [
-          10446,
-          "recomp_cont_site(&_cont_frame, 0x2000EB549ULL);",
-          "recomp_cont_site_inline(&_cont_frame, 0x2000EB549ULL);",
-          " + -20) = edi;\n    MEM32(ebp + -16) = eax;\n    if (((g_eflags & 0x80u) != 0)) { ",
-          " guest_cpu_yield(); goto loc_000EB549; } /* js: sign (negative) */\n\nloc_000EB5D0"
+          9716,
+          "    _fb = (uint32_t)(2) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n    _cf = (int)((((uint64_t)(eax) + (uint64_t)(2)) >> 32) & 1);\n    eax = eax + 2;\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((((~(((_fa - _fb)) ^ (_fb)) & (((_fa - _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n",
+          "    {\n        const uint32_t length_nibble = eax;\n        _fb = 2u;\n        _fbs = 2;\n        _cf = 0;\n        eax = length_nibble + 2u;\n        _fa = eax;\n        _fas = (int32_t)_fa;\n        /* Length is 2\u201317. The mask encodes even parity for those 16 lengths. */\n        const uint32_t parity = ((0xA59Au >> length_nibble) & 1u) << 2;\n        g_eflags = (g_eflags & ~0x8D5u) | (_fa & 0x10u) | parity;\n    }\n",
+          " (uint32_t)(edi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* or result */\n",
+          "    PUSH32(esp, 0);\n    MEM32(ebp + -24) = eax;\n    POP32(esp, eax);\n    MEM32(e"
+        ],
+        [
+          10409,
+          "    if (((g_eflags & 0x80u) != 0)) { recomp_cont_site(&_cont_frame, 0x2000EB549ULL); guest_cpu_yield(); goto loc_000EB549; } /* js: sign (negative) */\n",
+          "",
+          "x;\n    POP32(esp, eax);\n    MEM32(ebp + -20) = edi;\n    MEM32(ebp + -16) = eax;\n",
+          "\nloc_000EB5D0: ;\n    goto loc_000EB5D5;\n\nloc_000EB5D2: ;\n    edi = MEM32(ebp + -"
         ],
         [
           11188,
@@ -105520,17 +105577,17 @@
         ],
         [
           12653,
-          "recomp_cont_site(&_cont_frame, 0x2000EB5D2ULL);",
-          "recomp_cont_site_inline(&_cont_frame, 0x2000EB5D2ULL);",
+          "recomp_cont_site(&_cont_frame, 0x2000EB5D2ULL); guest_cpu_yield(); goto loc_000EB5D2;",
+          "if ((ecx & 31u) == 0) {\n            recomp_cont_site_inline(&_cont_frame, 0x2000EB5D2ULL);\n            guest_cpu_yield();\n        } else _cont_frame.site = 0x2000EB5D2ULL;\n        goto loc_000EB5D2;",
           "s & 0x40u) != 0) || ((g_eflags & 0x80u) != 0) != ((g_eflags & 0x800u) != 0))) { ",
-          " guest_cpu_yield(); goto loc_000EB5D2; } /* jle: less or equal (signed <=) */\n\nl"
+          " } /* jle: less or equal (signed <=) */\n\nloc_000EB601: ;\n    { recomp_cont_site("
         ],
         [
           12801,
-          "recomp_cont_site(&_cont_frame, 0x2000EB549ULL);",
-          "recomp_cont_site_inline(&_cont_frame, 0x2000EB549ULL);",
+          "recomp_cont_site(&_cont_frame, 0x2000EB549ULL); guest_cpu_yield(); goto loc_000EB549;",
+          "if ((ecx & 31u) == 0) {\n            recomp_cont_site_inline(&_cont_frame, 0x2000EB549ULL);\n            guest_cpu_yield();\n        } else _cont_frame.site = 0x2000EB549ULL;\n        goto loc_000EB549;",
           "oto loc_000EB5D2; } /* jle: less or equal (signed <=) */\n\nloc_000EB601: ;\n    { ",
-          " guest_cpu_yield(); goto loc_000EB549; }\n\nloc_000EB606: ;\n    POP32(esp, edi);\n "
+          " }\n\nloc_000EB606: ;\n    POP32(esp, edi);\n    POP32(esp, esi);\n    POP32(esp, ebx"
         ],
         [
           13121,
@@ -149888,6 +149945,13 @@
           "    cpu_resume_001A7255: ;\n    eax = MEM32(ebp + -8);\n    cpu_resume_001A7258: ;\n    MEM32(eax + 0x1"
         ],
         [
+          45649,
+          "    _fb = (uint32_t)(1) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n    _cf = (int)((((uint64_t)(edx) + (uint64_t)(1)) >> 32) & 1);\n    edx = edx + 1;\n    _fa = (uint32_t)(edx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((((~(((_fa - _fb)) ^ (_fb)) & (((_fa - _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n    ",
+          "    {\n        const uint32_t incremented = edx + 1u;\n        edx = incremented;\n        _fa = incremented;\n        _fas = (int32_t)incremented;\n        _fb = 1;\n        _fbs = 1;\n        _cf = incremented == 0;\n        g_eflags = (g_eflags & ~0x8D5u) | (_cf ? 0x41u : 0u) |\n                   (RECOMP_PARITY8(incremented) ? 0x04u : 0u) |\n                   (!(incremented & 15u) ? 0x10u : 0u) |\n                   ((incremented >> 24) & 0x80u) |\n                   (incremented == 0x80000000u ? 0x800u : 0u);\n    }\n",
+          "  cpu_resume_001A72B2: ;\n    edx = MEM32(ebp + -44);\n    cpu_resume_001A72B5: ;\n",
+          "cpu_resume_001A72B8: ;\n    MEM32(ebp + -44) = edx;\n\nloc_001A72BB: ;\n    cpu_resu"
+        ],
+        [
           46614,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
@@ -156471,7 +156535,29 @@
       "address": 1827460,
       "name": "sub_001BE284",
       "file": "recomp_0050.c",
-      "edits": []
+      "edits": [
+        [
+          1598,
+          "recomp_cont_site(&_cont_frame, 0x1001BE29BULL);",
+          "recomp_cont_site_inline(&_cont_frame, 0x1001BE29BULL);",
+          "BE298: ;\n    PUSH32(esp, esi);\n    ecx = edi;\n    PUSH32(esp, 0x001BE2A0u);\n    ",
+          "\ncont_call_001BE29B: ;\n    RECOMP_ABI_CALL(0x001B354Eu, sub_001B354E); /* call 0"
+        ],
+        [
+          1742,
+          "recomp_cont_site(&_cont_frame, 0);",
+          "recomp_cont_site_inline(&_cont_frame, 0);",
+          "9B: ;\n    RECOMP_ABI_CALL(0x001B354Eu, sub_001B354E); /* call 0x001B354E */\n    ",
+          "\n\nloc_001BE2A0: ;\n    esi--;\n    _fa = (uint32_t)(esi) & 0xFFFFFFFFu;\n    _fas ="
+        ],
+        [
+          2624,
+          "recomp_cont_site(&_cont_frame, 0x2001BE298ULL);",
+          "recomp_cont_site_inline(&_cont_frame, 0x2001BE298ULL);",
+          "s & 0x40u) != 0) && ((g_eflags & 0x80u) != 0) == ((g_eflags & 0x800u) != 0))) { ",
+          " guest_cpu_yield(); goto loc_001BE298; } /* jg: greater (signed >) */\n\nloc_001BE"
+        ]
+      ]
     },
     {
       "address": 1827509,
@@ -156525,7 +156611,29 @@
       "address": 1828068,
       "name": "sub_001BE4E4",
       "file": "recomp_0050.c",
-      "edits": []
+      "edits": [
+        [
+          27879,
+          "recomp_cont_site(&_cont_frame, 0x1001BE6F3ULL);",
+          "recomp_cont_site_inline(&_cont_frame, 0x1001BE6F3ULL);",
+          " current across calls */\n    g_seh_ebp = ebp;\n    PUSH32(esp, 0x001BE6F8u);\n    ",
+          "\ncont_call_001BE6F3: ;\n    RECOMP_ABI_CALL(0x001BE219u, sub_001BE219); /* call 0"
+        ],
+        [
+          28023,
+          "recomp_cont_site(&_cont_frame, 0);",
+          "recomp_cont_site_inline(&_cont_frame, 0);",
+          "F3: ;\n    RECOMP_ABI_CALL(0x001BE219u, sub_001BE219); /* call 0x001BE219 */\n    ",
+          "\n\nloc_001BE6F8: ;\n    esi++;\n    _fa = (uint32_t)(esi) & 0xFFFFFFFFu;\n    _fas ="
+        ],
+        [
+          28930,
+          "recomp_cont_site(&_cont_frame, 0x2001BE6EFULL);",
+          "recomp_cont_site_inline(&_cont_frame, 0x2001BE6EFULL);",
+          "s & 0x40u) != 0) || ((g_eflags & 0x80u) != 0) != ((g_eflags & 0x800u) != 0))) { ",
+          " guest_cpu_yield(); goto loc_001BE6EF; } /* jle: less or equal (signed <=) */\n\nl"
+        ]
+      ]
     },
     {
       "address": 1828620,
@@ -186919,18 +187027,25 @@
       "file": "recomp_0058.c",
       "edits": [
         [
-          4054,
-          "loc_00237EDE: ;\n    edx = 0x7EFEFEFF;\n    eax = MEM32(ecx);",
-          "loc_00237EDE: ;\n    edx = 0x7EFEFEFF;\n    uint32_t copied_word = MEM32(ecx);\n    eax = copied_word;",
-          "? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n\n",
-          "\n    _fb = (uint32_t)(eax) & 0xFFFFFFFFu; _fbs = (int32"
+          1514,
+          "    SET_LO8(edx, MEM8(ecx));\n    _fb = (uint32_t)(1) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n    _cf = (int)((((uint64_t)(ecx) + (uint64_t)(1)) >> 32) & 1);\n    ecx = ecx + 1;\n    _fa = (uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n    g_eflags = (g_eflags & ~0x10u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n    _fa = (uint32_t)(LO8(edx)) & 0xFFu; _fb = (uint32_t)(LO8(edx)) & 0xFFu;\n    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* test LO8(edx), LO8(edx) (8-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    g_eflags = (g_eflags & ~0x8C5u) | ((CMP_B(_fa & _fb, 0)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) & (_fb))) ? 0x4u : 0u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
+          "    _fa = MEM8(ecx);\n    SET_LO8(edx, _fa);\n    ecx++;\n    _fb = _fa; _fas = (int32_t)(int8_t)_fa; _fbs = _fas;\n    _cf = 0;\n    g_eflags = (g_eflags & ~0x8D5u) | ((ecx & 15u) == 0 ? 0x10u : 0u) |\n               (RECOMP_PARITY8(_fa) ? 4u : 0u) | (_fa == 0 ? 0x40u : 0u) | (_fa & 0x80u);\n",
+          " 0)) goto loc_00237EDE; /* je: equal / zero */\n\nloc_00237EC1: ;\n",
+          "    if (((g_eflags & 0x40u) != 0)) goto loc_00237F30; /* je: equ"
         ],
         [
-          4709,
-          "    edx = MEM32(ecx);\n    _fb = (uint32_t)(4)",
-          "    edx = copied_word;\n    _fb = (uint32_t)(4)",
-          "FFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */\n",
-          " & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add "
+          2434,
+          "    MEM8(edi) = LO8(edx);\n    _fb = (uint32_t)(1) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n    _cf = (int)((((uint64_t)(edi) + (uint64_t)(1)) >> 32) & 1);\n    edi = edi + 1;\n    _fa = (uint32_t)(edi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n    g_eflags = (g_eflags & ~0x10u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n    _fa = (uint32_t)(ecx) & 0xFFFFFFFFu; _fb = (uint32_t)(3) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test ecx, 3 (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    g_eflags = (g_eflags & ~0x8C5u) | ((CMP_B(_fa & _fb, 0)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) & (_fb))) ? 0x4u : 0u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
+          "    MEM8(edi) = LO8(edx);\n    edi++;\n    _fa = ecx; _fb = 3; _fas = (int32_t)_fa; _fbs = 3;\n    _cf = 0;\n    const uint32_t low_bits = ecx & 3u;\n    g_eflags = (g_eflags & ~0x8D5u) | ((edi & 15u) == 0 ? 0x10u : 0u) |\n               (RECOMP_PARITY8(low_bits) ? 4u : 0u) | (low_bits == 0 ? 0x40u : 0u);\n",
+          " 0)) goto loc_00237F30; /* je: equal / zero */\n\nloc_00237ECA: ;\n",
+          "    if (!((g_eflags & 0x40u) != 0)) { recomp_cont_site(&_cont_fr"
+        ],
+        [
+          4070,
+          "    edx = 0x7EFEFEFF;\n    eax = MEM32(ecx);\n    _fb = (uint32_t)(eax) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n    _cf = (int)((((uint64_t)(edx) + (uint64_t)(eax)) >> 32) & 1);\n    edx = edx + eax;\n    _fa = (uint32_t)(edx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n    _cf = 0; /* logical op clears CF */\n    eax = eax ^ 0xFFFFFFFFu;\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */\n    _cf = 0; /* logical op clears CF */\n    eax = eax ^ edx;\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */\n    edx = MEM32(ecx);\n    _fb = (uint32_t)(4) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n    _cf = (int)((((uint64_t)(ecx) + (uint64_t)(4)) >> 32) & 1);\n    ecx = ecx + 4;\n    _fa = (uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n    g_eflags = (g_eflags & ~0x10u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(0x81010100u) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test eax, 0x81010100u (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    g_eflags = (g_eflags & ~0x8C5u) | ((CMP_B(_fa & _fb, 0)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) & (_fb))) ? 0x4u : 0u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
+          "    edx = 0x7EFEFEFF;\n    const uint32_t copied_word = MEM32(ecx);\n    eax = ~(copied_word ^ (edx + copied_word));\n    edx = copied_word;\n    ecx += 4;\n    _fa = eax; _fb = 0x81010100u; _fas = (int32_t)_fa; _fbs = (int32_t)_fb;\n    _cf = 0;\n    const uint32_t tested_bits = _fa & _fb;\n    /* The TEST mask clears the low byte, giving even parity. */\n    g_eflags = (g_eflags & ~0x8D5u) | ((ecx & 15u) < 4u ? 0x10u : 0u) |\n               4u | (tested_bits == 0 ? 0x40u : 0u) | ((tested_bits >> 24) & 0x80u);\n",
+          "u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n\nloc_00237EDE: ;\n",
+          "    if (((g_eflags & 0x40u) != 0)) { recomp_cont_site(&_cont_fra"
         ]
       ]
     },
@@ -188043,6 +188158,13 @@
           "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
           "void sub_0023AAAF(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          2217,
+          "    _cf = 0; /* logical op clears CF */\n    SET_LO16(eax, LO16(eax) & 0x7FF0);\n    _fa = (uint32_t)(LO16(eax)) & 0xFFFFu; _fas = (int32_t)(int16_t)(_fa); /* and result */\n    _fa = (uint32_t)(LO16(eax)) & 0xFFFFu; _fb = (uint32_t)(0x7FF0) & 0xFFFFu;\n    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp LO16(eax), 0x7FF0 (16-bit) */\n    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint16_t)((uint16_t)(_fas) - (uint16_t)(_fbs)) >> 15) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x8000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n",
+          "    {\n        const uint32_t exponent = LO16(eax) & 0x7FF0u;\n        SET_LO16(eax, exponent);\n        _fa = exponent;\n        _fas = (int32_t)exponent;\n        _fb = 0x7FF0u;\n        _fbs = 0x7FF0;\n        /* All exponents are nonnegative multiples of 16 through 0x7FF0.\n         * A smaller exponent sets CF and SF. AF and OF are always clear. */\n        _cf = exponent != 0x7FF0u;\n        g_eflags = (g_eflags & ~0x8D5u) | (_cf ? 0x81u : 0x40u) |\n                   (RECOMP_PARITY8(exponent - 0x7FF0u) ? 0x04u : 0u);\n    }\n",
+          "e(&_cont_frame, 0);\n\nloc_0023AAC6: ;\n    edi = eax;\n    eax = MEM32(ebp + 0xE);\n",
+          "    POP32(esp, ecx);\n    POP32(esp, ecx);\n    if (!((g_eflags & 0x40u) != 0)) go"
         ],
         [
           6000,
@@ -190763,11 +190885,32 @@
           "\n    if ((((g_eflags & 0x40u) != 0) || ((g_eflags & 0x80u) != 0) != ((g_eflags &"
         ],
         [
+          8556,
+          "    _cf = 0; /* logical op clears CF */\n    eax = eax & 8;\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* and result */\n    g_eflags = (g_eflags & ~0x8C5u) | ((0) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n\n",
+          "    eax = eax & 8;\n\n",
+          "\nloc_00240AFC: ;\n    ecx = MEM32(0x534950);\n    eax = ZX8(MEM8(ecx + eax * 2));\n",
+          "loc_00240B09: ;\n    _cf = 0; /* xor clears CF */\n    esi = 0; /* xor self */\n   "
+        ],
+        [
           9224,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
-          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_zero_flags(_fa) & 0x8D5u);",
           "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, esi (32-bit) */\n",
           "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00240B51; /* je: equal / zero */\n\nl"
+        ],
+        [
+          9706,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_00240B51; /* je: equal / zero */\n\nloc_00240B0F: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
+          10125,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "_fb != 0)) ? 0x800u : 0u) | ((_fa ^ (_fa + 1u) ^ 1u) & 0x10u);\n\nloc_00240B12: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           12029,
@@ -190805,6 +190948,13 @@
           "    if (((g_eflags & 0x40u) != 0)) goto loc_00240BC8; /* je: equal / zero */\n\nloc_00240BB9: ;\n    ME"
         ],
         [
+          19074,
+          "    MEM32(ebp + -64) = MEM32(ebp + -64) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -64)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -64);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_00240BC8; /* je: equal / zero */\n\nloc_00240BB9: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
+        ],
+        [
           19748,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
@@ -190838,6 +190988,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, 0x4C (32-bit) */\n",
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00240C4F; /* jne: not equal / not "
+        ],
+        [
+          23034,
+          "    MEM8(ebp + -75) = MEM8(ebp + -75) + 1;\n    _fa = (uint32_t)(MEM8(ebp + -75)) & 0xFFu;\n",
+          "    {\n        volatile uint8_t *const _operand = &MEM8(ebp + -75);\n        const uint8_t _result = (uint8_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "40u) != 0)) goto loc_00240C4F; /* jne: not equal / not zero */\n\nloc_00240BEB: ;\n",
+          "    _fas = (int32_t)(int8_t)(_fa); _fb = (_fa == 0x80u); /* inc result/SF/OF; CF"
         ],
         [
           23460,
@@ -190880,6 +191037,13 @@
           "    eax = _block_00240BF8_eax;\n",
           "b)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n",
           "    if (!((g_eflags & 0x40u) != 0)) goto loc_00240C0F; /* jne: not equal / not zero */\n\nloc_00240C00"
+        ],
+        [
+          24835,
+          "    MEM32(ebp + -80) = MEM32(ebp + -80) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -80)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -80);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "o loc_00240C0F; /* jne: not equal / not zero */\n\nloc_00240C00: ;\n    edi = eax;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           25871,
@@ -190945,6 +191109,13 @@
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00240C4F; /* jne: not equal / not "
         ],
         [
+          30347,
+          "    MEM8(ebp + -71) = MEM8(ebp + -71) + 1;\n    _fa = (uint32_t)(MEM8(ebp + -71)) & 0xFFu;\n",
+          "    {\n        volatile uint8_t *const _operand = &MEM8(ebp + -71);\n        const uint8_t _result = (uint8_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "ot equal / not zero */\n\nloc_00240C39: ;\n    goto loc_00240C62;\n\nloc_00240C3B: ;\n",
+          "    _fas = (int32_t)(int8_t)(_fa); _fb = (_fa == 0x80u); /* inc result/SF/OF; CF"
+        ],
+        [
           30949,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
@@ -190964,6 +191135,41 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, 0x77 (32-bit) */\n",
           "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00240C57; /* je: equal / zero */\n\nl"
+        ],
+        [
+          32747,
+          "    MEM8(ebp + -72) = MEM8(ebp + -72) + 1;\n    _fa = (uint32_t)(MEM8(ebp + -72)) & 0xFFu;\n",
+          "    {\n        volatile uint8_t *const _operand = &MEM8(ebp + -72);\n        const uint8_t _result = (uint8_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_00240C57; /* je: equal / zero */\n\nloc_00240C4F: ;\n",
+          "    _fas = (int32_t)(int8_t)(_fa); _fb = (_fa == 0x80u); /* inc result/SF/OF; CF"
+        ],
+        [
+          33173,
+          "    MEM8(ebp + -75) = MEM8(ebp + -75) + 1;\n    _fa = (uint32_t)(MEM8(ebp + -75)) & 0xFFu;\n",
+          "    {\n        volatile uint8_t *const _operand = &MEM8(ebp + -75);\n        const uint8_t _result = (uint8_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "u) | ((_fa ^ (_fa - 1u) ^ 1u) & 0x10u);\n    goto loc_00240C62;\n\nloc_00240C54: ;\n",
+          "    _fas = (int32_t)(int8_t)(_fa); _fb = (_fa == 0x80u); /* inc result/SF/OF; CF"
+        ],
+        [
+          33576,
+          "    MEM8(ebp + -74) = MEM8(ebp + -74) + 1;\n    _fa = (uint32_t)(MEM8(ebp + -74)) & 0xFFu;\n",
+          "    {\n        volatile uint8_t *const _operand = &MEM8(ebp + -74);\n        const uint8_t _result = (uint8_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "_fb != 0)) ? 0x800u : 0u) | ((_fa ^ (_fa - 1u) ^ 1u) & 0x10u);\n\nloc_00240C57: ;\n",
+          "    _fas = (int32_t)(int8_t)(_fa); _fb = (_fa == 0x80u); /* inc result/SF/OF; CF"
+        ],
+        [
+          34002,
+          "    MEM8(ebp + -75) = MEM8(ebp + -75) - 1;\n    _fa = (uint32_t)(MEM8(ebp + -75)) & 0xFFu;\n",
+          "    {\n        volatile uint8_t *const _operand = &MEM8(ebp + -75);\n        const uint8_t _result = (uint8_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "u) | ((_fa ^ (_fa - 1u) ^ 1u) & 0x10u);\n    goto loc_00240C62;\n\nloc_00240C5C: ;\n",
+          "    _fas = (int32_t)(int8_t)(_fa); _fb = (_fa == 0x7Fu); /* dec result/SF/OF; CF"
+        ],
+        [
+          34186,
+          "    MEM8(ebp + -74) = MEM8(ebp + -74) - 1;\n    _fa = (uint32_t)(MEM8(ebp + -74)) & 0xFFu;\n",
+          "    {\n        volatile uint8_t *const _operand = &MEM8(ebp + -74);\n        const uint8_t _result = (uint8_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "t32_t)(int8_t)(_fa); _fb = (_fa == 0x7Fu); /* dec result/SF/OF; CF unchanged */\n",
+          "    _fas = (int32_t)(int8_t)(_fa); _fb = (_fa == 0x7Fu); /* dec result/SF/OF; CF"
         ],
         [
           34817,
@@ -191064,6 +191270,13 @@
           "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00240D4D; /* je: equal / zero */\n\nl"
         ],
         [
+          41646,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_00240D4D; /* je: equal / zero */\n\nloc_00240CCD: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
+        ],
+        [
           43448,
           "    edx = MEM32(ebp + -64);\n    _fa = (uint32_t)(edx) & 0xFFFFFFFFu; _fb = (uint32_t)(edx) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test edx, edx (32-bit) */\n",
           "    uint32_t _block_00240CEB_edx = edx;\n    _block_00240CEB_edx = MEM32(ebp + -64);\n    _fa = (uint32_t)(_block_00240CEB_edx) & 0xFFFFFFFFu; _fb = (uint32_t)(_block_00240CEB_edx) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test _block_00240CEB_edx, _block_00240CEB_edx (32-bit) */\n",
@@ -191148,6 +191361,13 @@
           "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0024156E; /* je: equal / zero */\n\nl"
         ],
         [
+          49875,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "/* je: equal / zero */\n\nloc_00240D48: ;\n    goto loc_0024158E;\n\nloc_00240D4D: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
+        ],
+        [
           51014,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
@@ -191167,6 +191387,20 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, 0x2B (32-bit) */\n",
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00240DAF; /* jne: not equal / not "
+        ],
+        [
+          53052,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "40u) != 0)) goto loc_00240DAF; /* jne: not equal / not zero */\n\nloc_00240D98: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
+          53252,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF/OF; CF unchanged */\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           54373,
@@ -191211,6 +191445,13 @@
           "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n "
         ],
         [
+          57780,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "c_00240E0E; /* je: equal / zero */\n\nloc_00240DED: ;\n    eax = MEM32(ebp + -68);\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
           58052,
           "    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test eax, eax (32-bit) */\n",
           "    _fa = (uint32_t)(_block_00240DED_eax) & 0xFFFFFFFFu; _fb = (uint32_t)(_block_00240DED_eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test _block_00240DED_eax, _block_00240DED_eax (32-bit) */\n",
@@ -191223,6 +191464,20 @@
           "    eax = _block_00240DED_eax;\n",
           "u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    if (((g_eflags & 0x40u) != 0)) goto loc_00240E0E; /* je: equal / zero */\n\nloc_00240DF7: ;\n    ME"
+        ],
+        [
+          58585,
+          "    MEM32(ebp + -60) = MEM32(ebp + -60) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -60)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -60);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_00240E0E; /* je: equal / zero */\n\nloc_00240DF7: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
+        ],
+        [
+          58964,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF/OF; CF unchanged */\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           60033,
@@ -191239,6 +191494,13 @@
           "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n "
         ],
         [
+          60543,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "A; /* jne: not equal / not zero */\n\nloc_00240E16: ;\n    eax = MEM32(ebp + -68);\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
           60815,
           "    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test eax, eax (32-bit) */\n",
           "    _fa = (uint32_t)(_block_00240E16_eax) & 0xFFFFFFFFu; _fb = (uint32_t)(_block_00240E16_eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test _block_00240E16_eax, _block_00240E16_eax (32-bit) */\n",
@@ -191251,6 +191513,13 @@
           "    eax = _block_00240E16_eax;\n",
           "u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    if (((g_eflags & 0x40u) != 0)) goto loc_00240E7A; /* je: equal / zero */\n\nloc_00240E20: ;\n    ME"
+        ],
+        [
+          61348,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_00240E7A; /* je: equal / zero */\n\nloc_00240E20: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           62072,
@@ -191295,6 +191564,13 @@
           "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n "
         ],
         [
+          64696,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "c_00240E7A; /* je: equal / zero */\n\nloc_00240E5C: ;\n    eax = MEM32(ebp + -68);\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
           64968,
           "    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test eax, eax (32-bit) */\n",
           "    _fa = (uint32_t)(_block_00240E5C_eax) & 0xFFFFFFFFu; _fb = (uint32_t)(_block_00240E5C_eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test _block_00240E5C_eax, _block_00240E5C_eax (32-bit) */\n",
@@ -191307,6 +191583,20 @@
           "    eax = _block_00240E5C_eax;\n",
           "u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    if (((g_eflags & 0x40u) != 0)) goto loc_00240E7A; /* je: equal / zero */\n\nloc_00240E66: ;\n    ME"
+        ],
+        [
+          65501,
+          "    MEM32(ebp + -60) = MEM32(ebp + -60) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -60)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -60);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_00240E7A; /* je: equal / zero */\n\nloc_00240E66: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
+        ],
+        [
+          65880,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF/OF; CF unchanged */\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           66975,
@@ -191337,6 +191627,13 @@
           "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n "
         ],
         [
+          68779,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "3; /* jne: not equal / not zero */\n\nloc_00240E92: ;\n    eax = MEM32(ebp + -68);\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
           69051,
           "    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test eax, eax (32-bit) */\n",
           "    _fa = (uint32_t)(_block_00240E92_eax) & 0xFFFFFFFFu; _fb = (uint32_t)(_block_00240E92_eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test _block_00240E92_eax, _block_00240E92_eax (32-bit) */\n",
@@ -191349,6 +191646,13 @@
           "    eax = _block_00240E92_eax;\n",
           "u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    if (((g_eflags & 0x40u) != 0)) goto loc_00240F13; /* je: equal / zero */\n\nloc_00240E9C: ;\n    ME"
+        ],
+        [
+          69759,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF/OF; CF unchanged */\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           70702,
@@ -191372,6 +191676,13 @@
           "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n "
         ],
         [
+          72311,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "C; /* jne: not equal / not zero */\n\nloc_00240EBE: ;\n    eax = MEM32(ebp + -68);\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
           72583,
           "    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test eax, eax (32-bit) */\n",
           "    _fa = (uint32_t)(_block_00240EBE_eax) & 0xFFFFFFFFu; _fb = (uint32_t)(_block_00240EBE_eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test _block_00240EBE_eax, _block_00240EBE_eax (32-bit) */\n",
@@ -191384,6 +191695,13 @@
           "    eax = _block_00240EBE_eax;\n",
           "u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    if (!((g_eflags & 0x40u) != 0)) goto loc_00240ECD; /* jne: not equal / not zero */\n\nloc_00240EC8"
+        ],
+        [
+          73548,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          ") | ((0) ? 0x800u : 0u);\n    goto loc_00240EDC;\n\nloc_00240ECD: ;\n    edx = edi;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           74511,
@@ -191414,6 +191732,13 @@
           "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n "
         ],
         [
+          76466,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "c_00240F13; /* je: equal / zero */\n\nloc_00240F01: ;\n    eax = MEM32(ebp + -68);\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
           76738,
           "    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test eax, eax (32-bit) */\n",
           "    _fa = (uint32_t)(_block_00240F01_eax) & 0xFFFFFFFFu; _fb = (uint32_t)(_block_00240F01_eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test _block_00240F01_eax, _block_00240F01_eax (32-bit) */\n",
@@ -191426,6 +191751,20 @@
           "    eax = _block_00240F01_eax;\n",
           "u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    if (((g_eflags & 0x40u) != 0)) goto loc_00240F13; /* je: equal / zero */\n\nloc_00240F0B: ;\n    ME"
+        ],
+        [
+          77271,
+          "    MEM32(ebp + -60) = MEM32(ebp + -60) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -60)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -60);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_00240F13; /* je: equal / zero */\n\nloc_00240F0B: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
+        ],
+        [
+          77963,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "rame, 0x200240ECDULL); guest_cpu_yield(); goto loc_00240ECD; }\n\nloc_00240F13: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
         ],
         [
           78353,
@@ -191447,6 +191786,13 @@
           "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp8_zero_flags(_fa) & 0x8D5u);",
           " MEM8(ebp + -71), 0 (8-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0024158E; /* jne: not equal / not "
+        ],
+        [
+          80618,
+          "    MEM32(ebp + -48) = MEM32(ebp + -48) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -48)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -48);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "40u) != 0)) goto loc_0024158E; /* jne: not equal / not zero */\n\nloc_00240F38: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           81886,
@@ -191484,11 +191830,25 @@
           "    if (!((g_eflags & 0x40u) != 0)) goto loc_00240F6A; /* jne: not equal / not zero */\n\nloc_00240F60"
         ],
         [
+          83069,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "F6A; /* jne: not equal / not zero */\n\nloc_00240F60: ;\n    MEM32(ebp + -64) = 1;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
+        ],
+        [
           83716,
           "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp8_zero_flags(_fa) & 0x8D5u);",
           " MEM8(ebp + -74), 0 (8-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
           "\n    if ((((g_eflags & 0x40u) != 0) || ((g_eflags & 0x80u) != 0) != ((g_eflags &"
+        ],
+        [
+          84316,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "EM8(ebp + -73) = 1;\n\nloc_00240F74: ;\n    edi = MEM32(ebp + -96);\n    ebx = edi;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
         ],
         [
           84732,
@@ -191512,6 +191872,13 @@
           "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n "
         ],
         [
+          86371,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "c_00240FA3; /* je: equal / zero */\n\nloc_00240F95: ;\n    eax = MEM32(ebp + -68);\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
           86643,
           "    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test eax, eax (32-bit) */\n",
           "    _fa = (uint32_t)(_block_00240F95_eax) & 0xFFFFFFFFu; _fb = (uint32_t)(_block_00240F95_eax) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test _block_00240F95_eax, _block_00240F95_eax (32-bit) */\n",
@@ -191524,6 +191891,13 @@
           "    eax = _block_00240F95_eax;\n",
           "u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    if (((g_eflags & 0x40u) != 0)) goto loc_002412BA; /* je: equal / zero */\n\nloc_00240FA3: ;\n    ME"
+        ],
+        [
+          87176,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_002412BA; /* je: equal / zero */\n\nloc_00240FA3: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           87911,
@@ -191601,6 +191975,13 @@
           "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp8_zero_flags(_fa) & 0x8D5u);",
           " MEM8(ebp + -73), 0 (8-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
           "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00241296; /* je: equal / zero */\n\nl"
+        ],
+        [
+          97068,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_0024103E; /* je: equal / zero */\n\nloc_0024102D: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           98282,
@@ -191743,6 +192124,13 @@
           "\n    goto loc_002415EE;\n\nloc_002410A6: ;\n    MEM8(ebp + -37) = MEM8(ebp + -37) -"
         ],
         [
+          103946,
+          "    MEM8(ebp + -37) = MEM8(ebp + -37) - 1;\n    _fa = (uint32_t)(MEM8(ebp + -37)) & 0xFFu;\n",
+          "    {\n        volatile uint8_t *const _operand = &MEM8(ebp + -37);\n        const uint8_t _result = (uint8_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          " | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n    goto loc_002415EE;\n\nloc_002410A6: ;\n",
+          "    _fas = (int32_t)(int8_t)(_fa); _fb = (_fa == 0x7Fu); /* dec result/SF/OF; CF"
+        ],
+        [
           104358,
           "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp8_zero_flags(_fa) & 0x8D5u);",
@@ -191883,6 +192271,13 @@
           "    g_eflags = (g_eflags & ~0x1u) | ((0) ? 0x1u : 0u);\n    edi++;\n    _fa = (uint32_t)(edi) & 0xFFFF"
         ],
         [
+          119057,
+          "    MEM32(ebp + -460) = MEM32(ebp + -460) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -460)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -460);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF/OF; CF unchanged */\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
           119462,
           "",
           "    eax = _block_0024118C_eax; ecx = _block_0024118C_ecx; edx = _block_0024118C_edx;\n",
@@ -191939,6 +192334,13 @@
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00241206; /* jne: not equal / not "
         ],
         [
+          124585,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "40u) != 0)) goto loc_00241206; /* jne: not equal / not zero */\n\nloc_002411E8: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
           125091,
           "    _fa = (uint32_t)(edx) & 0xFFFFFFFFu; _fb = (uint32_t)(edx) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test edx, edx (32-bit) */\n",
           "    uint32_t _block_002411ED_edx = edx;\n    _fa = (uint32_t)(_block_002411ED_edx) & 0xFFFFFFFFu; _fb = (uint32_t)(_block_002411ED_edx) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test _block_002411ED_edx, _block_002411ED_edx (32-bit) */\n",
@@ -191953,11 +192355,25 @@
           "    if (((g_eflags & 0x40u) != 0)) goto loc_002411F7; /* je: equal / zero */\n\nloc_002411F1: ;\n    ME"
         ],
         [
+          125689,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "oc_002411F1: ;\n    MEM8(ebp + -72) = 1;\n    goto loc_00241206;\n\nloc_002411F7: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
+        ],
+        [
           126649,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, 0x30 (32-bit) */\n",
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00241328; /* jne: not equal / not "
+        ],
+        [
+          127141,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "40u) != 0)) goto loc_00241328; /* jne: not equal / not zero */\n\nloc_0024120F: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           128079,
@@ -191988,11 +192404,39 @@
           "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00241243; /* je: equal / zero */\n\nl"
         ],
         [
+          130601,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_00241243; /* je: equal / zero */\n\nloc_0024123B: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
+          131107,
+          "    MEM8(ebp + -72) = MEM8(ebp + -72) + 1;\n    _fa = (uint32_t)(MEM8(ebp + -72)) & 0xFFu;\n",
+          "    {\n        volatile uint8_t *const _operand = &MEM8(ebp + -72);\n        const uint8_t _result = (uint8_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "40u) != 0)) goto loc_00241243; /* jne: not equal / not zero */\n\nloc_00241240: ;\n",
+          "    _fas = (int32_t)(int8_t)(_fa); _fb = (_fa == 0x80u); /* inc result/SF/OF; CF"
+        ],
+        [
+          131580,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "241243: ;\n    MEM32(ebp + -100) = 0x6F;\n    goto loc_00241328;\n\nloc_0024124F: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
           131970,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, 0xFFFFFFFFu (32-bit) */\n",
           "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00241260; /* je: equal / zero */\n\nl"
+        ],
+        [
+          132946,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "PUSH32(esp, 0x30);\n    POP32(esp, ebx);\n    goto loc_00241325;\n\nloc_00241268: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           133958,
@@ -192007,6 +192451,20 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(ebp + -68), 1 (32-bit) */\n",
           "\n    if ((((g_eflags & 0x80u) != 0) == ((g_eflags & 0x800u) != 0))) goto loc_002"
+        ],
+        [
+          135452,
+          "    MEM8(ebp + -72) = MEM8(ebp + -72) + 1;\n    _fa = (uint32_t)(MEM8(ebp + -72)) & 0xFFu;\n",
+          "    {\n        volatile uint8_t *const _operand = &MEM8(ebp + -72);\n        const uint8_t _result = (uint8_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "))) goto loc_0024128A; /* jge: greater or equal (signed >=) */\n\nloc_00241287: ;\n",
+          "    _fas = (int32_t)(int8_t)(_fa); _fb = (_fa == 0x80u); /* inc result/SF/OF; CF"
+        ],
+        [
+          136928,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "rame, 0x200240F8FULL); guest_cpu_yield(); goto loc_00240F8F; }\n\nloc_002412A7: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
         ],
         [
           137318,
@@ -192028,6 +192486,13 @@
           "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp8_zero_flags(_fa) & 0x8D5u);",
           " MEM8(ebp + -71), 0 (8-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0024158E; /* jne: not equal / not "
+        ],
+        [
+          139555,
+          "    MEM32(ebp + -48) = MEM32(ebp + -48) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -48)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -48);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "40u) != 0)) goto loc_0024158E; /* jne: not equal / not zero */\n\nloc_002412CC: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           139959,
@@ -192100,6 +192565,13 @@
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00241328; /* jne: not equal / not "
         ],
         [
+          143368,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "40u) != 0)) goto loc_00241328; /* jne: not equal / not zero */\n\nloc_0024130A: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
           143874,
           "    _fa = (uint32_t)(edx) & 0xFFFFFFFFu; _fb = (uint32_t)(edx) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test edx, edx (32-bit) */\n",
           "    uint32_t _block_0024130F_edx = edx;\n    _fa = (uint32_t)(_block_0024130F_edx) & 0xFFFFFFFFu; _fb = (uint32_t)(_block_0024130F_edx) & 0xFFFFFFFFu;\n    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* test _block_0024130F_edx, _block_0024130F_edx (32-bit) */\n",
@@ -192112,6 +192584,13 @@
           "    edx = _block_0024130F_edx;\n",
           "u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
           "    if (((g_eflags & 0x40u) != 0)) goto loc_00241319; /* je: equal / zero */\n\nloc_00241313: ;\n    ME"
+        ],
+        [
+          144472,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "oc_00241313: ;\n    MEM8(ebp + -72) = 1;\n    goto loc_00241328;\n\nloc_00241319: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           145518,
@@ -192198,6 +192677,13 @@
           "    if (((g_eflags & 0x40u) != 0)) goto loc_002413EA; /* je: equal / zero */\n\nloc_002413CC: ;\n    ea"
         ],
         [
+          156730,
+          "    MEM8(ebp + -72) = MEM8(ebp + -72) + 1;\n    _fa = (uint32_t)(MEM8(ebp + -72)) & 0xFFu;\n",
+          "    {\n        volatile uint8_t *const _operand = &MEM8(ebp + -72);\n        const uint8_t _result = (uint8_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "me, 0);\n\nloc_002413E6: ;\n    ebx = eax;\n    goto loc_002413ED;\n\nloc_002413EA: ;\n",
+          "    _fas = (int32_t)(int8_t)(_fa); _fb = (_fa == 0x80u); /* inc result/SF/OF; CF"
+        ],
+        [
           157361,
           "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp8_zero_flags(_fa) & 0x8D5u);",
@@ -192205,11 +192691,39 @@
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0024141F; /* jne: not equal / not "
         ],
         [
+          157811,
+          "    MEM32(ebp + -60) = MEM32(ebp + -60) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -60)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -60);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "40u) != 0)) goto loc_0024141F; /* jne: not equal / not zero */\n\nloc_002413F3: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
+        ],
+        [
           159102,
           "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_zero_flags(_fa) & 0x8D5u);",
           "EM32(ebp + -64), 0 (32-bit) */\n    _cf = 0; /* nothing borrows from zero */\n    ",
           "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00241411; /* je: equal / zero */\n\nl"
+        ],
+        [
+          159552,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_00241411; /* je: equal / zero */\n\nloc_00241406: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
+          160123,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "oc_0024140B: ;\n    MEM8(ebp + -72) = 1;\n    goto loc_00241430;\n\nloc_00241411: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
+        ],
+        [
+          160902,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "me, 0);\n\nloc_0024141B: ;\n    ebx = eax;\n    goto loc_00241430;\n\nloc_0024141F: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
         ],
         [
           161292,
@@ -192259,6 +192773,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0x534958), 1 (32-bit) */\n",
           "\n    if ((((g_eflags & 0x40u) != 0) || ((g_eflags & 0x80u) != 0) != ((g_eflags &"
+        ],
+        [
+          168081,
+          "    _cf = 0; /* logical op clears CF */\n    eax = eax & 4;\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* and result */\n    g_eflags = (g_eflags & ~0x8C5u) | ((0) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n\n",
+          "    eax = eax & 4;\n\n",
+          "\nloc_0024148F: ;\n    eax = MEM32(0x534950);\n    eax = ZX8(MEM8(eax + ebx * 2));\n",
+          "loc_0024149B: ;\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(eax) &"
         ],
         [
           168424,
@@ -192331,6 +192852,13 @@
           "    if (((g_eflags & 0x40u) != 0)) goto loc_002414EF; /* je: equal / zero */\n\nloc_002414E0: ;\n    { "
         ],
         [
+          174505,
+          "    MEM8(ebp + -72) = MEM8(ebp + -72) + 1;\n    _fa = (uint32_t)(MEM8(ebp + -72)) & 0xFFu;\n",
+          "    {\n        volatile uint8_t *const _operand = &MEM8(ebp + -72);\n        const uint8_t _result = (uint8_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "me, 0);\n\nloc_002414EB: ;\n    ebx = eax;\n    goto loc_002414F2;\n\nloc_002414EF: ;\n",
+          "    _fas = (int32_t)(int8_t)(_fa); _fb = (_fa == 0x80u); /* inc result/SF/OF; CF"
+        ],
+        [
           175136,
           "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp8_zero_flags(_fa) & 0x8D5u);",
@@ -192343,6 +192871,13 @@
           "    uint32_t _block_002414F8_eax = eax;\n",
           "if (!((g_eflags & 0x40u) != 0)) goto loc_00241524; /* jne: not equal / not zero */\n\nloc_002414F8: ;\n",
           "    MEM32(ebp + -60) = MEM32(ebp + -60) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -60)) & 0xFFFFFFFFu;\n "
+        ],
+        [
+          175586,
+          "    MEM32(ebp + -60) = MEM32(ebp + -60) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -60)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -60);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "40u) != 0)) goto loc_00241524; /* jne: not equal / not zero */\n\nloc_002414F8: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           175786,
@@ -192364,6 +192899,27 @@
           "    eax = _block_002414F8_eax;\n",
           "((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);\n",
           "    if (((g_eflags & 0x40u) != 0)) goto loc_00241516; /* je: equal / zero */\n\nloc_0024150B: ;\n    ME"
+        ],
+        [
+          176564,
+          "    MEM32(ebp + -68) = MEM32(ebp + -68) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -68)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -68);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_00241516; /* je: equal / zero */\n\nloc_0024150B: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
+          177135,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "oc_00241510: ;\n    MEM8(ebp + -72) = 1;\n    goto loc_00241535;\n\nloc_00241516: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
+        ],
+        [
+          177914,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "me, 0);\n\nloc_00241520: ;\n    ebx = eax;\n    goto loc_00241535;\n\nloc_00241524: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
         ],
         [
           178304,
@@ -192408,6 +192964,13 @@
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_0024158E; /* jne: not equal / not "
         ],
         [
+          183598,
+          "    MEM32(ebp + -48) = MEM32(ebp + -48) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -48)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -48);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "40u) != 0)) goto loc_0024158E; /* jne: not equal / not zero */\n\nloc_00241565: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
+        ],
+        [
           184318,
           "g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_zero_flags(_fa) & 0x8D5u);",
@@ -192429,11 +192992,32 @@
           "\n    if (((g_eflags & 0x40u) != 0)) goto loc_0024158B; /* je: equal / zero */\n\nl"
         ],
         [
+          185687,
+          "    MEM8(ebp + -37) = MEM8(ebp + -37) + 1;\n    _fa = (uint32_t)(MEM8(ebp + -37)) & 0xFFu;\n",
+          "    {\n        volatile uint8_t *const _operand = &MEM8(ebp + -37);\n        const uint8_t _result = (uint8_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "oto loc_0024158E;\n\nloc_0024158B: ;\n    MEM16(ebx) = LO16(eax);\n\nloc_0024158E: ;\n",
+          "    _fas = (int32_t)(int8_t)(_fa); _fb = (_fa == 0x80u); /* inc result/SF/OF; CF"
+        ],
+        [
+          186322,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          ") & 0x10u);\n    MEM32(ebp + 0xC) = edi;\n    goto loc_00241602;\n\nloc_0024159A: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
+        ],
+        [
           187481,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ebx (32-bit) */\n",
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_002415EB; /* jne: not equal / not "
+        ],
+        [
+          188585,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) + 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand + 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "lags & 0x40u) != 0)) goto loc_00241602; /* je: equal / zero */\n\nloc_002415C5: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ],
         [
           189701,
@@ -192455,6 +193039,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebx, 0xFFFFFFFFu (32-bit) */\n",
           "\n\nloc_002415EE: ;\n    if (((g_eflags & 0x40u) != 0)) goto loc_0024161E; /* je: e"
+        ],
+        [
+          192422,
+          "    MEM32(ebp + -44) = MEM32(ebp + -44) - 1;\n    _fa = (uint32_t)(MEM32(ebp + -44)) & 0xFFFFFFFFu;\n",
+          "    {\n        volatile uint32_t *const _operand = &MEM32(ebp + -44);\n        const uint32_t _result = (uint32_t)(*_operand - 1u);\n        *_operand = _result;\n        _fa = _result;\n    }\n",
+          "  POP32(esp, ecx);\n    POP32(esp, ecx);\n    goto loc_0024161E;\n\nloc_002415FF: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
         ],
         [
           193057,
@@ -193317,11 +193908,25 @@
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_00243AD1; /* jne: not equal / not "
         ],
         [
+          6110,
+          "    MEM32(esi) = MEM32(esi) - 1;\n    _fa = (uint32_t)(MEM32(esi)) & 0xFFFFFFFFu;\n",
+          "    {\n        const uint32_t counter_address = esi;\n        const uint32_t next_count = MEM32(counter_address) - 1u;\n        MEM32(counter_address) = next_count;\n        _fa = next_count;\n    }\n",
+          "0u) | ((_fa ^ (_fa - 1u) ^ 1u) & 0x10u);\n    MEM32(esi) = eax;\n\nloc_00243AC0: ;\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x7FFFFFFFu); /* dec result/SF"
+        ],
+        [
           7111,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint8_t)((uint8_t)(_fas) - (uint8_t)(_fbs)) >> 7) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp8_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(eax), LO8(ebx) (8-bit) */\n",
           "\n    if (((g_eflags & 0x40u) != 0)) goto loc_00243AD9; /* je: equal / zero */\n\nl"
+        ],
+        [
+          8524,
+          "    MEM32(esi + 4) = MEM32(esi + 4) + 1;\n    _fa = (uint32_t)(MEM32(esi + 4)) & 0xFFFFFFFFu;\n",
+          "    {\n        const uint32_t counter_address = esi + 4;\n        const uint32_t next_count = MEM32(counter_address) + 1u;\n        MEM32(counter_address) = next_count;\n        _fa = next_count;\n    }\n",
+          "43AD7: ;\n    MEM8(eax) = LO8(ebx);\n\nloc_00243AD9: ;\n    eax = MEM32(esi + 0xC);\n",
+          "    _fas = (int32_t)(int32_t)(_fa); _fb = (_fa == 0x80000000u); /* inc result/SF"
         ]
       ]
     },
@@ -233968,7 +234573,43 @@
       "address": 2779484,
       "name": "sub_002A695C",
       "file": "recomp_0085.c",
-      "edits": []
+      "edits": [
+        [
+          0,
+          "",
+          "#include <immintrin.h>\n",
+          "",
+          "void sub_002A695C(void)\n{\n    uint32_t ebp = 0;\n    ebp = g_ebp;  /* pro"
+        ],
+        [
+          12884,
+          "    { uint64_t _dividend=(uint64_t)(((uint64_t)edx<<32)|eax);\n    uint64_t _divisor=(uint32_t)(ecx);\n    int _fault=(!_divisor || ((_dividend >> 32) >= (uint64_t)_divisor));\n    uint64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; _remainder=_dividend%_divisor; }\n    if(_fault) {",
+          "    { const uint32_t _divisor = ecx;\n    if (!_divisor || (uint32_t)edx >= _divisor) {",
+          "s < 0)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n    cpu_resume_002A69F2: ;\n",
+          "\n    _cont_fault_code_002A69F2=0xC0000094u; _cont_fault_address_002A69F2"
+        ],
+        [
+          29182,
+          "    eax=(uint32_t)_quotient; edx=(uint32_t)_remainder;\n    } }",
+          "    uint32_t _remainder;\n    eax = _udiv64(((uint64_t)edx << 32) | eax, _divisor, &_remainder);\n    edx = _remainder;\n    } }",
+          "ceptionContinue(_cont_fault_result_002A69F2,ebp); break; }\n    } else {\n",
+          "\n    cpu_resume_002A69F4: ;\n    _cf = 0; /* xor clears CF */\n    ebx = 0"
+        ],
+        [
+          45496,
+          "    { uint64_t _dividend=(uint64_t)(((uint64_t)edx<<32)|eax);\n    uint64_t _divisor=(uint32_t)(ecx);\n    int _fault=(!_divisor || ((_dividend >> 32) >= (uint64_t)_divisor));\n    uint64_t _quotient=0,_remainder=0;\n    if(!_fault) { _quotient=_dividend/_divisor; _remainder=_dividend%_divisor; }\n    if(_fault) {",
+          "    { const uint32_t _divisor = ecx;\n    if (!_divisor || (uint32_t)edx >= _divisor) {",
+          " cpu_resume_002A6AAA: ;\n    POP32(esp, ecx);\n    cpu_resume_002A6AAB: ;\n",
+          "\n    _cont_fault_code_002A6AAB=0xC0000094u; _cont_fault_address_002A6AAB"
+        ],
+        [
+          61794,
+          "    eax=(uint32_t)_quotient; edx=(uint32_t)_remainder;\n    } }",
+          "    uint32_t _remainder;\n    eax = _udiv64(((uint64_t)edx << 32) | eax, _divisor, &_remainder);\n    edx = _remainder;\n    } }",
+          "ceptionContinue(_cont_fault_result_002A6AAB,ebp); break; }\n    } else {\n",
+          "\n    cpu_resume_002A6AAD: ;\n    ecx = 0xFFF;\n    cpu_resume_002A6AB2: ;\n"
+        ]
+      ]
     },
     {
       "address": 2780024,
@@ -234004,7 +234645,78 @@
       "address": 2780973,
       "name": "sub_002A6F2D",
       "file": "recomp_0085.c",
-      "edits": []
+      "edits": [
+        [
+          0,
+          "void sub_002A6F2D(void)\n{\n",
+          "void sub_002A6F2D(void)\n{\n    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n",
+          "",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame */\n    "
+        ],
+        [
+          1848,
+          "recomp_cont_site(&_cont_frame, 0x1002A6F39ULL);",
+          "recomp_cont_site_inline(&_cont_frame, 0x1002A6F39ULL);",
+          "x;\n    { _cont_target_002A6F39 = MEM32(0x31756C); PUSH32(esp, 0x002A6F3Fu);\n    ",
+          "\ncont_call_002A6F39: ;\n    RECOMP_ICALL_SAFE_AT(_cont_target_002A6F39, _cont_esp"
+        ],
+        [
+          2026,
+          "recomp_cont_site(&_cont_frame, 0);",
+          "recomp_cont_site_inline(&_cont_frame, 0);",
+          "nt_target_002A6F39, _cont_esp_002A6F39, 0x002A6F39u); } /* indirect call */\n    ",
+          "\n    }\n\nloc_002A6F3F: ;\n    SET_LO16(eax, MEM16(esi + 0x12));\n    _cf = 0; /* lo"
+        ],
+        [
+          2477,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint16_t)((uint16_t)(_fas) - (uint16_t)(_fbs)) >> 15) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x8000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    /* AND left only bits 15 and 0. Packed CMP flags, low to high: 0000h, 0001h, 8000h, 8001h. */\n    _cf = (int)((0x0044009508850015ull >> (((_fa >> 14) | (_fa & 1u)) * 16)) & 0x8D5u);\n    g_eflags = (g_eflags & ~0x8D5u) | (uint32_t)_cf;\n    _cf &= 1;",
+          "6_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp LO16(eax), 0x8001 (16-bit) */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_002A6F7B; /* jne: not equal / not "
+        ],
+        [
+          3899,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, eax (32-bit) */\n",
+          "\n    if ((((g_eflags & 0x80u) != 0) != ((g_eflags & 0x800u) != 0))) goto loc_002"
+        ],
+        [
+          4779,
+          "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
+          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ecx (32-bit) */\n",
+          "\n    if (((g_eflags & 0x1u) != 0)) goto loc_002A6F84; /* jb: below (unsigned <) "
+        ],
+        [
+          5392,
+          "recomp_cont_site(&_cont_frame, 0x1002A6F74ULL);",
+          "recomp_cont_site_inline(&_cont_frame, 0x1002A6F74ULL);",
+          " current across calls */\n    g_seh_ebp = ebp;\n    PUSH32(esp, 0x002A6F79u);\n    ",
+          "\ncont_call_002A6F74: ;\n    RECOMP_ABI_CALL(0x002A6E44u, sub_002A6E44); /* call 0"
+        ],
+        [
+          5536,
+          "recomp_cont_site(&_cont_frame, 0);",
+          "recomp_cont_site_inline(&_cont_frame, 0);",
+          "74: ;\n    RECOMP_ABI_CALL(0x002A6E44u, sub_002A6E44); /* call 0x002A6E44 */\n    ",
+          "\n\nloc_002A6F79: ;\n    goto loc_002A6F84;\n\nloc_002A6F7B: ;\n    eax = MEM32(esi);\n"
+        ],
+        [
+          5798,
+          "recomp_cont_site(&_cont_frame, 0x1002A6F81ULL);",
+          "recomp_cont_site_inline(&_cont_frame, 0x1002A6F81ULL);",
+          "\n    { _cont_target_002A6F81 = MEM32(eax + 0x1C); PUSH32(esp, 0x002A6F84u);\n    ",
+          "\ncont_call_002A6F81: ;\n    RECOMP_ICALL_SAFE_AT(_cont_target_002A6F81, _cont_esp"
+        ],
+        [
+          5976,
+          "recomp_cont_site(&_cont_frame, 0);",
+          "recomp_cont_site_inline(&_cont_frame, 0);",
+          "nt_target_002A6F81, _cont_esp_002A6F81, 0x002A6F81u); } /* indirect call */\n    ",
+          "\n    }\n\nloc_002A6F84: ;\n    POP32(esp, esi);\n    esp = ebp;\n    POP32(esp, ebp);"
+        ]
+      ]
     },
     {
       "address": 2781063,
@@ -234113,6 +234825,13 @@
       "file": "recomp_0085.c",
       "edits": [
         [
+          26,
+          "",
+          "    extern void apu_write_vp_sequence(void *, const uint32_t (*)[2], unsigned);\n",
+          "void sub_002A7946(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame"
+        ],
+        [
           4328,
           "    edx = MEM32(-25034736);",
           "    edx = (uint32_t)apu_read_adapter(g_apu_state, 0x20010u, 4);",
@@ -234120,60 +234839,18 @@
           "\n    { uint32_t _v=(uint32_t)(edx), _c=(uint32_t)(2) & 31u; if(_c) {\n    _cf=(in"
         ],
         [
-          6566,
-          "    MEM32(0xFE8202F8u) = eax;",
-          "    apu_write_adapter(g_apu_state, 0x202F8u, (uint32_t)(eax), 4);",
-          "S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n    eax = ZX16(MEM16(edx));\n",
-          "\n    eax = MEM32(ebp + -4);\n    MEM32(-25033988) = 1;\n    MEM32(0xFE820300u) = e"
-        ],
-        [
-          6623,
-          "    MEM32(-25033988) = 1;",
-          "    apu_write_adapter(g_apu_state, 0x202FCu, (uint32_t)(1), 4);",
-          "ax = ZX16(MEM16(edx));\n    MEM32(0xFE8202F8u) = eax;\n    eax = MEM32(ebp + -4);\n",
-          "\n    MEM32(0xFE820300u) = eax;\n    eax = MEM32(edi);\n    if (((g_eflags & 0x40u)"
-        ],
-        [
-          6649,
-          "    MEM32(0xFE820300u) = eax;",
-          "    apu_write_adapter(g_apu_state, 0x20300u, (uint32_t)(eax), 4);",
-          " MEM32(0xFE8202F8u) = eax;\n    eax = MEM32(ebp + -4);\n    MEM32(-25033988) = 1;\n",
-          "\n    eax = MEM32(edi);\n    if (((g_eflags & 0x40u) != 0)) goto loc_002A79C4; /* "
+          6538,
+          "    eax = ZX16(MEM16(edx));\n    MEM32(0xFE8202F8u) = eax;\n    eax = MEM32(ebp + -4);\n    MEM32(-25033988) = 1;\n    MEM32(0xFE820300u) = eax;",
+          "    {\n        const uint32_t voice = ZX16(MEM16(edx));\n        eax = MEM32(ebp + -4);\n        const uint32_t writes[][2] = {{0x202F8u, voice}, {0x202FCu, 1}, {0x20300u, eax}};\n        apu_write_vp_sequence(g_apu_state, writes, 3);\n    }",
+          "x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n",
+          "\n    eax = MEM32(edi);\n    if (((g_eflags & 0x40u) != 0)) goto loc_002A7"
         ],
         [
           7144,
-          "    MEM32(0xFE820304u) = eax;",
-          "    apu_write_adapter(g_apu_state, 0x20304u, (uint32_t)(eax), 4);",
-          "40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n\nloc_002A79C4: ;\n",
-          "\n    eax = MEM32(ebp + ecx * 4 + -48);\n    MEM32(0xFE820360u) = eax;\n    eax = M"
-        ],
-        [
-          7212,
-          "    MEM32(0xFE820360u) = eax;",
-          "    apu_write_adapter(g_apu_state, 0x20360u, (uint32_t)(eax), 4);",
-          "002A79C4: ;\n    MEM32(0xFE820304u) = eax;\n    eax = MEM32(ebp + ecx * 4 + -48);\n",
-          "\n    eax = MEM32(ebp + ecx * 4 + -36);\n    MEM32(0xFE820364u) = eax;\n    eax = M"
-        ],
-        [
-          7280,
-          "    MEM32(0xFE820364u) = eax;",
-          "    apu_write_adapter(g_apu_state, 0x20364u, (uint32_t)(eax), 4);",
-          "* 4 + -48);\n    MEM32(0xFE820360u) = eax;\n    eax = MEM32(ebp + ecx * 4 + -36);\n",
-          "\n    eax = MEM32(ebp + ecx * 4 + -24);\n    MEM32(0xFE820368u) = eax;\n    MEM32(-"
-        ],
-        [
-          7348,
-          "    MEM32(0xFE820368u) = eax;",
-          "    apu_write_adapter(g_apu_state, 0x20368u, (uint32_t)(eax), 4);",
-          "* 4 + -36);\n    MEM32(0xFE820364u) = eax;\n    eax = MEM32(ebp + ecx * 4 + -24);\n",
-          "\n    MEM32(-25033988) = 0;\n    eax = ZX8(MEM8(esi + 0x64));\n    ecx++;\n    _fa ="
-        ],
-        [
-          7378,
-          "    MEM32(-25033988) = 0;",
-          "    apu_write_adapter(g_apu_state, 0x202FCu, (uint32_t)(0), 4);",
-          "64u) = eax;\n    eax = MEM32(ebp + ecx * 4 + -24);\n    MEM32(0xFE820368u) = eax;\n",
-          "\n    eax = ZX8(MEM8(esi + 0x64));\n    ecx++;\n    _fa = (uint32_t)(ecx) & 0xFFFFF"
+          "    MEM32(0xFE820304u) = eax;\n    eax = MEM32(ebp + ecx * 4 + -48);\n    MEM32(0xFE820360u) = eax;\n    eax = MEM32(ebp + ecx * 4 + -36);\n    MEM32(0xFE820364u) = eax;\n    eax = MEM32(ebp + ecx * 4 + -24);\n    MEM32(0xFE820368u) = eax;\n    MEM32(-25033988) = 0;",
+          "    {\n        const uint32_t format = eax;\n        const uint32_t volume_a = MEM32(ebp + ecx * 4 + -48);\n        const uint32_t volume_b = MEM32(ebp + ecx * 4 + -36);\n        eax = MEM32(ebp + ecx * 4 + -24);\n        const uint32_t writes[][2] = {\n            {0x20304u, format}, {0x20360u, volume_a}, {0x20364u, volume_b},\n            {0x20368u, eax}, {0x202FCu, 0},\n        };\n        apu_write_vp_sequence(g_apu_state, writes, 5);\n    }",
+          ") | (((_fas < 0)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n\nloc_002A79C4: ;\n",
+          "\n    eax = ZX8(MEM8(esi + 0x64));\n    ecx++;\n    _fa = (uint32_t)(ecx) &"
         ]
       ]
     },
@@ -234183,6 +234860,13 @@
       "file": "recomp_0085.c",
       "edits": [
         [
+          26,
+          "",
+          "    extern void apu_write_vp_sequence(void *, const uint32_t (*)[2], unsigned);\n",
+          "void sub_002A7A07(void)\n{\n",
+          "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* prologue saves caller's frame"
+        ],
+        [
           3857,
           "    edx = MEM32(-25034736);",
           "    edx = (uint32_t)apu_read_adapter(g_apu_state, 0x20010u, 4);",
@@ -234190,46 +234874,11 @@
           "\n    { uint32_t _v=(uint32_t)(edx), _c=(uint32_t)(2) & 31u; if(_c) {\n    _cf=(in"
         ],
         [
-          5656,
-          "    MEM32(-25033992) = edx;",
-          "    apu_write_adapter(g_apu_state, 0x202F8u, (uint32_t)(edx), 4);",
-          "c_002A7A49: ;\n    ecx = esi + 0xC;\n\nloc_002A7A4C: ;\n    edx = ZX16(MEM16(ecx));\n",
-          "\n    edx = MEM32(ebp + eax * 4 + -44);\n    MEM32(-25033988) = 1;\n    MEM32(-2503"
-        ],
-        [
-          5722,
-          "    MEM32(-25033988) = 1;",
-          "    apu_write_adapter(g_apu_state, 0x202FCu, (uint32_t)(1), 4);",
-          "(MEM16(ecx));\n    MEM32(-25033992) = edx;\n    edx = MEM32(ebp + eax * 4 + -44);\n",
-          "\n    MEM32(-25033888) = edx;\n    edx = MEM32(ebp + eax * 4 + -32);\n    MEM32(-25"
-        ],
-        [
-          5748,
-          "    MEM32(-25033888) = edx;",
-          "    apu_write_adapter(g_apu_state, 0x20360u, (uint32_t)(edx), 4);",
-          "5033992) = edx;\n    edx = MEM32(ebp + eax * 4 + -44);\n    MEM32(-25033988) = 1;\n",
-          "\n    edx = MEM32(ebp + eax * 4 + -32);\n    MEM32(-25033884) = edx;\n    edx = MEM"
-        ],
-        [
-          5814,
-          "    MEM32(-25033884) = edx;",
-          "    apu_write_adapter(g_apu_state, 0x20364u, (uint32_t)(edx), 4);",
-          "5033988) = 1;\n    MEM32(-25033888) = edx;\n    edx = MEM32(ebp + eax * 4 + -32);\n",
-          "\n    edx = MEM32(ebp + eax * 4 + -20);\n    MEM32(-25033880) = edx;\n    MEM32(-25"
-        ],
-        [
-          5880,
-          "    MEM32(-25033880) = edx;",
-          "    apu_write_adapter(g_apu_state, 0x20368u, (uint32_t)(edx), 4);",
-          "x * 4 + -32);\n    MEM32(-25033884) = edx;\n    edx = MEM32(ebp + eax * 4 + -20);\n",
-          "\n    MEM32(-25033988) = 0;\n    edx = ZX8(MEM8(esi + 0x64));\n    eax++;\n    _fa ="
-        ],
-        [
-          5908,
-          "    MEM32(-25033988) = 0;",
-          "    apu_write_adapter(g_apu_state, 0x202FCu, (uint32_t)(0), 4);",
-          "33884) = edx;\n    edx = MEM32(ebp + eax * 4 + -20);\n    MEM32(-25033880) = edx;\n",
-          "\n    edx = ZX8(MEM8(esi + 0x64));\n    eax++;\n    _fa = (uint32_t)(eax) & 0xFFFFF"
+          5628,
+          "    edx = ZX16(MEM16(ecx));\n    MEM32(-25033992) = edx;\n    edx = MEM32(ebp + eax * 4 + -44);\n    MEM32(-25033988) = 1;\n    MEM32(-25033888) = edx;\n    edx = MEM32(ebp + eax * 4 + -32);\n    MEM32(-25033884) = edx;\n    edx = MEM32(ebp + eax * 4 + -20);\n    MEM32(-25033880) = edx;\n    MEM32(-25033988) = 0;",
+          "    {\n        const uint32_t voice = ZX16(MEM16(ecx));\n        const uint32_t volume_a = MEM32(ebp + eax * 4 + -44);\n        const uint32_t volume_b = MEM32(ebp + eax * 4 + -32);\n        edx = MEM32(ebp + eax * 4 + -20);\n        const uint32_t writes[][2] = {\n            {0x202F8u, voice}, {0x202FCu, 1}, {0x20360u, volume_a},\n            {0x20364u, volume_b}, {0x20368u, edx}, {0x202FCu, 0},\n        };\n        apu_write_vp_sequence(g_apu_state, writes, 6);\n    }",
+          "(unsigned <=) */\n\nloc_002A7A49: ;\n    ecx = esi + 0xC;\n\nloc_002A7A4C: ;\n",
+          "\n    edx = ZX8(MEM8(esi + 0x64));\n    eax++;\n    _fa = (uint32_t)(eax) &"
         ]
       ]
     },
@@ -234243,7 +234892,36 @@
       "address": 2784049,
       "name": "sub_002A7B31",
       "file": "recomp_0085.c",
-      "edits": []
+      "edits": [
+        [
+          1566,
+          "recomp_cont_site(&_cont_frame, 0x1002A7B3EULL);",
+          "recomp_cont_site_inline(&_cont_frame, 0x1002A7B3EULL);",
+          "loc_002A7B43;\n\nloc_002A7B3C: ;\n    ecx = esi;\n    PUSH32(esp, 0x002A7B43u);\n    ",
+          "\ncont_call_002A7B3E: ;\n    RECOMP_ABI_CALL(0x002A6F2Du, sub_002A6F2D); /* call 0"
+        ],
+        [
+          1710,
+          "recomp_cont_site(&_cont_frame, 0);",
+          "recomp_cont_site_inline(&_cont_frame, 0);",
+          "3E: ;\n    RECOMP_ABI_CALL(0x002A6F2Du, sub_002A6F2D); /* call 0x002A6F2D */\n    ",
+          "\n\nloc_002A7B43: ;\n    _fa = (uint32_t)(MEM16(esi + 0x12)) & 0xFFFFu; _fb = (uint"
+        ],
+        [
+          2008,
+          "    g_eflags = (g_eflags & ~0x8C5u) | ((CMP_B(_fa & _fb, 0)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) & (_fb))) ? 0x4u : 0u) | ((TEST_Z(_fa, _fb)) ? 0x40u : 0u) | ((TEST_S(_fas, _fbs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);",
+          "    {\n        /* Bit 15 selects the sign or zero result. The low byte is always zero, so PF is set. */\n        const uint32_t pending_flags = (_fa & 0x8000u) ? 0x84u : 0x44u;\n        g_eflags = (g_eflags & ~0x8C5u) | pending_flags;\n    }",
+          " 0x12), 0x8000 (16-bit) */\n    _cf = 0; /* nothing borrows from zero */\n",
+          "\n    if (!((g_eflags & 0x40u) != 0)) { recomp_cont_site(&_cont_frame, 0x"
+        ],
+        [
+          2265,
+          "recomp_cont_site(&_cont_frame, 0x2002A7B3CULL);",
+          "recomp_cont_site_inline(&_cont_frame, 0x2002A7B3CULL);",
+          "bs)) ? 0x80u : 0u) | ((0) ? 0x800u : 0u);\n    if (!((g_eflags & 0x40u) != 0)) { ",
+          " guest_cpu_yield(); goto loc_002A7B3C; } /* jne: not equal / not zero */\n\nloc_00"
+        ]
+      ]
     },
     {
       "address": 2784077,
@@ -237609,6 +238287,13 @@
           "    int _flags = 0; /* fallback flag var */\n    uint32_t _fa = 0, _fb = 0;\n    i"
         ],
         [
+          1699,
+          "    { uint64_t _n = (uint64_t)ecx * 4u;\n    if (!g_df && esi < 0xFD000000u && edi < 0xFD000000u && (uint64_t)esi + _n <= 0xFD000000u && (uint64_t)edi + _n <= 0xFD000000u) {\n      uint8_t *_d = (uint8_t*)XBOX_PTR(edi), *_s = (uint8_t*)XBOX_PTR(esi);\n      if ((uint64_t)edi + _n <= esi || (uint64_t)esi + _n <= edi) memcpy(_d, _s, (size_t)_n);\n      else { uint32_t _i; for (_i = 0; _i < ecx; _i++) MEM32(edi + _i*4u) = MEM32(esi + _i*4u); }\n      esi += ecx * 4u; edi += ecx * 4u; }\n",
+          "    {\n        /* The immediately preceding original instruction sets ECX to 16 dwords. */\n        const uint32_t bytes = 16u * 4u;\n        if (!g_df && esi <= 0xFD000000u - bytes && edi <= 0xFD000000u - bytes) {\n            uint8_t *_d = (uint8_t*)XBOX_PTR(edi), *_s = (uint8_t*)XBOX_PTR(esi);\n            if (edi + bytes <= esi || esi + bytes <= edi) memcpy(_d, _s, bytes);\n            else {\n                for (uint32_t i = 0; i < 16; i++)\n                    MEM32(edi + i * 4u) = MEM32(esi + i * 4u);\n            }\n            esi += bytes;\n            edi += bytes;\n        }\n",
+          "  PUSH32(esp, edi);\n    edi = ecx + ebx + 0x810;\n    ecx = 0x10;\n    esi = edx;\n",
+          "    else { uint32_t _i; int32_t _st = RECOMP_DF_STEP(4);\n      for (_i = 0; _i <"
+        ],
+        [
           2776,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
@@ -238367,6 +239052,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           "t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 0xB00 (32-bit) */\n",
           "\n    ecx = ebx;\n    esi = eax;\n    ebp = ecx;\n    if (!((g_eflags & 0x40u) != 0)"
+        ],
+        [
+          7142,
+          "    _cf = (int)((((uint64_t)(MEM32(esp + 0x10)) + (uint64_t)(ebx)) >> 32) & 1);\n    MEM32(esp + 0x10) = MEM32(esp + 0x10) + ebx;\n    _fa = (uint32_t)(MEM32(esp + 0x10)) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */\n",
+          "    {\n        /* One original stack read and one write, with flags from that operation. */\n        const uint32_t address = esp + 0x10u;\n        const uint32_t cursor = MEM32(address);\n        const uint32_t result = cursor + _fb;\n        _cf = result < cursor;\n        MEM32(address) = result;\n        _fa = result;\n        _fas = (int32_t)_fa;\n    }\n",
+          "s = (int32_t)(int32_t)(_fb); /* add source, before the write */\n",
+          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RE"
         ]
       ]
     },
@@ -240298,10 +240990,10 @@
           "\n    if (!((g_eflags & 0x1u) != 0)) goto loc_002F6F44; /* jae: above or equal (u"
         ],
         [
-          13893,
-          "    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
-          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_flags((uint32_t)(_fa + _fb), _fb) & 0x8D4u) | ((_cf) ? 0x1u : 0u);",
-          "(uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n",
+          13607,
+          "    eax = esi;\n    _fb = (uint32_t)(ebp) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* sub source, before the write */\n    _cf = (int)((uint32_t)(eax) < (uint32_t)(ebp));\n    eax = eax - ebp;\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n    g_eflags = (g_eflags & ~0x8D5u) | ((_cf) ? 0x1u : 0u) | ((RECOMP_PARITY8(_fa)) ? 0x4u : 0u) | (((_fa == 0)) ? 0x40u : 0u) | (((_fas < 0)) ? 0x80u : 0u) | (((((((_fa + _fb)) ^ (_fb)) & (((_fa + _fb)) ^ (_fa)) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa + _fb)) & 0x10u);",
+          "    eax = esi;\n    _fb = (uint32_t)(ebp) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* sub source, before the write */\n    eax = eax - ebp;\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */\n    _cf = (int)smt9_cmp32_flags(esi, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "0u);\n\nloc_002F6F29: ;\n    edx = MEM32(esi + 0x34);\n    esi = MEM32(esi + 0x30);\n",
           "\n\nloc_002F6F33: ;\n    ecx = MEM32(edx);\n    edi = esi;\n    _fb = (uint32_t)(ecx)"
         ],
         [
@@ -241809,7 +242501,7 @@
         [
           26,
           "",
-          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
+          "    extern __declspec(noalias) uint32_t smt9_cmp32_flags(uint32_t, uint32_t);\n    extern __declspec(noalias) uint32_t smt9_cmp32_zero_flags(uint32_t);\n    const ptrdiff_t _recomp_memory_offset = g_xbox_mem_offset;\n#define g_xbox_mem_offset _recomp_memory_offset\n",
           "void sub_002FCAF0(void)\n{\n",
           "    uint32_t ebp = 0;\n    ebp = g_ebp;  /* frameless: caller's frame */\n    int _flags = 0; /* fallb"
         ],
@@ -241837,7 +242529,7 @@
         [
           10360,
           "    _cf = (int)(_fa < _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((CMP_B(_fa, _fb)) ? 0x1u : 0u) | ((RECOMP_PARITY8((_fa) - (_fb))) ? 0x4u : 0u) | ((CMP_EQ(_fa, _fb)) ? 0x40u : 0u) | (((((uint32_t)((uint32_t)(_fas) - (uint32_t)(_fbs)) >> 31) != 0)) ? 0x80u : 0u) | ((((((_fa) ^ (_fb)) & ((_fa) ^ ((_fa - _fb))) & 0x80000000u) != 0)) ? 0x800u : 0u) | ((_fa ^ _fb ^ (_fa - _fb)) & 0x10u);",
-          "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
+          "    g_eflags = (g_eflags & ~0x8D5u) | (smt9_cmp32_zero_flags(_fa) & 0x8D5u);\n    _cf = 0;",
           "2_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edi, ebx (32-bit) */\n",
           "\n    if (!((g_eflags & 0x40u) != 0)) goto loc_002FCC18; /* jne: not equal / not "
         ],
@@ -241847,6 +242539,20 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(edx + 0x1C), 2 (32-bit) */\n",
           "\n    if (((g_eflags & 0x40u) != 0)) goto loc_002FCBFC; /* je: equal / zero */\n\nl"
+        ],
+        [
+          12973,
+          "    _cf = (int)((((uint64_t)(eax) + (uint64_t)(MEM32(edx + 0x18))) >> 32) & 1);\n    eax = eax + MEM32(edx + 0x18);",
+          "    _cf = (int)((((uint64_t)(eax) + (uint64_t)(_fb)) >> 32) & 1);\n    eax = eax + _fb;",
+          "0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n",
+          "\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add"
+        ],
+        [
+          13297,
+          "    _cf = (int)((((uint64_t)(eax) + (uint64_t)(MEM32(esi + 4))) >> 32) & 1);\n    eax = eax + MEM32(esi + 4);",
+          "    _cf = (int)((((uint64_t)(eax) + (uint64_t)(_fb)) >> 32) & 1);\n    eax = eax + _fb;",
+          "0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n",
+          "\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add"
         ],
         [
           14743,
@@ -241861,6 +242567,13 @@
           "    _cf = (int)smt9_cmp32_flags(_fa, _fb);\n    g_eflags = (g_eflags & ~0x8D5u) | ((uint32_t)_cf & 0x8D5u);\n    _cf &= 1;",
           ")(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi + 0x1C), 2 (32-bit) */\n",
           "\n    if (((g_eflags & 0x40u) != 0)) goto loc_002FCC6D; /* je: equal / zero */\n\nl"
+        ],
+        [
+          18095,
+          "    _cf = (int)((((uint64_t)(eax) + (uint64_t)(MEM32(edi + 4))) >> 32) & 1);\n    eax = eax + MEM32(edi + 4);",
+          "    _cf = (int)((((uint64_t)(eax) + (uint64_t)(_fb)) >> 32) & 1);\n    eax = eax + _fb;",
+          "0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */\n",
+          "\n    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add"
         ],
         [
           20195,

@@ -48,6 +48,8 @@ unsigned smt9_native_font_pages(void){return s_language.font_pages;}
 extern float d3d8_GameAspect(void);
 float smt9_game_aspect(void) { return d3d8_GameAspect(); }
 unsigned smt9_game_refresh_hz(void) { return s_display.refresh_hz; }
+extern int smt9_frame_wait_init(void);
+extern void smt9_frame_wait_shutdown(void);
 #ifdef SMT9_MACHINE_CHECKPOINT
 #include "video_player.h"
 #include <io.h>
@@ -763,7 +765,12 @@ int main(int argc, char **argv)
     (void)argc;
     (void)argv;
 #endif
-    int result=nine_error_log_finish(WinMain(GetModuleHandle(NULL), NULL, GetCommandLineA(), SW_SHOW));
+    int result=1;
+    if(smt9_frame_wait_init()) {
+        result=WinMain(GetModuleHandle(NULL), NULL, GetCommandLineA(), SW_SHOW);
+        smt9_frame_wait_shutdown();
+    }
+    result=nine_error_log_finish(result);
     if(result && gui_startup)MessageBoxW(NULL,startup_text(STARTUP_FAILED),L"NINE",MB_OK|MB_ICONERROR);
     return result;
 }

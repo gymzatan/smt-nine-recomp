@@ -236,6 +236,8 @@ typedef struct NV2AVshProgram {
     /* Bitmask of input registers read (v0-v15). Bit N = vN is used.
      * Used to determine the required input layout. */
     uint16_t            inputs_read;
+    uint16_t            constant_count; /* Prefix covering every constant operand. */
+    uint16_t            diffuse_constant; /* Direct oD0 source slot plus one, or zero. */
 } NV2AVshProgram;
 
 /* ================================================================
@@ -279,8 +281,10 @@ typedef struct NV2AVSConstants {
  */
 HRESULT d3d8_vsh_init(void);
 const char *d3d8_vsh_geometry_source(void);
-char *d3d8_vsh_fixed_source(void);
-NvkShader *d3d8_vsh_vulkan_program(const DWORD *microcode,int length,uint32_t *inputs);
+const char *d3d8_vsh_smooth_triangle_source(void);
+char *d3d8_vsh_depth_guard_source(void);
+char *d3d8_vsh_fixed_source(int direct_fill);
+NvkShader *d3d8_vsh_vulkan_program(const DWORD *microcode,int length,uint64_t revision,uint32_t *inputs,unsigned *constant_count,unsigned *diffuse_constant);
 
 typedef struct NV2ANativeGeometry {
     float screen[4], bounds[4], tex_scale[4][4], fog[4];
@@ -297,14 +301,14 @@ typedef struct NV2ANativeFixed {
     float spot_falloff[8][4], spot_direction[8][4];
     float material[4];
     uint32_t flags[4], sources[4], light_modes[2][4];
-    uint32_t texgen[4][4], texture_matrix[4], skinning[4];
+    uint32_t texgen[4][4], texture_matrix[4], skinning[2], direct_attributes, reserved;
     float back_scene[4], back_emission[4], back_material[4];
     float back_ambient[8][4], back_diffuse[8][4], back_specular[8][4];
     uint32_t back_sources[4];
     float specular_second[4],back_specular_second[4];
 } NV2ANativeFixed;
 HRESULT d3d8_vsh_bind_geometry(const float *constants,const NV2ANativeGeometry *geometry,unsigned kind);
-HRESULT d3d8_vsh_bind_native(const DWORD *microcode, int length, const float *constants, const NV2ANativeGeometry *geometry, D3D11_PRIMITIVE_TOPOLOGY topology, uint32_t *inputs_read);
+HRESULT d3d8_vsh_bind_native(const DWORD *microcode, int length, uint64_t revision, const float *constants, const NV2ANativeGeometry *geometry, D3D11_PRIMITIVE_TOPOLOGY topology, uint32_t *inputs_read);
 HRESULT d3d8_vsh_bind_fixed(const float *constants, const NV2ANativeGeometry *geometry, const NV2ANativeFixed *fixed, D3D11_PRIMITIVE_TOPOLOGY topology);
 
 /**

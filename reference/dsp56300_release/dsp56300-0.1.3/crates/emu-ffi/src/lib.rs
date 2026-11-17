@@ -352,6 +352,27 @@ pub unsafe extern "C" fn dsp56300_read_memory(
     dsp.state.read_memory(space.to_core(), addr)
 }
 
+/// Read consecutive 24-bit DSP words in increasing address order.
+///
+/// # Safety
+/// `dsp` must point to a valid `DspJit`. `out` must be writable for `count`
+/// consecutive `u32` values and must not alias storage accessed by the DSP.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dsp56300_read_memory_words(
+    dsp: *const DspJit,
+    space: CMemSpace,
+    addr: u32,
+    out: *mut u32,
+    count: u32,
+) {
+    let dsp = unsafe { &*dsp };
+    let space = space.to_core();
+    for i in 0..count {
+        let word = dsp.state.read_memory(space, addr.wrapping_add(i));
+        unsafe { out.add(i as usize).write(word) };
+    }
+}
+
 /// Write a word to DSP memory.
 ///
 /// If writing to P-space, automatically marks the dirty bitmap for JIT

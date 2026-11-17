@@ -21,11 +21,11 @@ def native_gpu(tmp_path_factory):
 #include "nv2a_vulkan.h"
 static unsigned layout_query_calls,layout_output_draws;
 static int layout_watch,layout_output;
-static unsigned layout_inputs_for_test(const NvkShader *shader,unsigned *locations,unsigned *attributes,unsigned capacity) {
+static unsigned layout_attributes_for_test(NvkShader *shader,uint32_t input_mask,VkVertexInputAttributeDescription attributes[16]) {
     if(layout_watch)++layout_query_calls;
-    return nvk_shader_inputs(shader,locations,attributes,capacity);
+    return nvk_shader_vertex_attributes(shader,input_mask,attributes);
 }
-#define nvk_shader_inputs layout_inputs_for_test
+#define nvk_shader_vertex_attributes layout_attributes_for_test
 static uint64_t native_vertex_generation;
 static uint32_t native_vertex_offset;
 static unsigned native_vertex_bytes,native_stream_bytes,native_vertex_stride;
@@ -147,10 +147,10 @@ static HRESULT pixel_state_map_for_test(ID3D11DeviceContext *,ID3D11Resource *,U
 #include "nv2a/nv2a_state.h"
 static unsigned progress_kick_calls;
 static void progress_kick_for_test(NV2AState *gpu) {
-    ++progress_kick_calls;nv2a_fifo_kick(gpu);
+    ++progress_kick_calls;nv2a_fifo_request_progress(gpu);
 }
-#define nv2a_fifo_kick progress_kick_for_test
-static unsigned prep_watch,prep_reverse_calls,prep_batch_calls,prep_pixel_calls,prep_geometry_calls,prep_draw_calls,prep_geometry_draws,prep_stage_unpack_calls,prep_in_geometry,prep_gs_cb_calls,prep_vs_cb_calls;
+#define nv2a_fifo_request_progress progress_kick_for_test
+static unsigned prep_watch,prep_batch_calls,prep_pixel_calls,prep_geometry_calls,prep_draw_calls,prep_geometry_draws,prep_stage_unpack_calls,prep_in_geometry,prep_gs_cb_calls,prep_vs_cb_calls;
 static int prep_program,prep_fixed,prep_output;
 static unsigned prep_border_unpack_calls;
 static unsigned owner_mark_checks;
@@ -961,6 +961,7 @@ static void verify_vertex_payloads(void) {
     const uint32_t masks[]={9,0x8001,0xffff,0,1,9,0x1fff,0x8001,9};
     for(unsigned test=0;test<sizeof masks/sizeof masks[0];++test) {
         uint32_t mask=masks[test];int fixed=test==6;
+        if(fixed && d3d8_IsNativeVulkan())mask&=~(1u<<6);
         method(NV097_SET_VERTEX_DATA_ARRAY_FORMAT,fixed?0x1432:0x1442);
         if(!fixed) {
             unsigned slot=0;
@@ -1039,9 +1040,14 @@ static void verify_vertex_conversion_reuse(const char *snapshot,const char *memo
      * contain different bytes. verify_vertex_bytes reads the actual GPU data. */
     unsigned char untouched[128];memset(untouched,0xA5,sizeof untouched);
     memcpy(s_hw_program_upload.vertex,untouched,sizeof untouched);
+    const uint32_t stale_rows[6]={5,4,3,2,1,0};
+    const uint32_t first_indices[12]={0,0,1,0,2,0,3,3,4,3,5,3};
+    memcpy(s_hw_program_vertex_rows,stale_rows,sizeof stale_rows);
     method(NV097_SET_PROVOKING_VERTEX,1);draw_reused_vertex_payload();
     assert(s_gpu.hardware_vertex_stream_uploads==uploads+1);
+    assert(!memcmp(s_hw_program_upload.indices,first_indices,sizeof first_indices));
     assert(!memcmp(s_hw_program_upload.vertex,untouched,sizeof untouched));
+    assert(!memcmp(s_hw_program_vertex_rows,stale_rows,sizeof stale_rows));
     method(NV097_SET_PROVOKING_VERTEX,0);
 
     XboxSharedMemoryViews views;assert(xbox_GetSharedMemoryViews(raw,60,&views));
@@ -1169,17 +1175,22 @@ static void verify_vsh_upload_updates(void) {
     for(unsigned i=0;i<4;i++)nv2a_vsh_program_word(words[i]);
     assert(!vsh_decode_calls);
     assert(nv2a_vsh_inputs_used()==(1u<<3) && vsh_decode_calls==1);
-    int length=0;uint32_t used=0;const uint32_t *program=nv2a_vsh_program(&length,&used);
+    int length=0;uint32_t used=0;uint64_t original_revision=0,revision=0;
+    const uint32_t *program=nv2a_vsh_program(&length,&used,&original_revision);
     assert(used==(1u<<3));
     assert(program && length==1 && !memcmp(program,words,sizeof words) && vsh_decode_calls==1);
+    assert(original_revision && nv2a_vsh_program(&length,&used,&revision)==program && revision==original_revision);
     float inputs[16][4]={{0}};const float value[4]={1.25f,-2.5f,3.75f,4};memcpy(inputs[3],value,sizeof value);
     Nv2aVshOutput output;assert(nv2a_vsh_run(inputs,&output) && !memcmp(output.pos,value,sizeof value));
     unsigned before=vsh_decode_calls;nv2a_vsh_set_load_slot(5);
     for(unsigned i=0;i<4;i++)nv2a_vsh_program_word(words[i]);
     assert(nv2a_vsh_inputs_used()==(1u<<3) && vsh_decode_calls==before);
+    assert(nv2a_vsh_program(&length,&used,&revision)==program && revision==original_revision);
     nv2a_vsh_set_load_slot(5);nv2a_vsh_program_word(0xaabbccddu);
     nv2a_vsh_program_word((1u<<21)|(7u<<9)|(1u<<8)|0x1bu);
     assert(nv2a_vsh_inputs_used()==(1u<<7) && vsh_decode_calls==before+1);
+    assert(nv2a_vsh_program(&length,&used,&revision)==program && revision!=original_revision);
+    uint64_t edited_revision=revision;
     memcpy(inputs[7],value,sizeof value);assert(nv2a_vsh_run(inputs,&output));
     for(unsigned i=0;i<4;i++)assert(output.pos[i]==-value[i]);
     nv2a_vsh_program_word(words[2]);nv2a_vsh_program_word(words[3]);
@@ -1190,6 +1201,7 @@ static void verify_vsh_upload_updates(void) {
     nv2a_vsh_set_instruction(5,words);nv2a_vsh_apply_checkpoint(saved);free(saved);
     before=vsh_decode_calls;assert(s_load_slot==5 && s_load_word==2);
     assert(nv2a_vsh_inputs_used()==(1u<<9) && vsh_decode_calls==before);
+    assert(nv2a_vsh_program(&length,&used,&revision)==program && revision!=edited_revision);
     nv2a_vsh_program_word(words[2]);nv2a_vsh_program_word(words[3]);
     memcpy(inputs[9],value,sizeof value);assert(nv2a_vsh_run(inputs,&output) && !memcmp(output.pos,value,sizeof value));
     nv2a_vsh_set_load_slot(5);nv2a_vsh_program_word(0x55667788u);
@@ -1213,16 +1225,16 @@ static void verify_vsh_upload_updates(void) {
     nv2a_vsh_set_instruction(5,first);nv2a_vsh_set_instruction(6,words);
     nv2a_vsh_set_load_slot(6);nv2a_vsh_program_word(words[0]);
     nv2a_vsh_program_word((1u<<21)|(9u<<9)|0x1bu);
-    assert(nv2a_vsh_program(&length,&used) && length==2 && used==((1u<<3)|(1u<<9)));
-    assert(used==nv2a_vsh_inputs_used() && nv2a_vsh_program(&length,NULL));
+    assert(nv2a_vsh_program(&length,&used,&revision) && length==2 && used==((1u<<3)|(1u<<9)));
+    assert(used==nv2a_vsh_inputs_used() && nv2a_vsh_program(&length,NULL,NULL));
     first[3]=(15u<<12);nv2a_vsh_set_instruction(5,first);nv2a_vsh_set_cxt_write(1);
-    length=-1;used=0x12345678;
-    assert(!nv2a_vsh_program(&length,&used) && length==-1 && used==0x12345678);
+    length=-1;used=0x12345678;revision=UINT64_MAX;
+    assert(!nv2a_vsh_program(&length,&used,&revision) && length==-1 && used==0x12345678 && revision==UINT64_MAX);
     nv2a_vsh_set_cxt_write(0);nv2a_vsh_set_start_slot(NV2A_VSH_SLOTS-1);
     nv2a_vsh_set_instruction(NV2A_VSH_SLOTS-1,first);
-    assert(!nv2a_vsh_program(&length,&used) && length==-1 && used==0x12345678);
+    assert(!nv2a_vsh_program(&length,&used,&revision) && length==-1 && used==0x12345678 && revision==UINT64_MAX);
     nv2a_vsh_set_start_slot(NV2A_VSH_SLOTS);
-    assert(!nv2a_vsh_program(&length,&used) && length==-1 && used==0x12345678);
+    assert(!nv2a_vsh_program(&length,&used,&revision) && length==-1 && used==0x12345678 && revision==UINT64_MAX);
     fprintf(stderr,"[VSH] four changed upload words use one original decode; partial consumer, raw identity, output, direct setter, dump and pending checkpoint passed\n");
 }
 static void geometry_driver_bytes(const NV2ANativeGeometry *expected) {
@@ -1383,7 +1395,7 @@ static void verify_combiner_uploads(void) {
     unsigned repeated=combiner_test_maps-1;combiner_bytes(&actual);assert(!memcmp(&value,&actual,sizeof value));assert(repeated==expected_repeat_maps);
     const uint32_t bits[]={0x80000000u,0x7fc00001u,0x7fc00002u};
     for(unsigned i=0;i<3;i++) {memcpy(&value.c0[0][0],&bits[i],4);assert(SUCCEEDED(d3d8_combiners_bind(&state,&value)));combiner_bytes(&actual);assert(!memcmp(&value,&actual,sizeof value));}
-    unsigned before=combiner_test_maps;value.alpha_ref=.25f;combiner_test_fail=1;
+    unsigned before=combiner_test_maps;value.alpha_lower=32.0f;combiner_test_fail=1;
     assert(d3d8_combiners_bind(&state,&value)==E_OUTOFMEMORY);assert(SUCCEEDED(d3d8_combiners_bind(&state,&value)));assert(combiner_test_maps==before+2);
     combiner_bytes(&actual);assert(!memcmp(&value,&actual,sizeof value));
     before=combiner_test_maps;value.alpha_only[NV2A_MAX_TEXTURES-1]=1;
@@ -1419,7 +1431,13 @@ static void verify_pixel_state_uploads(void) {
     FILE *checkpoint=tmpfile();assert(checkpoint && nv2a_gpu_save_checkpoint(checkpoint));
     method(NV097_SET_WINDOW_CLIP_HORIZONTAL,6u<<16);pixel_state_draw();pixel_state_bytes(current);
     for(unsigned i=0;i<8;++i)assert(current[i]==nv2a_get_state()->pgraph.regs[NV_PGRAPH_WINDOWCLIPX0+i*4]);
-    assert(!memcmp(first+8,current+8,sizeof first-32));
+    size_t derived=offsetof(HwPixelState,window_covers_surface)/4;
+    assert(first[derived]==1 && current[derived]==0);
+    size_t clip_skip=offsetof(HwPixelState,skip_xy_clipping)/4;
+    assert(first[clip_skip]==1 && current[clip_skip]==0);
+    assert(!memcmp(first+8,current+8,(derived-8)*4));
+    assert(clip_skip==derived+1);
+    assert(!memcmp(first+derived+2,current+derived+2,sizeof first-(derived+2)*4));
     const uint32_t depth_bits[3]={0x80000000,0x7fc00001,0x7fc00002};
     for(unsigned i=0;i<3;++i) {
         method(NV097_SET_CLIP_MIN,depth_bits[i]);pixel_state_draw();pixel_state_bytes(current);
@@ -1635,7 +1653,7 @@ static void verify_completed_output_work(void) {
     HwMemory *memory=hw_memory(&views);
     unsigned calls=0;LARGE_INTEGER frequency,start,end;
     assert(QueryPerformanceFrequency(&frequency));
-    hw_complete_commands();assert(d3d8_IsNativeVulkan()?nvk_completed(nvk_fence())==1:s_hw_completion!=NULL);
+    hw_complete_commands();assert(d3d8_IsNativeVulkan()?nvk_completed(nvk_fence(),1)==1:s_hw_completion!=NULL);
     event_query_creates=0;
     query_context_getter_calls=0;
     query_status_calls=query_event_payload_calls=0;
@@ -1658,7 +1676,7 @@ static void verify_completed_output_work(void) {
     fprintf(stderr,"[QUERY CONTEXT] getter_calls=%u poll_calls=%u\n",query_context_getter_calls,query_status_calls);
     if(d3d8_IsNativeVulkan()) {
         assert(!query_context_getter_calls && !query_status_calls && !query_event_payload_calls);
-        assert(nvk_completed(nvk_fence())==1);
+        assert(nvk_completed(nvk_fence(),1)==1);
     } else {
         assert(query_context_getter_calls==query_status_calls+200);
         assert(query_status_calls>=100 && query_event_payload_calls==0);
@@ -1678,7 +1696,7 @@ static void verify_completed_output_work(void) {
     else assert(s_hw_queries[0].query!=s_hw_queries[1].query);
     ID3D11Query *first=s_hw_queries[0].query,*second=s_hw_queries[1].query;
     hw_complete_commands();
-    if(d3d8_IsNativeVulkan()) assert(nvk_completed(s_hw_queries[1].native_serial)==1);
+    if(d3d8_IsNativeVulkan()) assert(nvk_completed(s_hw_queries[1].native_serial,1)==1);
     else assert(s_hw_completion!=first && s_hw_completion!=second);
     protection_test_calls=0;
     hw_collect_queries(1);assert(!s_hw_query_count && ldl_le_p(output)==101 && ldl_le_p(output+4)==102);
@@ -1699,7 +1717,7 @@ static void verify_completed_output_work(void) {
     int host_write_held=nv2a_pb_host_write_begin(output-4,3*4096);
     nv2a_pb_host_write_end(host_write_held);
     protection_pages_for_test(memory,views.offset&~(size_t)4095,3,PAGE_READWRITE);
-    assert(d3d8_IsNativeVulkan()?nvk_completed(nvk_fence())==1:s_hw_completion!=NULL);
+    assert(d3d8_IsNativeVulkan()?nvk_completed(nvk_fence(),1)==1:s_hw_completion!=NULL);
     protection_test_inspect=1;
 }
 /* Completion pages retain write ownership until a real writer needs them. */
@@ -2320,6 +2338,7 @@ static void verify_large_batch(const char *producer) {
     }
     fprintf(stderr,"[LARGE BATCH] %s: 6000 vertices, six topologies, complete native payload and pixels passed\n",producer);
 }
+extern uint64_t g_nvk_timings[8];
 static void verify_fifo_worker_checkpoint(int partial,int indices) {
     NV2AState *gpu=nv2a_get_state();
     seed();method(NV097_SET_BEGIN_END,0);nv2a_pb_checkpoint_publish();
@@ -2331,7 +2350,9 @@ static void verify_fifo_worker_checkpoint(int partial,int indices) {
     assert(ReadAcquire64(&s_hw_query_count)==1);
     unsigned kicks=progress_kick_calls;
     nv2a_pb_request_progress();
-    assert(progress_kick_calls==kicks+1 && ReadAcquire(&gpu->pfifo.fifo_kick)==1);
+    assert(progress_kick_calls==kicks+1 && ReadAcquire(&gpu->pfifo.fifo_kick)==NV2A_FIFO_PROGRESS_PENDING);
+    nv2a_fifo_kick(gpu);
+    assert(ReadAcquire(&gpu->pfifo.fifo_kick)==(NV2A_FIFO_PROGRESS_PENDING|NV2A_FIFO_WORK_PENDING));
     for(unsigned repeat=0;repeat<4096;repeat++)nv2a_pb_request_progress();
     fprintf(stderr,"[PROGRESS REQUEST] repeated4096 extra_kicks=%u\n",progress_kick_calls-kicks-1);
     assert(progress_kick_calls==kicks+1 && ReadAcquire64(&s_hw_query_count)==1);
@@ -2388,6 +2409,7 @@ static void verify_fifo_worker_checkpoint(int partial,int indices) {
     assert(nv2a_gpu_save_checkpoint(snapshot) && xbox_CheckpointWriteDevices(devices));
     rewind(devices);assert(xbox_CheckpointLoadDevices(devices));fclose(devices);
     for(unsigned pass=0;pass<2;pass++) {
+        uint64_t prior_submits=g_nvk_timings[4];
         xbox_CheckpointEnd();nv2a_fifo_wait_idle(gpu);
         if(partial) {
             assert(r[NV_PFIFO_CACHE1_DMA_GET]==pending_get && BRIDGE_MEM32(0x80070000u)==0);
@@ -2400,13 +2422,30 @@ static void verify_fifo_worker_checkpoint(int partial,int indices) {
                     assert(nv2a_gpu_save_checkpoint(snapshot));xbox_CheckpointEnd();
                 }
             } else assert(!memcmp(nv2a_vsh_constant(17),zero,sizeof zero));
+            prior_submits=g_nvk_timings[4];
             nv2a_mmio_write(gpu,0x800040,end,4);nv2a_fifo_wait_idle(gpu);
+        }
+        if(d3d8_IsNativeVulkan()) {
+            if(partial || pass) {
+                assert(g_nvk_timings[4]==prior_submits && s_hw_query_count==1);
+                assert(BRIDGE_MEM32(0x80070000u)==0);
+            } else {
+                /* The explicit request posted before freezing is now consumed
+                 * with the original PUT. Only the GPU checkpoint reload resets it. */
+                assert(g_nvk_timings[4]==prior_submits+1);
+            }
         }
         ULONGLONG deadline=GetTickCount64()+5000;
         while(BRIDGE_MEM32(0x80070000u)!=0x12345678 && GetTickCount64()<deadline) {
             nv2a_pb_request_progress();Sleep(1);
         }
         assert(BRIDGE_MEM32(0x80070000u)==0x12345678);
+        if(d3d8_IsNativeVulkan()) {
+            assert(g_nvk_timings[4]==prior_submits+1);
+            if(partial || pass)
+                fprintf(stderr,"[FIFO PROGRESS] ordinary command submits 0, requested submission 1\n");
+            else fprintf(stderr,"[FIFO PROGRESS] coalesced command and progress submit once\n");
+        }
         assert(xbox_CheckpointBootstrapBegin());nv2a_pb_checkpoint_publish();
         assert(r[NV_PFIFO_CACHE1_DMA_GET]==end && BRIDGE_MEM32(0x80020000u)==(indices?0xffff0000u:0xff445566u));
         if(indices)assert(s_gpu.prim==0 && s_gpu.idx_count==3 && s_gpu.idx[0]==0 && s_gpu.idx[1]==1 && s_gpu.idx[2]==2);
@@ -4360,9 +4399,6 @@ int main(int argc,char **argv) {
     pb_path.write_text(pb,encoding='utf-8')
     bridge_path=work/'prep_src/kernel/nv2a_d3d11_bridge.inc'
     bridge=bridge_path.read_text(encoding='utf-8')
-    reverse_entry='static uint32_t hw_reverse_inputs(uint32_t word)\n{'
-    assert bridge.count(reverse_entry)==1
-    bridge=bridge.replace(reverse_entry,reverse_entry+'\n    if(prep_watch)++prep_reverse_calls;',1)
     actual='hw_ranges_overlap(other->memory_offset,hw_color_bytes(other),color->memory_offset,hw_color_bytes(color))) other->upload_needed=1;'
     assert bridge.count(actual)==1
     bridge=bridge.replace(actual,'(++owner_mark_checks,hw_ranges_overlap(other->memory_offset,hw_color_bytes(other),color->memory_offset,hw_color_bytes(color)))) other->upload_needed=1;',1)
@@ -4372,7 +4408,8 @@ int main(int argc,char **argv) {
     bridge=bridge.replace(selection,'        HwVertexBatch *entry=&s_hw_vertex_batches[set][way];\n        ++lru_selection_visits;\n        if(!selected',1)
 
     bridge='static void prep_unpack_for_test(uint32_t color,float out[4]) {if(prep_watch)++prep_stage_unpack_calls;nv2a_rc_unpack(color,out); }\n'+bridge
-    bridge=bridge.replace('nv2a_rc_unpack(states[','prep_unpack_for_test(states[')
+    assert bridge.count('nv2a_rc_unpack(combiner.c')==2
+    bridge=bridge.replace('nv2a_rc_unpack(combiner.c','prep_unpack_for_test(combiner.c')
     bridge='static void prep_border_unpack_for_test(uint32_t color,float out[4]) {if(prep_watch)++prep_border_unpack_calls;nv2a_rc_unpack(color,out); }\n'+bridge
     assert bridge.count('nv2a_rc_unpack(s_gpu.texs[i].border_color,draw->textures[i].border);')==1
     bridge=bridge.replace('nv2a_rc_unpack(s_gpu.texs[i].border_color,draw->textures[i].border);','prep_border_unpack_for_test(s_gpu.texs[i].border_color,draw->textures[i].border);')
@@ -4768,10 +4805,13 @@ def test_native_index_range_rejects_invalid_submission(native_gpu,tmp_path,inval
 def test_fifo_worker_preserves_pending_checkpoint_and_gpu_completion(native_gpu,tmp_path,backend,partial,operation):
     executable,xbe=native_gpu
     result=subprocess.run([str(executable),'fifo-worker' if operation=='constant' else 'fifo-worker-'+operation,str(xbe),str(tmp_path/'gpu.state'),str(tmp_path/'memory.state'),'1','partial' if partial else 'complete'],
-        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'DXVK_LOG_PATH':str(tmp_path)},
+        env={**os.environ,'RECOMP_GPU_BACKEND':backend,'DXVK_LOG_PATH':str(tmp_path),'RECOMP_GPU_TIMING':'1'},
         capture_output=True,text=True,errors='replace',timeout=30)
     assert result.returncode==0,result.stdout+result.stderr
     assert '[FIFO CHECKPOINT]' in result.stderr
+    if backend=='Vulkan':
+        assert result.stderr.count('[FIFO PROGRESS] ordinary command submits 0, requested submission 1')==(2 if partial else 1)
+        assert result.stderr.count('[FIFO PROGRESS] coalesced command and progress submit once')==(0 if partial else 1)
 
 
 @pytest.mark.parametrize('backend',['D3D11','D3D12','Vulkan','OpenGL'])

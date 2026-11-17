@@ -77,4 +77,25 @@ static inline uint32_t float_to_24b(float value)
     return int24 & 0xffffff;
 }
 
+#if defined(_MSC_VER) && defined(_M_X64)
+static inline __m128i float_pair_to_24b(__m128d samples)
+{
+    const __m128d scaled = _mm_mul_pd(samples, _mm_set1_pd(0x800000));
+    /* A NaN in the second operand survives either clamp. */
+    const __m128d lower = _mm_max_pd(_mm_set1_pd(-0x800000), scaled);
+    return _mm_cvtpd_epi32(_mm_min_pd(_mm_set1_pd(0x7fffff), lower));
+}
+
+static inline void float_quad_to_24b(uint32_t *output, const float *input)
+{
+    const __m128 samples = _mm_loadu_ps(input);
+    const __m128i low = float_pair_to_24b(_mm_cvtps_pd(samples));
+    const __m128i high = float_pair_to_24b(_mm_cvtps_pd(_mm_movehl_ps(samples, samples)));
+    const __m128i packed = _mm_unpacklo_epi64(low, high);
+    if (_mm_movemask_epi8(_mm_cmpeq_epi32(packed, _mm_set1_epi32(INT32_MIN))))
+        _set_errno(EDOM);
+    _mm_storeu_si128((__m128i *)output, _mm_and_si128(packed, _mm_set1_epi32(0xffffff)));
+}
+#endif
+
 #endif

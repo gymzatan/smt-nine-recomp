@@ -530,6 +530,9 @@ calc_output_stereo (SINC_FILTER *filter, int channels, increment_t increment, in
 	/* Convert input parameters into fixed point. */
 	max_filter_index = int_to_fp (filter->coeff_half_len) ;
 
+	/* A stereo output has complementary phases within one positive step. */
+	assert (increment > 0 && start_filter_index >= 0 && start_filter_index <= increment) ;
+
 	/* First apply the left half of the filter. */
 	filter_index = start_filter_index ;
 	coeff_count = (max_filter_index - filter_index) / increment ;
@@ -543,15 +546,19 @@ calc_output_stereo (SINC_FILTER *filter, int channels, increment_t increment, in
 		filter_index -= increment * steps ;
 		data_index += steps * 2;
 	}
+	if (filter_index >= 0)
+	{	/* Coefficients move down and input indices move up. Rounding a
+		** phase to the next whole sample can add one final stereo pair. */
+		int last_input = filter->b_current + 2 * (start_filter_index == increment) ;
+		assert (fp_to_int (filter_index) + 1 < filter->coeff_half_len + 2) ;
+		assert (data_index >= 0 && last_input + 1 < filter->b_len && last_input + 1 < filter->b_end) ;
+		} ;
 	left [0] = left [1] = 0.0 ;
 	__m128d left_pair = _mm_setzero_pd () ;
 	while (filter_index >= MAKE_INCREMENT_T (0))
 	{	fraction = fp_to_double (filter_index) ;
 		indx = fp_to_int (filter_index) ;
-		assert (indx >= 0 && indx + 1 < filter->coeff_half_len + 2) ;
 		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
-		assert (data_index >= 0 && data_index + 1 < filter->b_len) ;
-		assert (data_index + 1 < filter->b_end) ;
 		__m128d input_pair = _mm_cvtps_pd (_mm_castsi128_ps (_mm_loadl_epi64 ((const __m128i *) (filter->buffer + data_index)))) ;
 		left_pair = _mm_add_pd (left_pair, _mm_mul_pd (_mm_set1_pd (icoeff), input_pair)) ;
 
@@ -567,15 +574,16 @@ calc_output_stereo (SINC_FILTER *filter, int channels, increment_t increment, in
 	filter_index = filter_index + coeff_count * increment ;
 	data_index = filter->b_current + channels * (1 + coeff_count) ;
 
+	/* The first right tap has the largest coefficient and input indices.
+	** The last right tap is at or after the pair beyond b_current. */
+	assert (filter_index >= 0 && fp_to_int (filter_index) + 1 < filter->coeff_half_len + 2) ;
+	assert (filter->b_current >= 0 && data_index + 1 < filter->b_len && data_index + 1 < filter->b_end) ;
 	right [0] = right [1] = 0.0 ;
 	__m128d right_pair = _mm_setzero_pd () ;
 	do
 	{	fraction = fp_to_double (filter_index) ;
 		indx = fp_to_int (filter_index) ;
-		assert (indx >= 0 && indx + 1 < filter->coeff_half_len + 2) ;
 		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
-		assert (data_index >= 0 && data_index + 1 < filter->b_len) ;
-		assert (data_index + 1 < filter->b_end) ;
 		__m128d input_pair = _mm_cvtps_pd (_mm_castsi128_ps (_mm_loadl_epi64 ((const __m128i *) (filter->buffer + data_index)))) ;
 		right_pair = _mm_add_pd (right_pair, _mm_mul_pd (_mm_set1_pd (icoeff), input_pair)) ;
 
@@ -590,11 +598,34 @@ calc_output_stereo (SINC_FILTER *filter, int channels, increment_t increment, in
 		output [ch] = (float) (scale * (left [ch] + right [ch])) ;
 } /* calc_output_stereo */
 
+static inline int
+sinc_stereo_samples_in_hand (const SINC_FILTER *filter)
+{	int available = filter->b_end - filter->b_current ;
+	if (available < 0)
+		return available + filter->b_len ;
+	return available == filter->b_len ? 0 : available ;
+} /* sinc_stereo_samples_in_hand */
+
+static inline int
+sinc_stereo_advance_input (double position, double * phase)
+{	/* Keep the original fmod_one phase, and reuse its rounded position
+	** for the whole-sample advance. */
+	int whole = (int) lrint (position) ;
+	double remainder = position - whole ;
+	if (remainder < 0.0)
+	{	remainder += 1.0 ;
+		whole -- ;
+		} ;
+	*phase = remainder ;
+	return whole ;
+} /* sinc_stereo_advance_input */
+
 SRC_ERROR
 sinc_stereo_vari_process (SRC_STATE *state, SRC_DATA *data)
 {	SINC_FILTER *filter ;
-	double		input_index, src_ratio, count, float_increment, terminate, rem ;
-	increment_t	increment, start_filter_index ;
+	double		input_index, src_ratio, count, terminate, rem, input_step, scale = 0.0 ;
+	increment_t	increment = 0, start_filter_index ;
+	double		float_increment = 0.0 ;
 	int			half_filter_chan_len, samples_in_hand ;
 
 	if (state->private_data == NULL)
@@ -629,19 +660,21 @@ sinc_stereo_vari_process (SRC_STATE *state, SRC_DATA *data)
 	filter->b_current = (filter->b_current + state->channels * lrint (input_index - rem)) % filter->b_len ;
 	input_index = rem ;
 
-	terminate = 1.0 / src_ratio + 1e-20 ;
+	input_step = 1.0 / src_ratio ;
+	terminate = input_step + 1e-20 ;
+	const bool varying_ratio = filter->out_count > 0 && fabs (state->last_ratio - data->src_ratio) > 1e-10 ;
 
 	/* Main processing loop. */
 	while (filter->out_gen < filter->out_count)
 	{
 		/* Need to reload buffer? */
-		samples_in_hand = (filter->b_end - filter->b_current + filter->b_len) % filter->b_len ;
+		samples_in_hand = sinc_stereo_samples_in_hand (filter) ;
 
 		if (samples_in_hand <= half_filter_chan_len)
 		{	if ((state->error = prepare_data (filter, state->channels, data, half_filter_chan_len)) != 0)
 				return state->error ;
 
-			samples_in_hand = (filter->b_end - filter->b_current + filter->b_len) % filter->b_len ;
+			samples_in_hand = sinc_stereo_samples_in_hand (filter) ;
 			if (samples_in_hand <= half_filter_chan_len)
 				break ;
 			} ;
@@ -652,23 +685,28 @@ sinc_stereo_vari_process (SRC_STATE *state, SRC_DATA *data)
 				break ;
 			} ;
 
-		if (filter->out_count > 0 && fabs (state->last_ratio - data->src_ratio) > 1e-10)
-			src_ratio = state->last_ratio + filter->out_gen * (data->src_ratio - state->last_ratio) / filter->out_count ;
-
-		float_increment = filter->index_inc * (src_ratio < 1.0 ? src_ratio : 1.0) ;
-		increment = double_to_fp (float_increment) ;
+		if (varying_ratio)
+		{	src_ratio = state->last_ratio + filter->out_gen * (data->src_ratio - state->last_ratio) / filter->out_count ;
+			input_step = 1.0 / src_ratio ;
+			} ;
+		if (varying_ratio || filter->out_gen == 0)
+		{	/* Once the input is ready, the steady rate only needs one setup. */
+			float_increment = filter->index_inc * (src_ratio < 1.0 ? src_ratio : 1.0) ;
+			increment = double_to_fp (float_increment) ;
+			scale = float_increment / filter->index_inc ;
+			} ;
 
 		start_filter_index = double_to_fp (input_index * float_increment) ;
 
-		calc_output_stereo (filter, state->channels, increment, start_filter_index, float_increment / filter->index_inc, data->data_out + filter->out_gen) ;
+		calc_output_stereo (filter, state->channels, increment, start_filter_index, scale, data->data_out + filter->out_gen) ;
 		filter->out_gen += 2 ;
 
 		/* Figure out the next index. */
-		input_index += 1.0 / src_ratio ;
-		rem = fmod_one (input_index) ;
+		int step = sinc_stereo_advance_input (input_index + input_step, &input_index) ;
 
-		filter->b_current = (filter->b_current + state->channels * lrint (input_index - rem)) % filter->b_len ;
-		input_index = rem ;
+		/* Even the largest permitted stereo step is smaller than the buffer. */
+		int next = filter->b_current + state->channels * step ;
+		filter->b_current = next >= filter->b_len ? next - filter->b_len : next ;
 		} ;
 
 	state->last_position = input_index ;

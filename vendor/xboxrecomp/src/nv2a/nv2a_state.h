@@ -281,7 +281,13 @@ void nv2a_apply_checkpoint(const void *);
 #define NV2A_NATIVE_PROGRAM_COUNT_MASK 0x1FFC0000u
 void nv2a_fifo_run(NV2AState *d);
 /* Kick requires pfifo.lock; start/stop/idle must be called without it. */
+enum Nv2aFifoWake {
+    NV2A_FIFO_WORK_PENDING=1,
+    NV2A_FIFO_ACTIVE=2,
+    NV2A_FIFO_PROGRESS_PENDING=4
+};
 void nv2a_fifo_kick(NV2AState *d);
+void nv2a_fifo_request_progress(NV2AState *d);
 int nv2a_fifo_start(NV2AState *d, int threaded);
 void nv2a_fifo_wait_idle(NV2AState *d);
 void nv2a_fifo_stop(NV2AState *d);

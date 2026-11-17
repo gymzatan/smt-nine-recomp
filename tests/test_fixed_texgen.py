@@ -77,7 +77,7 @@ int main(void) {
 '''
     geometry = (root / 'd3d/d3d8_nv2a_geometry.inc').read_text(encoding='utf-8')
     fragments = []
-    for start, end in [('static const char nv2a_geometry_source[]', 'static HRESULT bind_native_geometry'),
+    for start, end in [('#define NV2A_EMIT_FILL', 'static HRESULT bind_native_geometry'),
                        ('static const char nv2a_fixed_vertex_source[]', 'HRESULT d3d8_vsh_bind_fixed')]:
         fragments.append(geometry[geometry.index(start):geometry.index(end)])
     (tmp_path / 'production_shader.h').write_text('\n'.join(fragments), encoding='utf-8')

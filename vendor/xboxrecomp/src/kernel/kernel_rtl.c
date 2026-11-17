@@ -398,6 +398,8 @@ static int xbox_crt_lock_index(uint32_t guest_va)
     return -1;
 }
 
+static volatile LONG g_crt_lock_trace_mode = -1;
+
 /* Every acquisition and release of a lock the CRT names, in order.
  *
  * A deadlock report says which two locks are crossed but not how they got that
@@ -410,18 +412,16 @@ static int xbox_crt_lock_index(uint32_t guest_va)
  * and the CRT locks are hot. */
 static void crt_lock_trace(const char *what, PRTL_CRITICAL_SECTION guest)
 {
-    static int enabled = -1;
+    LONG mode = ReadAcquire(&g_crt_lock_trace_mode);
     int idx;
-
-    static int all;
     uint32_t va;
 
-    if (enabled < 0) {
+    if (mode < 0) {
         const char *v = getenv("RECOMP_CS_TRACE_CRT");
-        enabled = v != NULL;
-        all = v && !strcmp(v, "all");
+        mode = !v ? 0 : !strcmp(v, "all") ? 2 : 1;
+        WriteRelease(&g_crt_lock_trace_mode, mode);
     }
-    if (!enabled)
+    if (!mode)
         return;
     va = (uint32_t)((uintptr_t)guest - (uintptr_t)g_xbox_mem_offset);
     idx = xbox_crt_lock_index(va);
@@ -450,7 +450,7 @@ static void crt_lock_trace(const char *what, PRTL_CRITICAL_SECTION guest)
         }
     }
 
-    if (all) {
+    if (mode == 2) {
         fprintf(stderr, "  [CSTRACE] t%-6lu %-4s 0x%08X idx %d\n",
                 GetCurrentThreadId(), what, va, idx);
         fflush(stderr);
@@ -492,7 +492,8 @@ VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSectio
     if (!slot)
         return;
     CRITICAL_SECTION* cs = &slot->cs;
-    crt_lock_trace("take", CriticalSection);
+    if (ReadAcquire(&g_crt_lock_trace_mode))
+        crt_lock_trace("take", CriticalSection);
     if (TryEnterCriticalSection(cs)) {
         xbox_cs_note_owner(slot);
         return;
@@ -542,7 +543,8 @@ VOID __stdcall xbox_RtlLeaveCriticalSection(PRTL_CRITICAL_SECTION CriticalSectio
 {
     XBOX_CS_SLOT* slot = xbox_cs_shadow(CriticalSection);
     if (slot) {
-        crt_lock_trace("drop", CriticalSection);
+        if (ReadAcquire(&g_crt_lock_trace_mode))
+            crt_lock_trace("drop", CriticalSection);
         xbox_cs_clear_owner(slot);
         LeaveCriticalSection(&slot->cs);
     }

@@ -1,62 +1,96 @@
+#define NV2A_EMIT_FILL(NAME, APPEND) \
+"void " NAME "(V input[6],inout TriangleStream<O> stream) {\n" \
+"    V p[9]={(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0};uint e[9]={0,0,0,0,0,0,0,0,0},v[9]={0,0,0,0,0,0,0,0,0};uint n=prepare_polygon(input,p,e,v);if(!visible_polygon(p,n,0))return;\n" \
+"    O first=convert(p[0]),second=convert(p[1]),previous=convert(p[2]);\n" \
+"    " APPEND "(first,second,previous,stream);\n" \
+"    [loop] for(uint i=3;i<n;i++){O next=convert(p[i]);" APPEND "(first,previous,next,stream);previous=next;}\n" \
+"}\n"
+
 /* Native screen-coordinate setup consumes the original translated VS outputs. */
+#define NV2A_GEOMETRY_INPUTS \
+"cbuffer VSC:register(b1) { float4 C[192]; };\n" \
+"cbuffer Geometry:register(b2) { float4 screen,bounds,ts[4],fog; uint4 flags; float4 pointParams[2],pointSize; uint4 pointFlags,polygon; float4 raster; };\n" \
+"struct V { float4 p:SV_POSITION; float4 d0:COLOR0,d1:COLOR1,t0:TEXCOORD0,t1:TEXCOORD1,t2:TEXCOORD2,t3:TEXCOORD3; float f:FOG,sz:PSIZE; float4 b0:TEXCOORD4,b1:TEXCOORD5; };\n" \
+"struct O { float4 p:SV_POSITION; noperspective float4 d0:COLOR0,d1:COLOR1; float4 t0:TEXCOORD0,t1:TEXCOORD1,t2:TEXCOORD2,t3:TEXCOORD3; noperspective float f:TEXCOORD4; noperspective float2 z:TEXCOORD5; };\n" \
+"V toclip(V a) { [unroll] for(int j=0;j<3;j++) a.p[j]=C[58][j]!=0 ? (a.p[j]-C[59][j])/C[58][j]*a.p.w : 0; return a; }\n" \
+"V mixv(V a,V b,float t) { V o; o.p=a.p+(b.p-a.p)*t; o.d0=a.d0+(b.d0-a.d0)*t; o.d1=a.d1+(b.d1-a.d1)*t; o.t0=a.t0+(b.t0-a.t0)*t; o.t1=a.t1+(b.t1-a.t1)*t; o.t2=a.t2+(b.t2-a.t2)*t; o.t3=a.t3+(b.t3-a.t3)*t; o.f=a.f+(b.f-a.f)*t; o.sz=a.sz+(b.sz-a.sz)*t;o.b0=a.b0+(b.b0-a.b0)*t;o.b1=a.b1+(b.b1-a.b1)*t;return o; }\n" \
+"float ff(float d) { if(fog.w==0) return 1; float f; uint mode=(uint)fog.z; if(mode==0x800 || mode==0x802) f=fog.x+exp2(d*fog.y*16)-1.5; else if(mode==0x801 || mode==0x803) f=fog.x+exp2(-d*d*fog.y*fog.y*32)-1.5; else f=fog.x+d*fog.y-1; if(mode==0x802 || mode==0x803 || mode==0x804) f=abs(f); if(isnan(f)) f=1; return saturate(f); }\n" \
+"O convert(V v) { O o=(O)0; o.p=float4((v.p.x/screen.x*2-1)*v.p.w,(1-v.p.y/screen.y*2)*v.p.w,0,v.p.w); o.d0=v.d0;o.d1=v.d1;o.f=ff(v.f);o.z=float2(v.p.z,0);o.t0=v.t0*ts[0];o.t1=v.t1*ts[1];o.t2=v.t2*ts[2];o.t3=v.t3*ts[3];return o; }\n" \
+"\n" \
+"V from_output(O o) { V v=(V)0;v.p=o.p;v.d0=o.d0;v.d1=o.d1;v.t0=o.t0;v.t1=o.t1;v.t2=o.t2;v.t3=o.t3;v.f=o.f;v.sz=pointSize.x;return v; }\n" \
+"void output_vertices(O input[6],inout V v[6]) { [unroll] for(int i=0;i<6;i++)v[i]=from_output(input[i]); }\n" \
+"uint next_polygon_vertex(uint index,uint count) {return index+1==count?0:index+1;}\n" \
+"uint clip_polygon_xy(inout V p[9],inout uint edges[9],inout uint points[9],uint n,uint axis,float boundary,bool lower) {\n" \
+"    V output[9]={(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0};uint oe[9]={0,0,0,0,0,0,0,0,0},op[9]={0,0,0,0,0,0,0,0,0};uint count=0;\n" \
+"    [loop] for(uint i=0;i<n;i++) {\n" \
+"        V a=p[i],b=p[next_polygon_vertex(i,n)];float da=lower?a.p[axis]-boundary:boundary-a.p[axis],db=lower?b.p[axis]-boundary:boundary-b.p[axis];bool ain=da>=0,bin=db>=0;\n" \
+"        if(ain){output[count]=a;oe[count]=edges[i];op[count]=points[i];count++;}\n" \
+"        if(ain && !bin && da==0)oe[count-1]=1;\n" \
+"        if(ain!=bin && da!=0 && db!=0) {\n" \
+"            float t=da/(da-db);precise float clip_t=t*a.p.w/((1-t)*b.p.w+t*a.p.w);\n" \
+"            a.p.xyz*=a.p.w;b.p.xyz*=b.p.w;V v=mixv(a,b,clip_t);v.p.xyz/=v.p.w;v.p[axis]=boundary;\n" \
+"            output[count]=v;oe[count]=ain?1:edges[i];op[count]=edges[i];count++;\n" \
+"        }\n" \
+"    }\n" \
+"    [unroll] for(uint j=0;j<9;j++){p[j]=output[j];edges[j]=oe[j];points[j]=op[j];}return count;\n" \
+"}\n"
+
+#define NV2A_GEOMETRY_POLYGON(COUNT, FLAT_TINT, EARLY_ACCEPT, CLIP_XY) \
+"uint prepare_polygon(V input[6],inout V poly[9],inout uint edges[9],inout uint points[9]) {\n" \
+"    V a[4]={(V)0,(V)0,(V)0,(V)0};a[0]=input[0];a[1]=input[2];a[2]=input[4];a[3]=input[3];\n" \
+COUNT \
+FLAT_TINT \
+"    bool clipped=false,inside=true;[unroll] for(uint i=0;i<4;i++)if(i<count){if(a[i].p.w<=0.001)clipped=true;if(!(a[i].p.w>0.001))inside=false;}\n" \
+EARLY_ACCEPT \
+"    uint n=0;[loop] for(uint i=0;i<count;i++) {\n" \
+"        V p=a[i],q=a[next_polygon_vertex(i,count)];uint edge=(edgeMask>>i)&1;bool pin=p.p.w>0.001,qin=q.p.w>0.001;\n" \
+"        if(pin){poly[n]=p;if(clipped)poly[n]=toclip(p);edges[n]=edge;points[n]=(pointMask>>i)&1;n++;}\n" \
+"        if(pin!=qin){precise float t=(0.001-p.p.w)/(q.p.w-p.p.w);poly[n]=mixv(toclip(p),toclip(q),t);edges[n]=pin?1:edge;points[n]=edge;n++;}\n" \
+"    }\n" \
+"    if(clipped) [loop] for(uint i=0;i<n;i++)poly[i].p.xyz=poly[i].p.xyz/poly[i].p.w*C[58].xyz+C[59].xyz;\n" \
+CLIP_XY \
+"    return n;\n" \
+"}\n"
+
+#define NV2A_GEOMETRY_VISIBILITY(FILL_MODE, CULL, BACK_TINT) \
+"precise float visible_triangle_area(float2 origin,float2 second,float2 third) {\n" \
+"    precise float2 a=second-origin,b=third-origin;\n" \
+"    return a.x*b.y-a.y*b.x;\n" \
+"}\n" \
+"bool visible_polygon(inout V p[9],uint n,uint mode) {\n" \
+"    if(n<3)return false;\n" \
+"    [unroll] for(uint j=0;j<3;j++)p[j].p.xy=trunc(p[j].p.xy*16)/16;\n" \
+"    precise float area=visible_triangle_area(p[0].p.xy,p[1].p.xy,p[2].p.xy);\n" \
+"    [loop] for(uint j=3;j<n;j++)p[j].p.xy=trunc(p[j].p.xy*16)/16;\n" \
+"    [loop] for(uint i=2;area==0 && i+1<n;i++)area=visible_triangle_area(p[0].p.xy,p[i].p.xy,p[i+1].p.xy);\n" \
+"    if(area==0 || isnan(area))return false;bool front=(area<0)==(flags.z!=0);\n" \
+FILL_MODE \
+CULL \
+BACK_TINT \
+"    return true;\n" \
+"}\n"
+
+#define NV2A_GEOMETRY_FILL \
+"float polygon_depth_slope(V p[9],uint n) {\n" \
+"    [loop] for(uint j=1;j+1<n;j++){float2 b=p[j].p.xy-p[0].p.xy,c=p[j+1].p.xy-p[0].p.xy;precise float area=b.x*c.y-b.y*c.x;if(area!=0){float db=p[j].p.z-p[0].p.z,dc=p[j+1].p.z-p[0].p.z;return max(abs((db*c.y-dc*b.y)/area),abs((dc*b.x-db*c.x)/area));}}return 0;\n" \
+"}\n" \
+"void append_fill_triangle(O first,O second,O third,inout TriangleStream<O> stream) {\n" \
+"    stream.Append(first);stream.Append(second);stream.Append(third);stream.RestartStrip();\n" \
+"}\n" \
+NV2A_EMIT_FILL("emit_polygon_fill", "append_fill_triangle")
+
 static const char nv2a_geometry_source[] =
-"cbuffer VSC:register(b1) { float4 C[192]; };\n"
-"cbuffer Geometry:register(b2) { float4 screen,bounds,ts[4],fog; uint4 flags; float4 pointParams[2],pointSize; uint4 pointFlags,polygon; float4 raster; };\n"
-"struct V { float4 p:SV_POSITION; float4 d0:COLOR0,d1:COLOR1,t0:TEXCOORD0,t1:TEXCOORD1,t2:TEXCOORD2,t3:TEXCOORD3; float f:FOG,sz:PSIZE; float4 b0:TEXCOORD4,b1:TEXCOORD5; };\n"
-"struct O { float4 p:SV_POSITION; noperspective float4 d0:COLOR0,d1:COLOR1; float4 t0:TEXCOORD0,t1:TEXCOORD1,t2:TEXCOORD2,t3:TEXCOORD3; noperspective float f:TEXCOORD4; noperspective float2 z:TEXCOORD5; };\n"
-"V toclip(V a) { [unroll] for(int j=0;j<3;j++) a.p[j]=C[58][j]!=0 ? (a.p[j]-C[59][j])/C[58][j]*a.p.w : 0; return a; }\n"
-"V mixv(V a,V b,float t) { V o; o.p=a.p+(b.p-a.p)*t; o.d0=a.d0+(b.d0-a.d0)*t; o.d1=a.d1+(b.d1-a.d1)*t; o.t0=a.t0+(b.t0-a.t0)*t; o.t1=a.t1+(b.t1-a.t1)*t; o.t2=a.t2+(b.t2-a.t2)*t; o.t3=a.t3+(b.t3-a.t3)*t; o.f=a.f+(b.f-a.f)*t; o.sz=a.sz+(b.sz-a.sz)*t;o.b0=a.b0+(b.b0-a.b0)*t;o.b1=a.b1+(b.b1-a.b1)*t;return o; }\n"
-"float ff(float d) { if(fog.w==0) return 1; float f; uint mode=(uint)fog.z; if(mode==0x800 || mode==0x802) f=fog.x+exp2(d*fog.y*16)-1.5; else if(mode==0x801 || mode==0x803) f=fog.x+exp2(-d*d*fog.y*fog.y*32)-1.5; else f=fog.x+d*fog.y-1; if(mode==0x802 || mode==0x803 || mode==0x804) f=abs(f); if(isnan(f)) f=1; return saturate(f); }\n"
-"O convert(V v) { O o=(O)0; o.p=float4((v.p.x/screen.x*2-1)*v.p.w,(1-v.p.y/screen.y*2)*v.p.w,0,v.p.w); o.d0=v.d0;o.d1=v.d1;o.f=ff(v.f);o.z=float2(v.p.z,0);o.t0=v.t0*ts[0];o.t1=v.t1*ts[1];o.t2=v.t2*ts[2];o.t3=v.t3*ts[3];return o; }\n"
-"\n"
-"V from_output(O o) { V v=(V)0;v.p=o.p;v.d0=o.d0;v.d1=o.d1;v.t0=o.t0;v.t1=o.t1;v.t2=o.t2;v.t3=o.t3;v.f=o.f;v.sz=pointSize.x;return v; }\n"
-"void output_vertices(O input[6],inout V v[6]) { [unroll] for(int i=0;i<6;i++)v[i]=from_output(input[i]); }\n"
-"uint clip_polygon_xy(inout V p[9],inout uint edges[9],inout uint points[9],uint n,uint axis,float boundary,bool lower) {\n"
-"    V output[9]={(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0};uint oe[9]={0,0,0,0,0,0,0,0,0},op[9]={0,0,0,0,0,0,0,0,0};uint count=0;\n"
-"    [loop] for(uint i=0;i<n;i++) {\n"
-"        V a=p[i],b=p[(i+1)%n];float da=lower?a.p[axis]-boundary:boundary-a.p[axis],db=lower?b.p[axis]-boundary:boundary-b.p[axis];bool ain=da>=0,bin=db>=0;\n"
-"        if(ain){output[count]=a;oe[count]=edges[i];op[count]=points[i];count++;}\n"
-"        if(ain && !bin && da==0)oe[count-1]=1;\n"
-"        if(ain!=bin && da!=0 && db!=0) {\n"
-"            float t=da/(da-db);precise float clip_t=t*a.p.w/((1-t)*b.p.w+t*a.p.w);\n"
-"            a.p.xyz*=a.p.w;b.p.xyz*=b.p.w;V v=mixv(a,b,clip_t);v.p.xyz/=v.p.w;v.p[axis]=boundary;\n"
-"            output[count]=v;oe[count]=ain?1:edges[i];op[count]=edges[i];count++;\n"
-"        }\n"
-"    }\n"
-"    [unroll] for(uint j=0;j<9;j++){p[j]=output[j];edges[j]=oe[j];points[j]=op[j];}return count;\n"
-"}\n"
-"uint prepare_polygon(V input[6],inout V poly[9],inout uint edges[9],inout uint points[9]) {\n"
-"    V a[4]={(V)0,(V)0,(V)0,(V)0};a[0]=input[0];a[1]=input[2];a[2]=input[4];a[3]=input[3];\n"
-"    uint count=(polygon.w&255)==4?4:3,edgeMask=(polygon.w>>8)&15,pointMask=(polygon.w>>16)&15;\n"
-"    [unroll] for(uint i=0;i<9;i++){poly[i]=(V)0;edges[i]=points[i]=0;}\n"
-"    if(flags.x!=0) [unroll] for(uint k=0;k<4;k++){a[k].d0=input[1].d0;a[k].d1=input[1].d1;a[k].b0=input[1].b0;a[k].b1=input[1].b1;}\n"
-"    bool clipped=false,inside=true;[unroll] for(uint i=0;i<4;i++)if(i<count){if(a[i].p.w<=0.001)clipped=true;if(!(a[i].p.w>0.001))inside=false;}\n"
-"    if(inside && polygon.x==0 && polygon.y==0){poly[0]=a[0];poly[1]=a[1];poly[2]=a[2];poly[3]=a[3];return count;}\n"
-"    uint n=0;[loop] for(uint i=0;i<count;i++) {\n"
-"        V p=a[i],q=a[(i+1)%count];uint edge=(edgeMask>>i)&1;bool pin=p.p.w>0.001,qin=q.p.w>0.001;\n"
-"        if(pin){poly[n]=p;if(clipped)poly[n]=toclip(p);edges[n]=edge;points[n]=(pointMask>>i)&1;n++;}\n"
-"        if(pin!=qin){precise float t=(0.001-p.p.w)/(q.p.w-p.p.w);poly[n]=mixv(toclip(p),toclip(q),t);edges[n]=pin?1:edge;points[n]=edge;n++;}\n"
-"    }\n"
-"    if(clipped) [loop] for(uint i=0;i<n;i++)poly[i].p.xyz=poly[i].p.xyz/poly[i].p.w*C[58].xyz+C[59].xyz;\n"
-"    if(polygon.x!=0 || polygon.y!=0){n=clip_polygon_xy(poly,edges,points,n,0,0,true);n=clip_polygon_xy(poly,edges,points,n,0,screen.x,false);n=clip_polygon_xy(poly,edges,points,n,1,0,true);n=clip_polygon_xy(poly,edges,points,n,1,screen.y,false);}\n"
-"    return n;\n"
-"}\n"
-"bool visible_polygon(inout V p[9],uint n,uint mode) {\n"
-"    if(n<3)return false;[loop] for(uint j=0;j<n;j++)p[j].p.xy=trunc(p[j].p.xy*16)/16;precise float area=0;\n"
-"    [loop] for(uint i=1;i+1<n;i++){area=(p[i].p.x-p[0].p.x)*(p[i+1].p.y-p[0].p.y)-(p[i].p.y-p[0].p.y)*(p[i+1].p.x-p[0].p.x);if(area!=0)break;}\n"
-"    if(area==0 || isnan(area))return false;bool front=(area<0)==(flags.z!=0);\n"
-"    if((front?polygon.x:polygon.y)!=mode)return false;\n"
-"    if(flags.y!=0 && (flags.w==3 || (front && flags.w==1) || (!front && flags.w==2)))return false;\n"
-"    [loop] for(uint i=0;i<n;i++){if(pointFlags.z!=0 && !front){p[i].d0=p[i].b0;p[i].d1=p[i].b1;}}\n"
-"    return true;\n"
-"}\n"
-"float polygon_depth_slope(V p[9],uint n) {\n"
-"    [loop] for(uint j=1;j+1<n;j++){float2 b=p[j].p.xy-p[0].p.xy,c=p[j+1].p.xy-p[0].p.xy;precise float area=b.x*c.y-b.y*c.x;if(area!=0){float db=p[j].p.z-p[0].p.z,dc=p[j+1].p.z-p[0].p.z;return max(abs((db*c.y-dc*b.y)/area),abs((dc*b.x-db*c.x)/area));}}return 0;\n"
-"}\n"
-"void emit_polygon_fill(V input[6],inout TriangleStream<O> stream) {\n"
-"    V p[9]={(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0};uint e[9]={0,0,0,0,0,0,0,0,0},v[9]={0,0,0,0,0,0,0,0,0};uint n=prepare_polygon(input,p,e,v);if(!visible_polygon(p,n,0))return;\n"
-"    [loop] for(uint i=1;i+1<n;i++){stream.Append(convert(p[0]));stream.Append(convert(p[i]));stream.Append(convert(p[i+1]));stream.RestartStrip();}\n"
-"}\n"
+NV2A_GEOMETRY_INPUTS
+NV2A_GEOMETRY_POLYGON(
+    "    uint count=(polygon.w&255)==4?4:3,edgeMask=(polygon.w>>8)&15,pointMask=(polygon.w>>16)&15;\n",
+    "    if(flags.x!=0) [unroll] for(uint k=0;k<4;k++){a[k].d0=input[1].d0;a[k].d1=input[1].d1;a[k].b0=input[1].b0;a[k].b1=input[1].b1;}\n",
+    "    if(inside && polygon.x==0 && polygon.y==0){poly[0]=a[0];poly[1]=a[1];poly[2]=a[2];poly[3]=a[3];return count;}\n",
+    "    if(polygon.x!=0 || polygon.y!=0){n=clip_polygon_xy(poly,edges,points,n,0,0,true);n=clip_polygon_xy(poly,edges,points,n,0,screen.x,false);n=clip_polygon_xy(poly,edges,points,n,1,0,true);n=clip_polygon_xy(poly,edges,points,n,1,screen.y,false);}\n")
+NV2A_GEOMETRY_VISIBILITY(
+    "    if((front?polygon.x:polygon.y)!=mode)return false;\n",
+    "    if(flags.y!=0 && (flags.w==3 || (front && flags.w==1) || (!front && flags.w==2)))return false;\n",
+    "    if(pointFlags.z!=0 && !front) { [loop] for(uint i=0;i<n;i++){p[i].d0=p[i].b0;p[i].d1=p[i].b1;} }\n")
+NV2A_GEOMETRY_FILL
 "[maxvertexcount(21)] void main(triangleadj V input[6],inout TriangleStream<O> stream){emit_polygon_fill(input,stream);}\n"
 "[maxvertexcount(21)] void main_output(triangleadj O input[6],inout TriangleStream<O> stream){V v[6]={(V)0,(V)0,(V)0,(V)0,(V)0,(V)0};output_vertices(input,v);emit_polygon_fill(v,stream);}\n"
 "void emitpoint(O a,float size,inout TriangleStream<O> stream) { if(a.p.w<=0 || any(isnan(a.p)) || any(isinf(a.p)) || !isfinite(size) || any(abs(a.p.xy)>a.p.w)) return; size=max(1,floor(size+0.5)); float2 center=float2((a.p.x/a.p.w+1)*0.5*screen.x,(1-a.p.y/a.p.w)*0.5*screen.y); center=((uint)size&1)!=0 ? floor(center)+0.5 : floor(center+0.5); [unroll] for(int k=0;k<4;k++) { float2 uv=float2(k&1,k>>1); float2 pos=center+(uv-0.5)*size; O o=a; o.p.xy=float2(pos.x/screen.x*2-1,1-pos.y/screen.y*2)*a.p.w; if(pointFlags.y!=0) o.t3=float4(uv,1,1); stream.Append(o); } stream.RestartStrip(); }\n"
@@ -76,7 +110,7 @@ static const char nv2a_geometry_source[] =
 "    uint width=line_width();bool edge_instance=raster.y<0 && raster.z==0 && width>=2 && width<=16;if(edge_instance ? instance>=9 : (uint)raster.z+instance>=width)return;\n"
 "    V p[9]={(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0,(V)0};uint e[9]={0,0,0,0,0,0,0,0,0},v[9]={0,0,0,0,0,0,0,0,0};uint n=prepare_polygon(input,p,e,v);if(!visible_polygon(p,n,2))return;\n"
 "    float slope=(polygon.z&2)!=0?polygon_depth_slope(p,n):0;\n"
-"    [loop] for(uint i=0;i<n;i++)if(e[i]!=0 && (edge_instance ? i==instance : (raster.y<0 || i==(uint)raster.y))){O a=convert(p[i]),b=convert(p[(i+1)%n]);a.z.y=b.z.y=slope;if(edge_instance){[loop]for(uint copy=0;copy<width;copy++)emit_wide_line(a,b,copy,width,stream);}else emit_wide_line(a,b,instance,width,stream);}\n"
+"    [loop] for(uint i=0;i<n;i++)if(e[i]!=0 && (edge_instance ? i==instance : (raster.y<0 || i==(uint)raster.y))){O a=convert(p[i]),b=convert(p[next_polygon_vertex(i,n)]);a.z.y=b.z.y=slope;if(edge_instance){[loop]for(uint copy=0;copy<width;copy++)emit_wide_line(a,b,copy,width,stream);}else emit_wide_line(a,b,instance,width,stream);}\n"
 "}\n"
 "[instance(32)][maxvertexcount(32)] void main_polygon_line(triangleadj V input[6],uint id:SV_GSInstanceID,inout LineStream<O> stream){emit_polygon_lines(input,id,stream);}\n"
 "[instance(32)][maxvertexcount(32)] void main_output_polygon_line(triangleadj O input[6],uint id:SV_GSInstanceID,inout LineStream<O> stream){V v[6]={(V)0,(V)0,(V)0,(V)0,(V)0,(V)0};output_vertices(input,v);emit_polygon_lines(v,id,stream);}\n"
@@ -93,6 +127,95 @@ static const char nv2a_geometry_source[] =
 "[instance(32)][maxvertexcount(2)] void main_output_line(lineadj O input[4],uint id:SV_GSInstanceID,inout LineStream<O> stream){V v[4];[unroll]for(uint i=0;i<4;i++)v[i]=from_output(input[i]);emit_line_input(v,id,stream);}\n"
 "[maxvertexcount(4)] void main_point(point V input[1],inout TriangleStream<O> stream){V a=input[0];a.p.xy=trunc(a.p.xy*16)/16;emitpoint(convert(a),pointFlags.x!=0?a.sz:pointSize.x,stream);}\n"
 ;
+
+/* A triangle clipped against the W plane produces at most four vertices. */
+static const char nv2a_smooth_triangle_source[] =
+NV2A_GEOMETRY_INPUTS
+NV2A_GEOMETRY_POLYGON(
+    "    uint count=3,edgeMask=(polygon.w>>8)&15,pointMask=(polygon.w>>16)&15;\n",
+    "    \n",
+    "    if(inside){poly[0]=a[0];poly[1]=a[1];poly[2]=a[2];poly[3]=a[3];return count;}\n",
+    "    \n")
+NV2A_GEOMETRY_VISIBILITY(
+    "    if(mode!=0)return false;\n",
+    "    \n",
+    "    \n")
+NV2A_GEOMETRY_FILL
+"[maxvertexcount(6)] void main(triangleadj V input[6],inout TriangleStream<O> stream){if(any(isnan(float3(input[0].p.w,input[2].p.w,input[4].p.w))))return;emit_polygon_fill(input,stream);}\n"
+;
+
+#undef NV2A_GEOMETRY_FILL
+#undef NV2A_GEOMETRY_VISIBILITY
+#undef NV2A_GEOMETRY_POLYGON
+#undef NV2A_GEOMETRY_INPUTS
+
+static const char nv2a_depth_guard_source[] =
+"// Track position and weights while clipping before interpolating full vertex outputs.\n"
+"struct GuardVertex {float3 xyw;float3 weights;};\n"
+"uint trim_guard_edge(inout GuardVertex polygon[7],uint count,uint axis,float bound,bool lower){\n"
+"    GuardVertex output[7]={(GuardVertex)0,(GuardVertex)0,(GuardVertex)0,(GuardVertex)0,(GuardVertex)0,(GuardVertex)0,(GuardVertex)0};\n"
+"    uint output_count=0;\n"
+"    [loop] for(uint i=0;i<count;i++){\n"
+"        GuardVertex a=polygon[i],b=polygon[i+1<count?i+1:0];\n"
+"        float da=a.xyw[axis]-bound*a.xyw.z,db=b.xyw[axis]-bound*b.xyw.z;\n"
+"        bool inside_a=lower?da>=0:da<=0,inside_b=lower?db>=0:db<=0;\n"
+"        if(inside_a)output[output_count++]=a;\n"
+"        if(inside_a!=inside_b && da!=0 && db!=0){\n"
+"            precise float divisor=da-db;\n"
+"            precise float wa=-db/divisor,wb=da/divisor;\n"
+"            GuardVertex edge;\n"
+"            edge.xyw=a.xyw*wa+b.xyw*wb;\n"
+"            edge.xyw[axis]=bound*edge.xyw.z;\n"
+"            edge.weights=a.weights*wa+b.weights*wb;\n"
+"            output[output_count++]=edge;\n"
+"        }\n"
+"    }\n"
+"    [unroll] for(uint i=0;i<7;i++)polygon[i]=output[i];\n"
+"    return output_count;\n"
+"}\n"
+"O interpolate_guard_vertex(O a,O b,O c,GuardVertex vertex){\n"
+"    if(vertex.weights.x==1 && vertex.weights.y==0 && vertex.weights.z==0)return a;\n"
+"    if(vertex.weights.x==0 && vertex.weights.y==1 && vertex.weights.z==0)return b;\n"
+"    if(vertex.weights.x==0 && vertex.weights.y==0 && vertex.weights.z==1)return c;\n"
+"    O q;\n"
+"    q.p=float4(vertex.xyw.xy,0,vertex.xyw.z);\n"
+"    float3 p=vertex.weights;\n"
+"    // Screen-linear outputs and perspective outputs use different weights.\n"
+"    precise float3 s=(p*float3(a.p.w,b.p.w,c.p.w))/q.p.w;\n"
+"    q.d0=a.d0*s.x+b.d0*s.y+c.d0*s.z;q.d1=a.d1*s.x+b.d1*s.y+c.d1*s.z;\n"
+"    q.f=a.f*s.x+b.f*s.y+c.f*s.z;q.z=a.z*s.x+b.z*s.y+c.z*s.z;\n"
+"    q.t0=a.t0*p.x+b.t0*p.y+c.t0*p.z;q.t1=a.t1*p.x+b.t1*p.y+c.t1*p.z;\n"
+"    q.t2=a.t2*p.x+b.t2*p.y+c.t2*p.z;q.t3=a.t3*p.x+b.t3*p.y+c.t3*p.z;\n"
+"    return q;\n"
+"}\n"
+"void append_bounded_triangle(O a,O b,O c,inout TriangleStream<O> stream){\n"
+"    // Bound oversized triangles beyond the visible rectangle before Vulkan rasterization.\n"
+"    const float bound=2.0;\n"
+"    [branch] if(all(abs(a.p.xy)<=bound*a.p.w) && all(abs(b.p.xy)<=bound*b.p.w) && all(abs(c.p.xy)<=bound*c.p.w)){\n"
+"        append_fill_triangle(a,b,c,stream);\n"
+"        return;\n"
+"    }\n"
+"    GuardVertex polygon[7]={(GuardVertex)0,(GuardVertex)0,(GuardVertex)0,(GuardVertex)0,(GuardVertex)0,(GuardVertex)0,(GuardVertex)0};\n"
+"    polygon[0].xyw=a.p.xyw;polygon[0].weights=float3(1,0,0);\n"
+"    polygon[1].xyw=b.p.xyw;polygon[1].weights=float3(0,1,0);\n"
+"    polygon[2].xyw=c.p.xyw;polygon[2].weights=float3(0,0,1);\n"
+"    uint count=trim_guard_edge(polygon,3,0,-bound,true);\n"
+"    count=trim_guard_edge(polygon,count,0,bound,false);\n"
+"    count=trim_guard_edge(polygon,count,1,-bound,true);\n"
+"    count=trim_guard_edge(polygon,count,1,bound,false);\n"
+"    if(count<3)return;\n"
+"    stream.Append(interpolate_guard_vertex(a,b,c,polygon[0]));\n"
+"    [loop] for(uint i=1;i<count;i++){\n"
+"        uint vertex=(i&1)!=0?(i+1)/2:count-i/2;\n"
+"        stream.Append(interpolate_guard_vertex(a,b,c,polygon[vertex]));\n"
+"    }\n"
+"    stream.RestartStrip();\n"
+"}\n"
+NV2A_EMIT_FILL("emit_depth_guard", "append_bounded_triangle")
+"[maxvertexcount(28)] void main_depth_guard(triangleadj V input[6],inout TriangleStream<O> stream){emit_depth_guard(input,stream);}\n"
+;
+
+#undef NV2A_EMIT_FILL
 
 static HRESULT bind_native_geometry(const float *constants,const NV2ANativeGeometry *geometry,unsigned kind)
 {
@@ -134,16 +257,20 @@ HRESULT d3d8_vsh_bind_geometry(const float *constants,const NV2ANativeGeometry *
     return bind_native_geometry(constants,geometry,kind);
 }
 
-static VshCacheEntry *native_program(const DWORD *microcode,int length)
+static VshCacheEntry *native_program(const DWORD *microcode,int length,uint64_t revision)
 {
     static DWORD previous_program[NV2A_VS_MAX_INSTRUCTIONS * 4];
     static int previous_length;
     static uint32_t previous_hash;
-    size_t program_bytes=(size_t)length*16;
-    if(previous_length!=length || memcmp(previous_program,microcode,program_bytes)) {
-        previous_hash=fnv1a_hash(microcode,program_bytes);
-        memcpy(previous_program,microcode,program_bytes);
-        previous_length=length;
+    static uint64_t previous_revision;
+    if(previous_revision!=revision) {
+        size_t program_bytes=(size_t)length*16;
+        if(previous_length!=length || memcmp(previous_program,microcode,program_bytes)) {
+            previous_hash=fnv1a_hash(microcode,program_bytes);
+            memcpy(previous_program,microcode,program_bytes);
+            previous_length=length;
+        }
+        previous_revision=revision;
     }
     uint32_t hash=previous_hash;
     VshCacheEntry *entry=cache_lookup(hash);
@@ -151,7 +278,7 @@ static VshCacheEntry *native_program(const DWORD *microcode,int length)
     return entry;
 }
 
-HRESULT d3d8_vsh_bind_native(const DWORD *microcode, int length, const float *constants, const NV2ANativeGeometry *geometry, D3D11_PRIMITIVE_TOPOLOGY topology, uint32_t *inputs_read)
+HRESULT d3d8_vsh_bind_native(const DWORD *microcode, int length, uint64_t revision, const float *constants, const NV2ANativeGeometry *geometry, D3D11_PRIMITIVE_TOPOLOGY topology, uint32_t *inputs_read)
 {
     if(!inputs_read) return E_INVALIDARG;
     unsigned kind;
@@ -161,7 +288,7 @@ HRESULT d3d8_vsh_bind_native(const DWORD *microcode, int length, const float *co
     else return E_INVALIDARG;
     ID3D11Device *device=d3d8_GetD3D11Device();
     ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
-    VshCacheEntry *entry=native_program(microcode,length);
+    VshCacheEntry *entry=native_program(microcode,length,revision);
     if(!entry) return E_FAIL;
     HRESULT hr;
     if(!entry->native_layout) {
@@ -190,7 +317,7 @@ static const char nv2a_fixed_vertex_source[] =
 " float4 scene,emission;\n"
 " float4 ambient[8],diffuse[8],specular[8];\n"
 " float4 halfVector[8],direction[8],position[8],attenuation[8],spotFalloff[8],spotDirection[8];\n"
-" float4 material; uint4 fixedFlags,sources,lightModes[2],texgen[4],textureMatrix,skinning;\n"
+" float4 material; uint4 fixedFlags,sources,lightModes[2],texgen[4],textureMatrix; uint2 skinning; uint directAttributes; uint fixedReserved;\n"
 " float4 backScene,backEmission,backMaterial,backAmbient[8],backDiffuse[8],backSpecular[8]; uint4 backSources;float4 specularSecond,backSpecularSecond;\n"
 "};\n"
 "struct I { float4 a0:ATTR0,a1:ATTR1,a2:ATTR2,a3:ATTR3,a4:ATTR4,a5:ATTR5,a6:ATTR6,a7:ATTR7,a8:ATTR8,a9:ATTR9,a10:ATTR10,a11:ATTR11,a12:ATTR12; };\n"
@@ -200,9 +327,12 @@ static const char nv2a_fixed_vertex_source[] =
 "float rationalFalloff(float x,float3 k,float ceiling) { if(x<=-k.x) return 0;float denominator=k.y*x+k.z;if(denominator==0) return ceiling;if(denominator<0) return 0;return clamp((x+k.x)/denominator,0,ceiling); }\n"
 "float rationalHalfVector(float s,float hd,float3 k) { float ss=s*s;float numerator=ss+hd*k.x,denominator=ss*k.y+hd*k.z;if(s<0 || numerator<=0) return 0;if(denominator==0) return 10000;if(denominator<0) return 0;return clamp(numerator/denominator,0,10000); }\n"
 "V main_fixed(I v) {\n"
-" V o=(V)0; float4 eye=transform4(v.a0,8); float3 n=transform4(float4(v.a2.xyz,0),12).xyz;\n"
-" if(skinning.x!=0) { eye=0;n=0;uint count=(skinning.x+3)/2;float remaining=1;[unroll] for(uint bone=0;bone<4;bone++) { if(bone>=count) break;float weight=(skinning.x&1)!=0 && bone==count-1 ? remaining : v.a1[bone];remaining-=weight;eye+=transform4(v.a0,8+bone*8)*weight;n+=transform4(float4(v.a2.xyz,0),12+bone*8).xyz*weight; } }\n"
-" if(fixedFlags.y!=0) n=normalize(n);\n"
+" V o=(V)0; float4 eye=0; float3 n=0;\n"
+" [branch] if(directAttributes==0) {\n"
+"  eye=transform4(v.a0,8);n=transform4(float4(v.a2.xyz,0),12).xyz;\n"
+"  if(skinning.x!=0) { eye=0;n=0;uint count=(skinning.x+3)/2;float remaining=1;[unroll] for(uint bone=0;bone<4;bone++) { if(bone>=count) break;float weight=(skinning.x&1)!=0 && bone==count-1 ? remaining : v.a1[bone];remaining-=weight;eye+=transform4(v.a0,8+bone*8)*weight;n+=transform4(float4(v.a2.xyz,0),12+bone*8).xyz*weight; } }\n"
+"  if(fixedFlags.y!=0) n=normalize(n);\n"
+" }\n"
 " o.d0=v.a3;o.d1=v.a4;o.b0=v.a7;o.b1=v.a8;\n"
 " if(fixedFlags.x!=0) {\n"
 "  float3 toEye=fixedFlags.z!=0 ? normalize(C[56].xyz/C[56].w-eye.xyz/eye.w) : float3(0,0,0);\n"
@@ -242,12 +372,24 @@ static const char nv2a_fixed_vertex_source[] =
 " float4 p=skinning.x==0 ? transform4(v.a0,0) : transform4(eye,0);\n"
 " if(p.w>0 || asuint(p.w)==0) p.w=clamp(p.w,asfloat(0x1F800000),asfloat(0x5F800000));else p.w=clamp(p.w,asfloat(0xDF800000),asfloat(0x9F800000));\n"
 " o.p=float4(p.xy/p.w+C[59].xy,p.z/p.w,p.w);\n"
+" [branch] if(directAttributes!=0) {\n"
+"  o.sz=max(1,pointSize.x);o.t0=v.a9;o.t1=v.a10;o.t2=v.a11;o.t3=v.a12;\n"
+" } else {\n"
 " o.f=v.a5.x;if(pointFlags.w==0) o.f=saturate(v.a4.a);else if(pointFlags.w==1) o.f=length(eye.xyz);else if(pointFlags.w==2 || pointFlags.w==3) { o.f=dot(C[57].xyz,eye.xyz)+C[57].w;if(pointFlags.w==3) o.f=abs(o.f); }\n"
 " o.sz=max(1,pointSize.x);if(pointFlags.x!=0) { float d=length(eye);float mn=min(pointParams[1].w,63.875),mx=min(pointParams[0].w+mn,63.875);o.sz=clamp((rsqrt(pointParams[0].x+pointParams[0].y*d+pointParams[0].z*d*d)+pointParams[1].z)*pointParams[0].w+pointParams[1].w,mn,mx); }\n"
-" o.t0=fixedTexcoord(v,eye,n,0,v.a9);o.t1=fixedTexcoord(v,eye,n,1,v.a10);o.t2=fixedTexcoord(v,eye,n,2,v.a11);o.t3=fixedTexcoord(v,eye,n,3,v.a12);return o;\n"
+" o.t0=fixedTexcoord(v,eye,n,0,v.a9);o.t1=fixedTexcoord(v,eye,n,1,v.a10);o.t2=fixedTexcoord(v,eye,n,2,v.a11);o.t3=fixedTexcoord(v,eye,n,3,v.a12);\n"
+" }\n"
+" return o;\n"
 "}\n"
 ;
-
+/* A proved unclipped filled strip uses the same position snap and outputs. */
+static const char nv2a_direct_fill_source[] =
+"\n"
+"O main_fixed_fill(I input) {\n"
+"    V v=main_fixed(input);\n"
+"    v.p.xy=trunc(v.p.xy*16)/16;\n"
+"    return convert(v);\n"
+"}\n";
 
 HRESULT d3d8_vsh_bind_fixed(const float *constants,const NV2ANativeGeometry *geometry,const NV2ANativeFixed *fixed,D3D11_PRIMITIVE_TOPOLOGY topology)
 {
@@ -258,7 +400,7 @@ HRESULT d3d8_vsh_bind_fixed(const float *constants,const NV2ANativeGeometry *geo
     else return E_INVALIDARG;
     ID3D11Device *device=d3d8_GetD3D11Device();ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();HRESULT hr;
     if(!g_vsh_fixed_shader) {
-        char *source=d3d8_vsh_fixed_source();if(!source) return E_OUTOFMEMORY;
+        char *source=d3d8_vsh_fixed_source(0);if(!source) return E_OUTOFMEMORY;
         ID3DBlob *code=NULL,*errors=NULL;
         hr=D3DCompile(source,strlen(source),"nv2a_fixed_vertex",NULL,NULL,"main_fixed","vs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3|D3DCOMPILE_IEEE_STRICTNESS,0,&code,&errors);free(source);
         if(FAILED(hr)) { fprintf(stderr,"NV2A fixed vertex: %s\n",errors?(char *)ID3D10Blob_GetBufferPointer(errors):"compile failed");if(errors) ID3D10Blob_Release(errors);return hr; }

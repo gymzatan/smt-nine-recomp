@@ -25,6 +25,8 @@
 #include "../nv2a/nv2a_color_logic.h"
 #if defined(_WIN32)
 #include <windows.h>
+#include <float.h>
+#include <emmintrin.h>
 #include "../d3d/d3d8_internal.h"
 #include "../d3d/d3d8_vsh.h"
 #define NV_TLS __declspec(thread)
@@ -320,11 +322,12 @@ static uint32_t texture_volume_bytes(const Texture *t)
 
 static void note_unhandled(uint32_t method, uint32_t param);
 
-static void tex_update_valid(Texture *t)
+static void tex_update_valid(Texture *t, unsigned stage)
 {
     struct PGRAPHState *pg = &nv2a_get_state()->pgraph;
-    unsigned stage = (unsigned)(t - s_gpu.texs);
     uint32_t control = pg->regs[NV_PGRAPH_TEXCTL0_0 + stage * 4];
+    /* Swizzled textures supply their dimensions through FORMAT. Only
+     * linear textures need a row pitch. */
     t->valid = (control & NV_PGRAPH_TEXCTL0_0_ENABLE)
             && t->offset_set && t->width && t->height
             && (tex_size_from_format(t->color) || t->pitch);
@@ -344,12 +347,6 @@ static void record_tex_reg(uint32_t method, uint32_t param)
 {
     s_tex_reg[(method - NV_TEX_FIRST) / 4] = param;
     s_tex_set[(method - NV_TEX_FIRST) / 4] = 1;
-    /* A pitch is a linear texture's property. A swizzled one has no rows and
-     * so no pitch, and requiring one here refused every swizzled texture --
-     * which is nearly all of them, since swizzled is the Xbox default. That
-     * left the title's own textures unsampled and every textured quad drawn in
-     * flat vertex colour. */
-    tex_update_valid(&s_gpu.texs[0]);
 }
 
 /* Every distinct texture a batch was drawn with, and how many batches used it.
@@ -1734,24 +1731,58 @@ static int batch_is_screen_space(void)
 #define NV_PRIM_QUAD_STRIP     9
 #define NV_PRIM_POLYGON        10
 
+static int polygon_modes_active(const struct PGRAPHState *pg)
+{
+    return s_gpu.prim>NV_PRIM_LINE_STRIP && (pg->regs[NV_PGRAPH_SETUPRASTER]&
+        (NV_PGRAPH_SETUPRASTER_FRONTFACEMODE|NV_PGRAPH_SETUPRASTER_BACKFACEMODE))!=0;
+}
+
 /* How many post-draw captures to keep: enough to see whether the geometry
  * is stable from frame to frame, few enough not to fill a directory. */
 /* Primitive colour selection follows the original xemu geometry dispatcher.
  * Both indexed screen-space and program batches consume this same selection. */
-static uint32_t provoking_slot(struct PGRAPHState *pg,uint32_t start)
+typedef struct {
+    uint32_t start_mask, offset, wrap;
+} ProvokingVertex;
+
+static ProvokingVertex provoking_vertex(const struct PGRAPHState *pg,
+                                        uint32_t primitive,uint32_t count)
 {
-    int first = (pg->regs[NV_PGRAPH_CONTROL_3] &
-                 NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX) != 0;
-    switch (s_gpu.prim) {
-    case NV_PRIM_LINES: case NV_PRIM_LINE_STRIP: return first ? start : start+1;
-    case NV_PRIM_LINE_LOOP: return first ? start : (start+1)%s_gpu.idx_count;
-    case NV_PRIM_TRIANGLES: return first ? start : start + 2;
-    case NV_PRIM_TRIANGLE_STRIP: return first ? start : start + 2 - (start & 1);
-    case NV_PRIM_TRIANGLE_FAN: return first ? 0 : start;
-    case NV_PRIM_POLYGON: return start + 1;
-    case NV_PRIM_QUADS: case NV_PRIM_QUAD_STRIP: return start + 3;
-    default: note_unhandled(NV097_SET_BEGIN_END, s_gpu.prim); return 0;
+    ProvokingVertex vertex={UINT32_MAX,0,UINT32_MAX};
+    const int first=pg && (pg->regs[NV_PGRAPH_CONTROL_3]&NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX);
+    switch (primitive) {
+    case NV_PRIM_LINE_LOOP:
+        vertex.wrap=count;
+        /* fall through: the last vertex is also the next one in a loop. */
+    case NV_PRIM_LINES: case NV_PRIM_LINE_STRIP:
+        vertex.offset=first?0u:1u;
+        break;
+    case NV_PRIM_TRIANGLES:
+        vertex.offset=first?0u:2u;
+        break;
+    case NV_PRIM_TRIANGLE_STRIP:
+        if(!first) {
+            vertex.start_mask=~1u;
+            vertex.offset=2;
+        }
+        break;
+    case NV_PRIM_TRIANGLE_FAN:
+        if(first) vertex.start_mask=0;
+        break;
+    case NV_PRIM_POLYGON:
+        vertex.offset=1;
+        break;
+    case NV_PRIM_QUADS: case NV_PRIM_QUAD_STRIP:
+        vertex.offset=3;
+        break;
     }
+    return vertex;
+}
+
+static inline uint32_t provoking_slot(ProvokingVertex vertex,uint32_t start)
+{
+    const uint32_t slot=(start&vertex.start_mask)+vertex.offset;
+    return slot==vertex.wrap?0:slot;
 }
 
 #define FB_DUMP_AFTER_DRAW 8
@@ -3050,15 +3081,18 @@ static void raster_software_polygon(uint32_t a,uint32_t b,uint32_t c,uint32_t d,
     for(unsigned i=1;i+1<n;i++)raster_xf_triangle_mode(&poly[0],&poly[i],&poly[i+1],0,1,0);
 }
 
+/* Set by raster_batch_vertices before it starts assembling primitives. */
+static int s_program_polygon_modes;
+
 static void raster_program_triangle(uint32_t a,uint32_t b,uint32_t c,uint32_t p)
 {
 #if defined(_WIN32)
     if(s_hw_program_active) {
-        if(hw_polygon_modes_active())s_hw_polygon_info[s_hw_count/6]=primitive_polygon_info(a,b,c,0,3);
+        if(s_program_polygon_modes)s_hw_polygon_info[s_hw_count/6]=primitive_polygon_info(a,b,c,0,3);
         hw_program_triangle(a,b,c,p);return;
     }
 #endif
-    if(nv2a_get_state()->pgraph.regs[NV_PGRAPH_SETUPRASTER]&(NV_PGRAPH_SETUPRASTER_FRONTFACEMODE|NV_PGRAPH_SETUPRASTER_BACKFACEMODE)){raster_software_polygon(a,b,c,0,3,p);return;}
+    if(s_program_polygon_modes){raster_software_polygon(a,b,c,0,3,p);return;}
     raster_xf_clipped(&s_xf[a],&s_xf[b],&s_xf[c],&s_xf[p]);
 }
 
@@ -3108,12 +3142,10 @@ static void raster_indexed_line(uint32_t i0,uint32_t i1,uint32_t p)
     raster_vertex_line(&a,&b,&provoking,0,0);
 }
 
-static void raster_batch_vertices(int fixed)
+static void raster_batch_vertices(int fixed,int report_enabled)
 {
-    const int report_enabled = nv2a_pb_scan_exec_enabled();
     uint32_t i, n = s_gpu.idx_count;
-    /* Point batches do not select a provoking vertex. Other primitives use
-     * this same device for the whole batch; the flag is still read per call. */
+    /* Point batches do not select a provoking vertex. */
     struct PGRAPHState *pg=s_gpu.prim==NV_PRIM_POINTS?NULL:&nv2a_get_state()->pgraph;
 #if defined(_WIN32)
     uint64_t transform_start = gpu_timing_clock();
@@ -3124,17 +3156,19 @@ static void raster_batch_vertices(int fixed)
     /* Attributes and the program are fixed during this synchronous batch.
      * Context writes make repeated indices stateful, so those execute every
      * vertex. No outputs are retained across command batches. */
-    int reuse = fixed || !nv2a_vsh_cxt_write();
+    const int reuse = !s_gpu.inline_active && (fixed || !nv2a_vsh_cxt_write());
     uint32_t inputs = 0x1FFFu;
 #if defined(_WIN32)
     if(hw_enabled()) {
         hw_initialize();
         if(!fixed) {
-            s_hw_program=nv2a_vsh_program(&s_hw_program_length,&inputs);
+            s_hw_program=nv2a_vsh_program(&s_hw_program_length,&inputs,&s_hw_program_revision);
             if(!s_hw_program) hw_check(E_NOTIMPL,"vertex program context writes or missing final");
         }
         s_hw_program_active=1;s_hw_output_active=fixed==2;s_hw_fixed_active=fixed==1;s_hw_program_vertex_count=0;
         if(s_hw_output_active) inputs=255;
+        else if(s_hw_fixed_active && d3d8_IsNativeVulkan())
+            inputs&=~(1u<<6); /* Neither fixed Vulkan vertex entry reads ATTR6. */
         s_hw_program_inputs=inputs;
         /* The native input layout uses this same decoded input mask, in
          * ascending attribute order. Write its packed rows directly. */
@@ -3155,41 +3189,69 @@ static void raster_batch_vertices(int fixed)
     if(cache_locked) {hw_enter();cache=hw_vertex_batch_begin(inputs,attribute_count,&cache_hit);}
     s_hw_vertex_batch=cache;
     if(!cache_hit) {
-#endif
-    /* Only slots read by this batch need resetting. */
-    for (i = 0; i < n; i++)
-        s_xf_positions[s_gpu.idx[i] % NV_MAX_INDICES] = 0;
-    for (i = 0; i < n; i++) {
-        uint32_t slot = s_gpu.idx[i] % NV_MAX_INDICES;
-        uint32_t previous = s_xf_positions[slot];
-        if (reuse && previous && s_gpu.idx[previous - 1] == s_gpu.idx[i]) {
-#if defined(_WIN32)
-            if(s_hw_program_active) s_hw_program_vertex_rows[i]=s_hw_program_vertex_rows[previous-1];
-            else
-#endif
-            s_xf[i] = s_xf[previous - 1];
-            ++s_gpu.vertices_reused;
-        } else {
-#if defined(_WIN32)
-            if(s_hw_program_active) {
-                uint32_t row=s_hw_program_vertex_count++;s_hw_program_vertex_rows[i]=row;
-                if(s_hw_output_active) {
-                    Nv2aVshOutput output={0};
-                    if(!fetch_screen_vertex(s_gpu.idx[i],&output)) hw_check(E_FAIL,"screen vertex output");
-                    hw_pack_output((HwVertexOutput *)packed,&output);
-                    packed+=8;
-                } else for(unsigned a=0;a<attribute_count;++a) {
-                    unsigned attr=attributes[a];
-                    fetch_attr(&s_gpu.attr[attr],s_gpu.idx[i],*packed++);
-                }
-            } else
-#endif
-            {
-                if(fixed==2){memset(&s_xf[i],0,sizeof s_xf[i]);if(!fetch_screen_vertex(s_gpu.idx[i],&s_xf[i]))return;}
-                else if (!transform_vertex(s_gpu.idx[i], inputs, &s_xf[i])) return;
-                ++s_gpu.vertices_transformed;
+    /* Disabled arrays are constant throughout an inline batch. Decode their
+     * current register once and retain the normal decoder for arrays. */
+    float inline_current[16][4];
+    unsigned inline_array_slots[16], inline_array_count=0;
+    int inline_has_current=0;
+    if(s_hw_program_active && !s_hw_output_active && s_gpu.inline_active && n>=16) {
+        for(unsigned slot=0;slot<attribute_count;++slot) {
+            const VertexAttr *attr=&s_gpu.attr[attributes[slot]];
+            if(attr->size) {
+                inline_array_slots[inline_array_count++]=slot;
+                memset(inline_current[slot],0,sizeof inline_current[slot]);
+            } else {
+                fetch_attr(attr,0,inline_current[slot]);
+                inline_has_current=1;
             }
-            s_xf_positions[slot] = i + 1;
+        }
+    }
+#endif
+    /* Inline producers use the position as the index, so none can repeat.
+     * Otherwise a slot matches only after an equal index was seen this batch. */
+    for (i = 0; i < n; i++) {
+        const uint32_t index=s_gpu.idx[i];
+        if(reuse) {
+            /* 2^19 is congruent to 1 modulo the fixed 2^19-1 table size. */
+            uint32_t slot=(index & NV_MAX_INDICES)+index/(NV_MAX_INDICES+1u);
+            if(slot>=NV_MAX_INDICES)slot-=NV_MAX_INDICES;
+            const uint32_t previous=s_xf_positions[slot]-1;
+            if(previous<i && s_gpu.idx[previous]==index) {
+#if defined(_WIN32)
+                if(s_hw_program_active) s_hw_program_vertex_rows[i]=s_hw_program_vertex_rows[previous];
+                else
+#endif
+                s_xf[i]=s_xf[previous];
+                ++s_gpu.vertices_reused;
+                continue;
+            }
+            s_xf_positions[slot]=i+1;
+        }
+#if defined(_WIN32)
+        if(s_hw_program_active) {
+            uint32_t row=s_hw_program_vertex_count++;s_hw_program_vertex_rows[i]=row;
+            if(s_hw_output_active) {
+                Nv2aVshOutput output={0};
+                if(!fetch_screen_vertex(index,&output)) hw_check(E_FAIL,"screen vertex output");
+                hw_pack_output((HwVertexOutput *)packed,&output);
+                packed+=8;
+            } else if(inline_has_current) {
+                memcpy(packed,inline_current,attribute_count*sizeof *packed);
+                for(unsigned a=0;a<inline_array_count;++a) {
+                    const unsigned slot=inline_array_slots[a];
+                    fetch_attr(&s_gpu.attr[attributes[slot]],index,packed[slot]);
+                }
+                packed+=attribute_count;
+            } else for(unsigned a=0;a<attribute_count;++a) {
+                unsigned attr=attributes[a];
+                fetch_attr(&s_gpu.attr[attr],index,*packed++);
+            }
+        } else
+#endif
+        {
+            if(fixed==2){memset(&s_xf[i],0,sizeof s_xf[i]);if(!fetch_screen_vertex(index,&s_xf[i]))return;}
+            else if (!transform_vertex(index, inputs, &s_xf[i])) return;
+            ++s_gpu.vertices_transformed;
         }
     }
 #if defined(_WIN32)
@@ -3261,6 +3323,33 @@ static void raster_batch_vertices(int fixed)
     if (s_gpu.texs[0].valid)
         note_texture_use(report_enabled);
 
+#if defined(_WIN32)
+    if (s_hw_fixed_active && s_gpu.prim == NV_PRIM_TRIANGLE_STRIP && s_gpu.inline_active &&
+        d3d8_IsNativeVulkan() && s_gpu.attr[0].type == 2 && s_gpu.attr[0].size == 3 &&
+        !s_gpu.fog_enable &&
+        !(pg->regs[NV_PGRAPH_CSV0_C] & (NV_PGRAPH_CSV0_C_LIGHTING | NV_PGRAPH_CSV0_C_LIGHT_TWO_SIDE_ENABLE)) &&
+        !(pg->regs[NV_PGRAPH_CSV0_D] & NV_PGRAPH_CSV0_D_SKIN) &&
+        !(pg->regs[NV_PGRAPH_SETUPRASTER] & (NV_PGRAPH_SETUPRASTER_FRONTFACEMODE |
+          NV_PGRAPH_SETUPRASTER_BACKFACEMODE | NV_PGRAPH_SETUPRASTER_CULLENABLE |
+          NV_PGRAPH_SETUPRASTER_POFFSETFILLENABLE)) &&
+        hw_direct_fill_bounds(s_hw_program_upload.vertex, n, attribute_count, (const float (*)[4])nv2a_vsh_constant(0),
+                              s_gpu.zpass_enable ? NULL : &s_hw_fill_column_x16)) {
+        /* Inline rows are already in strip order. The shared vertex output
+         * retains the 1/16-pixel snap and the original fragment inputs. */
+        s_hw_topology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+        s_hw_count = n;
+        note_drawn();
+        return;
+    }
+    /* This command still owns the FIFO. Invalidation cannot free the map,
+     * and eviction or checkpoint restore cannot overlap primitive assembly. */
+    s_hw_program_row_view=cache_hit
+        ? (const uint32_t *)(cache->data+n*sizeof s_hw_program_vertex_rows[0])
+        : s_hw_program_vertex_rows;
+#endif
+    /* FIFO owns the primitive and its shading state until this batch ends. */
+    const ProvokingVertex vertex=provoking_vertex(pg,s_gpu.prim,n);
+    s_program_polygon_modes=pg && polygon_modes_active(pg);
     switch (s_gpu.prim) {
     case NV_PRIM_POINTS:
 #if defined(_WIN32)
@@ -3269,50 +3358,53 @@ static void raster_batch_vertices(int fixed)
         for(i=0;i<n;i++)raster_vertex_point(&s_xf[i],3,0);
         break;
     case NV_PRIM_LINES:
-        for(i=0;i+1<n;i+=2) raster_program_line(i,i+1,provoking_slot(pg,i));
+        for(i=0;i+1<n;i+=2) raster_program_line(i,i+1,provoking_slot(vertex,i));
         break;
     case NV_PRIM_LINE_STRIP:
-        for(i=0;i+1<n;i++) raster_program_line(i,i+1,provoking_slot(pg,i));
+        for(i=0;i+1<n;i++) raster_program_line(i,i+1,provoking_slot(vertex,i));
         break;
     case NV_PRIM_LINE_LOOP:
-        for(i=0;i<n;i++) raster_program_line(i,(i+1)%n,provoking_slot(pg,i));
+        for(i=0;i<n;i++) raster_program_line(i,(i+1)%n,provoking_slot(vertex,i));
         break;
     case NV_PRIM_TRIANGLES:
         for (i = 0; i + 2 < n; i += 3)
-            raster_program_triangle(i,i+1,i+2,provoking_slot(pg,i));
+            raster_program_triangle(i,i+1,i+2,provoking_slot(vertex,i));
         break;
     case NV_PRIM_TRIANGLE_STRIP:
         for (i = 0; i + 2 < n; i++)
-            raster_program_triangle(i+(i&1),i+1-(i&1),i+2,provoking_slot(pg,i));
+            raster_program_triangle(i+(i&1),i+1-(i&1),i+2,provoking_slot(vertex,i));
         break;
     case NV_PRIM_TRIANGLE_FAN:
     case NV_PRIM_POLYGON:
         for (i = 1; i + 1 < n; i++)
-            raster_program_triangle(0,i,i+1,provoking_slot(pg,i));
+            raster_program_triangle(0,i,i+1,provoking_slot(vertex,i));
         break;
     case NV_PRIM_QUADS:
         for (i = 0; i + 3 < n; i += 4) {
 #if defined(_WIN32)
-            if(s_hw_program_active && hw_polygon_modes_active()) {hw_program_quad(i,i+1,i+2,i+3,provoking_slot(pg,i));continue;}
+            if(s_hw_program_active && s_program_polygon_modes) {hw_program_quad(i,i+1,i+2,i+3,provoking_slot(vertex,i));continue;}
 #endif
-            if(pg->regs[NV_PGRAPH_SETUPRASTER]&(NV_PGRAPH_SETUPRASTER_FRONTFACEMODE|NV_PGRAPH_SETUPRASTER_BACKFACEMODE)){raster_software_polygon(i,i+1,i+2,i+3,4,provoking_slot(pg,i));continue;}
-            raster_program_triangle(i,i+1,i+2,provoking_slot(pg,i));
-            raster_program_triangle(i,i+2,i+3,provoking_slot(pg,i));
+            if(s_program_polygon_modes){raster_software_polygon(i,i+1,i+2,i+3,4,provoking_slot(vertex,i));continue;}
+            raster_program_triangle(i,i+1,i+2,provoking_slot(vertex,i));
+            raster_program_triangle(i,i+2,i+3,provoking_slot(vertex,i));
         }
         break;
     case NV_PRIM_QUAD_STRIP:
         for (i = 0; i + 3 < n; i += 2) {
 #if defined(_WIN32)
-            if(s_hw_program_active && hw_polygon_modes_active()) {hw_program_quad(i,i+1,i+3,i+2,provoking_slot(pg,i));continue;}
+            if(s_hw_program_active && s_program_polygon_modes) {hw_program_quad(i,i+1,i+3,i+2,provoking_slot(vertex,i));continue;}
 #endif
-            if(pg->regs[NV_PGRAPH_SETUPRASTER]&(NV_PGRAPH_SETUPRASTER_FRONTFACEMODE|NV_PGRAPH_SETUPRASTER_BACKFACEMODE)){raster_software_polygon(i,i+1,i+3,i+2,4,provoking_slot(pg,i));continue;}
-            raster_program_triangle(i,i+1,i+3,provoking_slot(pg,i));
-            raster_program_triangle(i,i+3,i+2,provoking_slot(pg,i));
+            if(s_program_polygon_modes){raster_software_polygon(i,i+1,i+3,i+2,4,provoking_slot(vertex,i));continue;}
+            raster_program_triangle(i,i+1,i+3,provoking_slot(vertex,i));
+            raster_program_triangle(i,i+3,i+2,provoking_slot(vertex,i));
         }
         break;
     default:
         break;
     }
+#if defined(_WIN32)
+    s_hw_program_row_view=NULL;
+#endif
 }
 
 static unsigned primitive_min_vertices(void)
@@ -3320,7 +3412,7 @@ static unsigned primitive_min_vertices(void)
     return s_gpu.prim==NV_PRIM_POINTS ? 1u : s_gpu.prim<=NV_PRIM_LINE_STRIP ? 2u : 3u;
 }
 
-static void raster_batch(void)
+static void raster_batch(int report_enabled)
 {
     uint32_t i;
     uint32_t before = s_gpu.tris_drawn;
@@ -3346,7 +3438,7 @@ static void raster_batch(void)
     if (no_vsh < 0)
         no_vsh = getenv("RECOMP_NO_VSH") != NULL;
     if ((s_gpu.xf_mode & 3) == 2 && !no_vsh) {
-        raster_batch_vertices(0);
+        raster_batch_vertices(0,report_enabled);
         return;
     }
 #if defined(_WIN32)
@@ -3358,7 +3450,7 @@ static void raster_batch(void)
            GET_MASK(fixed->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_SKIN) ||
            ((fixed->regs[NV_PGRAPH_CSV0_D]&NV_PGRAPH_CSV0_D_POINTPARAMSENABLE) &&
             (GET_MASK(fixed->regs[NV_PGRAPH_SETUPRASTER],NV_PGRAPH_SETUPRASTER_FRONTFACEMODE)==1 || GET_MASK(fixed->regs[NV_PGRAPH_SETUPRASTER],NV_PGRAPH_SETUPRASTER_BACKFACEMODE)==1)) || s_gpu.prim==NV_PRIM_POINTS || s_gpu.attr[0].size<4 || !batch_is_screen_space()) {
-            raster_batch_vertices(1);return;
+            raster_batch_vertices(1,report_enabled);return;
         }
     }
     /* CSV1 texgen and texture matrices belong to the original fixed vertex
@@ -3383,7 +3475,7 @@ static void raster_batch(void)
 #if defined(_WIN32)
        && !hw_enabled()
 #endif
-    ) {raster_batch_vertices(1);return;}
+    ) {raster_batch_vertices(1,report_enabled);return;}
 #if defined(_WIN32)
     uint32_t raster=pg->regs[NV_PGRAPH_SETUPRASTER];
     int polygon_point_params=(pg->regs[NV_PGRAPH_CSV0_D]&NV_PGRAPH_CSV0_D_POINTPARAMSENABLE) &&
@@ -3393,15 +3485,16 @@ static void raster_batch(void)
             hw_check(E_NOTIMPL,"fixed vertex mode");
         if(GET_MASK(pg->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_FOGGENMODE)>NV_PGRAPH_CSV0_D_FOGGENMODE_FOG_X)
             hw_check(E_NOTIMPL,"fixed vertex fog generation");
-        raster_batch_vertices(1);return;
+        raster_batch_vertices(1,report_enabled);return;
     }
 #endif
+    const int polygon_modes=polygon_modes_active(pg);
 #if defined(_WIN32)
-    if(hw_enabled() && (hw_polygon_modes_active() || (s_gpu.prim>=NV_PRIM_LINES && s_gpu.prim<=NV_PRIM_LINE_STRIP))) {
-        raster_batch_vertices(2);return;
+    if(hw_enabled() && (polygon_modes || (s_gpu.prim>=NV_PRIM_LINES && s_gpu.prim<=NV_PRIM_LINE_STRIP))) {
+        raster_batch_vertices(2,report_enabled);return;
     }
 #endif
-    if(s_gpu.prim>NV_PRIM_LINE_STRIP && (pg->regs[NV_PGRAPH_SETUPRASTER]&(NV_PGRAPH_SETUPRASTER_FRONTFACEMODE|NV_PGRAPH_SETUPRASTER_BACKFACEMODE))) {raster_batch_vertices(2);return;}
+    if(polygon_modes) {raster_batch_vertices(2,report_enabled);return;}
     if(GET_MASK(pg->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_SKIN)!=0)
         note_unhandled(NV097_SET_SKIN_MODE,GET_MASK(pg->regs[NV_PGRAPH_CSV0_D],NV_PGRAPH_CSV0_D_SKIN));
     if (pg->regs[NV_PGRAPH_CSV0_C] & NV_PGRAPH_CSV0_C_LIGHTING) {
@@ -3425,35 +3518,37 @@ static void raster_batch(void)
             s_gpu.batches_no_tex++;
         else {
             s_gpu.batches_textured++;
-            note_texture_use(nv2a_pb_scan_exec_enabled());
+            note_texture_use(report_enabled);
         }
     }
 
+    /* FIFO owns the primitive and its shading state until this batch ends. */
+    const ProvokingVertex vertex=provoking_vertex(pg,s_gpu.prim,s_gpu.idx_count);
     switch (s_gpu.prim) {
     case NV_PRIM_LINES:
-        for(i=0;i+1<s_gpu.idx_count;i+=2) raster_indexed_line(s_gpu.idx[i],s_gpu.idx[i+1],s_gpu.idx[provoking_slot(pg,i)]);
+        for(i=0;i+1<s_gpu.idx_count;i+=2) raster_indexed_line(s_gpu.idx[i],s_gpu.idx[i+1],s_gpu.idx[provoking_slot(vertex,i)]);
         break;
     case NV_PRIM_LINE_STRIP:
-        for(i=0;i+1<s_gpu.idx_count;i++) raster_indexed_line(s_gpu.idx[i],s_gpu.idx[i+1],s_gpu.idx[provoking_slot(pg,i)]);
+        for(i=0;i+1<s_gpu.idx_count;i++) raster_indexed_line(s_gpu.idx[i],s_gpu.idx[i+1],s_gpu.idx[provoking_slot(vertex,i)]);
         break;
     case NV_PRIM_LINE_LOOP:
-        for(i=0;i<s_gpu.idx_count;i++) raster_indexed_line(s_gpu.idx[i],s_gpu.idx[(i+1)%s_gpu.idx_count],s_gpu.idx[provoking_slot(pg,i)]);
+        for(i=0;i<s_gpu.idx_count;i++) raster_indexed_line(s_gpu.idx[i],s_gpu.idx[(i+1)%s_gpu.idx_count],s_gpu.idx[provoking_slot(vertex,i)]);
         break;
     case NV_PRIM_TRIANGLES:
         for (i = 0; i + 2 < s_gpu.idx_count; i += 3)
             raster_indexed(s_gpu.idx[i], s_gpu.idx[i+1], s_gpu.idx[i+2],
-                           s_gpu.idx[provoking_slot(pg,i)]);
+                           s_gpu.idx[provoking_slot(vertex,i)]);
         break;
     case NV_PRIM_TRIANGLE_STRIP:
         for (i = 0; i + 2 < s_gpu.idx_count; i++)
             raster_indexed(s_gpu.idx[i + (i & 1)], s_gpu.idx[i + 1 - (i & 1)], s_gpu.idx[i+2],
-                           s_gpu.idx[provoking_slot(pg,i)]);
+                           s_gpu.idx[provoking_slot(vertex,i)]);
         break;
     case NV_PRIM_TRIANGLE_FAN:
     case NV_PRIM_POLYGON:
         for (i = 1; i + 1 < s_gpu.idx_count; i++)
             raster_indexed(s_gpu.idx[0], s_gpu.idx[i], s_gpu.idx[i+1],
-                           s_gpu.idx[provoking_slot(pg,i)]);
+                           s_gpu.idx[provoking_slot(vertex,i)]);
         break;
     case NV_PRIM_QUADS:
         /* Independent quads, four vertices each. A batch of eight is two
@@ -3462,9 +3557,9 @@ static void raster_batch(void)
          * looked right. */
         for (i = 0; i + 3 < s_gpu.idx_count; i += 4) {
             raster_indexed(s_gpu.idx[i], s_gpu.idx[i+1], s_gpu.idx[i+2],
-                           s_gpu.idx[provoking_slot(pg,i)]);
+                           s_gpu.idx[provoking_slot(vertex,i)]);
             raster_indexed(s_gpu.idx[i], s_gpu.idx[i+2], s_gpu.idx[i+3],
-                           s_gpu.idx[provoking_slot(pg,i)]);
+                           s_gpu.idx[provoking_slot(vertex,i)]);
         }
         break;
     case NV_PRIM_QUAD_STRIP:
@@ -3472,9 +3567,9 @@ static void raster_batch(void)
          * pair before it. */
         for (i = 0; i + 3 < s_gpu.idx_count; i += 2) {
             raster_indexed(s_gpu.idx[i], s_gpu.idx[i+1], s_gpu.idx[i+3],
-                           s_gpu.idx[provoking_slot(pg,i)]);
+                           s_gpu.idx[provoking_slot(vertex,i)]);
             raster_indexed(s_gpu.idx[i], s_gpu.idx[i+3], s_gpu.idx[i+2],
-                           s_gpu.idx[provoking_slot(pg,i)]);
+                           s_gpu.idx[provoking_slot(vertex,i)]);
         }
         break;
     default:
@@ -3558,10 +3653,9 @@ static void draw_primitive(void)
         fprintf(stderr, "  [GPU] draw #%u\n", s_gpu.draws);
     s_gpu.verts += s_gpu.idx_count;
 
-    /* How many batches carry coordinates at all, and what range they span.
-     * A pipeline that decodes perfectly and draws nothing is indistinguishable
-     * from one that never ran, unless the vertices themselves are measured. */
-    {
+    /* The pushbuffer report reads this first position separately from rasterization. */
+    const int report_enabled=nv2a_pb_scan_exec_enabled();
+    if(report_enabled) {
         float p[4];
         if (fetch_attr(&s_gpu.attr[0], s_gpu.idx[0], p)) {
             if (p[0] != 0.0f || p[1] != 0.0f || p[2] != 0.0f) {
@@ -3580,7 +3674,7 @@ static void draw_primitive(void)
 #if defined(_WIN32)
         uint64_t timing_start = gpu_timing_clock();
 #endif
-        raster_batch();
+        raster_batch(report_enabled);
 #if defined(_WIN32)
         if (hw_enabled()) hw_flush_batch();
 #endif
@@ -4104,7 +4198,7 @@ static NV_NOINLINE void tex_stage_method(uint32_t method, uint32_t param)
     default:
         break;
     }
-    tex_update_valid(t);
+    tex_update_valid(t, stage);
     if (stage == 0)
         record_tex_reg(method, param);
 }
@@ -4114,13 +4208,26 @@ void nv2a_pb_index_words(const uint32_t *words,uint32_t count)
 {
     if (!s_gpu.prim || !count) return;
     require_batch_space("index",s_gpu.idx_count,count*2,NV_MAX_INDICES);
+    const uint8_t edge = (uint8_t)nv2a_get_state()->pgraph.edge_flag;
+    uint32_t index = s_gpu.idx_count;
     for (uint32_t i=0;i<count;++i) {
         uint32_t value=words[i];
-        s_gpu.idx_edge[s_gpu.idx_count]=(uint8_t)nv2a_get_state()->pgraph.edge_flag;
-        s_gpu.idx[s_gpu.idx_count++]=(uint16_t)value;
-        s_gpu.idx_edge[s_gpu.idx_count]=(uint8_t)nv2a_get_state()->pgraph.edge_flag;
-        s_gpu.idx[s_gpu.idx_count++]=(uint16_t)(value>>16);
+        s_gpu.idx_edge[index] = edge;
+        s_gpu.idx[index++] = (uint16_t)value;
+        s_gpu.idx_edge[index] = edge;
+        s_gpu.idx[index++] = (uint16_t)(value>>16);
     }
+    s_gpu.idx_count = index;
+}
+
+static inline void nv2a_pb_store_combiner_register(unsigned reg, uint32_t param)
+{
+    static uint32_t *const fields[] = {
+        s_gpu.rc.factor0, s_gpu.rc.factor1, s_gpu.rc.alpha_ocw,
+        s_gpu.rc.color_icw, s_gpu.rc.alpha_icw, s_gpu.rc.color_ocw
+    };
+    unsigned index = reg - 1;
+    fields[index / 8][index % 8] = param;
 }
 
 static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
@@ -4293,7 +4400,7 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
             s_gpu.imm_count = 0;
         } else {
             /* DMA bindings can change without another offset method. */
-            for (unsigned i = 0; i < 4; ++i) tex_update_valid(&s_gpu.texs[i]);
+            for (unsigned i = 0; i < 4; ++i) tex_update_valid(&s_gpu.texs[i], i);
             if (!s_gpu.imm_count && !s_gpu.inline_count) {
                 struct PGRAPHState *pg = &nv2a_get_state()->pgraph;
                 for (unsigned i = 0; i < NV_VERTEX_ATTRS; ++i) {
@@ -4344,10 +4451,13 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
         if (!s_gpu.prim)
             break;
         require_batch_space("index", s_gpu.idx_count, count, NV_MAX_INDICES);
+        const uint8_t edge = (uint8_t)nv2a_get_state()->pgraph.edge_flag;
+        const uint32_t first = s_gpu.idx_count;
         for (i = 0; i < count; i++) {
-            s_gpu.idx_edge[s_gpu.idx_count]=(uint8_t)nv2a_get_state()->pgraph.edge_flag;
-            s_gpu.idx[s_gpu.idx_count++] = start + i;
+            s_gpu.idx_edge[first + i] = edge;
+            s_gpu.idx[first + i] = start + i;
         }
+        s_gpu.idx_count = first + count;
         break;
     }
 
@@ -4561,28 +4671,9 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
                                         slot % 4, param);
             break;
         }
-        if (method >= 0x0260 && method < 0x0280) {         /* ALPHA_ICW(i) */
-            s_gpu.rc.alpha_icw[(method - 0x0260) / 4] = param;
-            break;
-        }
-        if (method >= 0x0AC0 && method < 0x0AE0) {         /* COLOR_ICW(i) */
-            s_gpu.rc.color_icw[(method - 0x0AC0) / 4] = param;
-            break;
-        }
-        if (method >= 0x1E40 && method < 0x1E60) {         /* COLOR_OCW(i) */
-            s_gpu.rc.color_ocw[(method - 0x1E40) / 4] = param;
-            break;
-        }
-        if (method >= 0x0AA0 && method < 0x0AC0) {         /* ALPHA_OCW(i) */
-            s_gpu.rc.alpha_ocw[(method - 0x0AA0) / 4] = param;
-            break;
-        }
-        if (method >= 0x0A60 && method < 0x0A80) {         /* FACTOR0(i) */
-            s_gpu.rc.factor0[(method - 0x0A60) / 4] = param;
-            break;
-        }
-        if (method >= 0x0A80 && method < 0x0AA0) {         /* FACTOR1(i) */
-            s_gpu.rc.factor1[(method - 0x0A80) / 4] = param;
+        unsigned combiner_reg = nv2a_combiner_register(method);
+        if (combiner_reg) {
+            nv2a_pb_store_combiner_register(combiner_reg, param);
             break;
         }
         /* SET_VIEWPORT_OFFSET / _SCALE. The GPU keeps these in the constant
@@ -4598,8 +4689,6 @@ static int nv2a_pb_exec_state(uint32_t method, uint32_t param, uint8_t *output)
             nv2a_vsh_constant_component(58, (method - 0x0AF0) / 4, param);
             break;
         }
-        if (method >= NV_TEX_FIRST && method <= NV_TEX_LAST)
-            record_tex_reg(method, param);
         if (method >= NV097_SET_VERTEX_DATA_ARRAY_OFFSET
                 && method < NV097_SET_VERTEX_DATA_ARRAY_OFFSET + NV_VERTEX_ATTRS * 4) {
             /* Preserve the hardware offset and its vertex DMA selection;
@@ -4698,6 +4787,16 @@ static NV_NOINLINE int nv2a_pb_exec_diagnostic(uint32_t subch, uint32_t method, 
     return nv2a_pb_exec_active(subch,method,param,output);
 }
 
+void nv2a_pb_exec_combiner_register(uint32_t subchannel, uint32_t method,
+                                    uint32_t param, unsigned reg)
+{
+    if (s_pb_exec_verbose || s_ftrace == 2) {
+        nv2a_pb_exec_diagnostic(subchannel, method, param, NULL);
+        return;
+    }
+    nv2a_pb_store_combiner_register(reg, param);
+}
+
 int nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param, uint8_t *output)
 {
     if(s_pb_exec_verbose || s_ftrace==2)
@@ -4719,18 +4818,21 @@ void nv2a_pb_request_progress(void)
     if (ReadAcquire64(&s_hw_query_count)) {
         NV2AState *d=nv2a_get_state();
         if (d && d->pfifo.thread.thread) {
-            /* Progress publishes no commands. A posted request already owns
-             * the next collection pass; running alone still needs a request.
-             * Keep PUT publication on the unchanged generic kick path. */
-            if (!(ReadAcquire(&d->pfifo.fifo_kick) & 1)) nv2a_fifo_kick(d);
+            if (!(ReadAcquire(&d->pfifo.fifo_kick) & NV2A_FIFO_PROGRESS_PENDING))
+                nv2a_fifo_request_progress(d);
         } else nv2a_pb_request_progress_without_worker();
     }
 #endif
 }
-void nv2a_pb_progress(void)
+/* The PFIFO worker calls this with its device lock held. */
+void nv2a_pb_progress(int submit_pending)
 {
 #if defined(_WIN32)
-    if(hw_enabled() && ReadAcquire64(&s_hw_query_count)) hw_collect_queries(0);
+    if(hw_enabled() && ReadAcquire64(&s_hw_query_count)) {
+        hw_context_enter();
+        hw_collect_queries_locked(submit_pending?HW_COMPLETION_POLL:HW_COMPLETION_RETIRE_READY);
+        LeaveCriticalSection(&s_hw_lock);
+    }
 #endif
 }
 

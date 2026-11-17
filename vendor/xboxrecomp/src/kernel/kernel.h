@@ -770,6 +770,7 @@ NTSTATUS __stdcall xbox_NtSignalAndWaitForSingleObjectEx(HANDLE Signal, HANDLE W
 NTSTATUS __stdcall xbox_NtWaitForSingleObject(HANDLE Handle, BOOLEAN Alertable, PLARGE_INTEGER Timeout);
 NTSTATUS __stdcall xbox_NtWaitForSingleObjectEx(HANDLE Handle, KPROCESSOR_MODE WaitMode, BOOLEAN Alertable, PLARGE_INTEGER Timeout);
 NTSTATUS __stdcall xbox_NtWaitForMultipleObjectsEx(ULONG Count, HANDLE Handles[], ULONG WaitType, KPROCESSOR_MODE WaitMode, BOOLEAN Alertable, PLARGE_INTEGER Timeout);
+DWORD xbox_ThreadChangeSuspendCount(HANDLE thread, int suspend);
 NTSTATUS __stdcall xbox_NtSuspendThread(HANDLE ThreadHandle, PULONG PreviousSuspendCount);
 NTSTATUS __stdcall xbox_NtResumeThread(HANDLE ThreadHandle, PULONG PreviousSuspendCount);
 NTSTATUS __stdcall xbox_NtClearEvent(HANDLE EventHandle);
@@ -880,6 +881,21 @@ typedef struct XboxFileOpenState {
     WCHAR path[MAX_PATH];
 } XboxFileOpenState;
 int xbox_CaptureFileOpenState(HANDLE, XboxFileOpenState *);
+#ifdef _WIN32
+enum { XBOX_DIRECTORY_CURSOR_CAPACITY = 64 };
+typedef struct XboxDirectoryCursor {
+    WCHAR pattern[MAX_PATH], last_name[MAX_PATH];
+} XboxDirectoryCursor;
+typedef struct XboxPreparedDirectoryCursor {
+    HANDLE search;
+    WIN32_FIND_DATAW last_entry;
+    WCHAR pattern[MAX_PATH];
+} XboxPreparedDirectoryCursor;
+int xbox_CaptureDirectoryCursor(HANDLE, XboxDirectoryCursor *);
+int xbox_PrepareDirectoryCursor(const XboxFileOpenState *, const XboxDirectoryCursor *,
+                                XboxPreparedDirectoryCursor *);
+int xbox_ApplyDirectoryCursor(HANDLE, XboxPreparedDirectoryCursor *);
+#endif
 int xbox_ValidateFileOpenState(const XboxFileOpenState *);
 HANDLE xbox_RestoreFileOpenState(const XboxFileOpenState *);
 void xbox_FileHandleDuplicated(HANDLE, HANDLE, int);
@@ -891,13 +907,26 @@ typedef struct XboxFileOpenLookup {
     int volume;
 } XboxFileOpenLookup;
 NTSTATUS xbox_kernel_prepare_file_open(PXBOX_OBJECT_ATTRIBUTES,WCHAR*,DWORD,uint32_t*,int*,const XboxFileOpenLookup*);
-NTSTATUS xbox_kernel_create_driver_file(PHANDLE,ACCESS_MASK,PXBOX_OBJECT_ATTRIBUTES,PXBOX_IO_STATUS_BLOCK,PLARGE_INTEGER,ULONG,ULONG,ULONG,ULONG,int*,XboxFileOpenLookup*);
+NTSTATUS xbox_kernel_begin_file_open(PHANDLE,ACCESS_MASK,PXBOX_OBJECT_ATTRIBUTES,
+    PXBOX_IO_STATUS_BLOCK,PLARGE_INTEGER,ULONG,ULONG,ULONG,ULONG,
+    int*,WCHAR*,DWORD,uint32_t*,int*);
 void xbox_kernel_release_file_device(uint32_t);
 NTSTATUS xbox_kernel_file_volume_status(HANDLE, unsigned *device_type);
+#ifdef _WIN32
+NTSTATUS xbox_kernel_read_file(HANDLE, HANDLE, PXBOX_IO_STATUS_BLOCK, PVOID,
+    ULONG, PLARGE_INTEGER, int release_guest_cpu);
+#endif
 NTSTATUS xbox_kernel_dismount_file_volume(HANDLE);
 
 int xbox_CheckpointWriteObjects(FILE *);
 int xbox_CheckpointLoadObjects(FILE *, const XboxCheckpointRoot *, unsigned);
+#ifdef _WIN32
+typedef struct XboxCheckpointDirectories XboxCheckpointDirectories;
+int xbox_CheckpointPrepareDirectories(FILE *, XboxCheckpointDirectories **);
+void xbox_CheckpointDiscardDirectories(XboxCheckpointDirectories *);
+int xbox_CheckpointLoadPreparedObjects(FILE *, const XboxCheckpointRoot *, unsigned,
+                                       XboxCheckpointDirectories *);
+#endif
 typedef struct XboxCriticalSectionState {
     uint32_t address, owner[4], depth, site;
 } XboxCriticalSectionState;

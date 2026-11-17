@@ -355,7 +355,7 @@ NTSTATUS __stdcall xbox_NtSuspendThread(
      * the two are not interchangeable: -1 must become an error status rather
      * than a suspend count of 0xFFFFFFFF.
      */
-    prev = SuspendThread(ThreadHandle);
+    prev = xbox_ThreadChangeSuspendCount(ThreadHandle, 1);
     if (prev == (DWORD)-1) {
         xbox_log(XBOX_LOG_ERROR, XBOX_LOG_THREAD,
             "NtSuspendThread: SuspendThread failed (error %u)", GetLastError());
@@ -378,7 +378,7 @@ NTSTATUS __stdcall xbox_NtResumeThread(
     DWORD prev;
 
     /* Mirror of NtSuspendThread: (DWORD)-1 is failure, not a count. */
-    prev = ResumeThread(ThreadHandle);
+    prev = xbox_ThreadChangeSuspendCount(ThreadHandle, 0);
     if (prev == (DWORD)-1) {
         xbox_log(XBOX_LOG_ERROR, XBOX_LOG_THREAD,
             "NtResumeThread: ResumeThread failed (error %u)", GetLastError());

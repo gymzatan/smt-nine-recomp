@@ -38,6 +38,13 @@ static uint32_t c_dma_mem_read(void *opaque, int space, uint32_t addr)
     return dsp56k_read_memory((dsp_core_t *)opaque, space, addr);
 }
 
+static void c_dma_mem_read_words(void *opaque, int space, uint32_t addr,
+                                 uint32_t *out, uint32_t count)
+{
+    for (uint32_t i = 0; i < count; ++i)
+        out[i] = c_dma_mem_read(opaque, space, addr + i);
+}
+
 static void c_dma_mem_write(void *opaque, int space, uint32_t addr,
                             uint32_t value)
 {
@@ -266,6 +273,7 @@ void dsp_c_init(DSPState *dsp)
 
     dsp->dma.mem_opaque = core;
     dsp->dma.mem_read = c_dma_mem_read;
+    dsp->dma.mem_read_words = c_dma_mem_read_words;
     dsp->dma.mem_write = c_dma_mem_write;
 
     /* Ensure the interpreter's opcode decoder tables are initialized.

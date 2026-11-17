@@ -96,6 +96,8 @@ int xbox_CheckpointLoadMachine(FILE *in,int cold,DWORD timeout) {
         header.sections==MACHINE_SECTIONS && header.pointer_bytes==sizeof(void *) &&
         !memcmp(header.executable,s_executable_digest,20) && !memcmp(header.image,s_image_digest,20) &&
         !(header.devices&~((1u<<XBOX_CHECKPOINT_DEVICE_COUNT)-2)) && machine_read_sections(in,&header,payloads);
+    XboxCheckpointDirectories *directories=NULL;
+    if (ok) ok=xbox_CheckpointPrepareDirectories(payloads[MACHINE_OBJECTS],&directories);
     int frozen=0,committed=0;void *threads=NULL;XboxCheckpointRoot roots[64];unsigned count=0;
     if(ok && cold) {
         if(header.devices&(1u<<XBOX_CHECKPOINT_TIMER))xbox_CheckpointStartKernelDevices();
@@ -117,13 +119,15 @@ int xbox_CheckpointLoadMachine(FILE *in,int cold,DWORD timeout) {
         ok=xbox_LoadPhysicalMemory(payloads[MACHINE_MEMORY]) && machine_payload_done(payloads[MACHINE_MEMORY]) &&
             xbox_RestoreThreadCreationState(&creation) && xbox_CheckpointApplyThreads(threads,roots,&count);
     }
-    if(ok)ok=xbox_CheckpointLoadObjects(payloads[MACHINE_OBJECTS],roots,count) && machine_payload_done(payloads[MACHINE_OBJECTS]);
+    if(ok)ok=xbox_CheckpointLoadPreparedObjects(payloads[MACHINE_OBJECTS],roots,count,directories) &&
+        machine_payload_done(payloads[MACHINE_OBJECTS]);
     if(ok)ok=xbox_LoadKernelScheduler(payloads[MACHINE_SCHEDULER]) && machine_payload_done(payloads[MACHINE_SCHEDULER]);
     if(ok)ok=xbox_CheckpointLoadDevices(payloads[MACHINE_DEVICES]) && machine_payload_done(payloads[MACHINE_DEVICES]);
     if(ok)ok=xbox_OhciLoadCheckpoint(payloads[MACHINE_USB]) && machine_payload_done(payloads[MACHINE_USB]);
     if(ok)ok=nv2a_gpu_load_checkpoint(payloads[MACHINE_GPU]) && machine_payload_done(payloads[MACHINE_GPU]);
     if(ok)ok=mcpx_apu_load_checkpoint(g_apu_state,payloads[MACHINE_APU]) && machine_payload_done(payloads[MACHINE_APU]);
     if(ok)ok=xbox_FramebufferLoadCheckpoint(payloads[MACHINE_FRONTEND]) && machine_payload_done(payloads[MACHINE_FRONTEND]);
+    xbox_CheckpointDiscardDirectories(directories);
     if(committed && !ok)recomp_cont_invalid();
     if(threads)xbox_CheckpointFreeThreads(threads);
     if(committed)for(unsigned i=0;i<count;i++)CloseHandle(roots[i].handle);

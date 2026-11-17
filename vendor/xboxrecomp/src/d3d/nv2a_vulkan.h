@@ -21,15 +21,33 @@ void nvk_shutdown(void);
 uint64_t nvk_submit(void);
 uint64_t nvk_fence(void);
 int nvk_wait(uint64_t serial);
-int nvk_completed(uint64_t serial);
+/* Without submit_pending, only already submitted commands can complete. */
+int nvk_completed(uint64_t serial,int submit_pending);
 
 NvkImage *nvk_image_create(unsigned width,unsigned height,unsigned layers,
                           VkFormat format,int cube);
 /* Volume slices are z-major, each containing height rows at the upload/read pitch. */
 NvkImage *nvk_image_create_volume(unsigned width,unsigned height,unsigned depth,VkFormat format);
+VkFormat nvk_image_format(const NvkImage *image);
 void nvk_image_destroy(NvkImage *image);
 int nvk_image_upload(NvkImage *image,const void *pixels,size_t pitch);
+/* Fill packed rows immediately. The writer must not call into this device. */
+typedef void (*NvkTextureWriter)(void *destination,size_t pitch,const void *source);
+int nvk_image_upload_written(NvkImage *image,NvkTextureWriter write,const void *source);
 int nvk_image_read(NvkImage *image,void *pixels,size_t pitch);
+/* Read the same [left, top, right, bottom) rectangle of every layer or slice. */
+int nvk_image_read_rect(NvkImage *image,void *pixels,size_t pitch,const int32_t bounds[4]);
+enum { NVK_COLOR_READ_COUNT = 4 };
+typedef struct NvkImageRead {
+    NvkImage *image;
+    int32_t bounds[4];
+    void *destination;
+    size_t pitch;
+    void (*publish)(void *destination,const void *packed_rows,size_t row_bytes);
+} NvkImageRead;
+/* Publish in request order after one completion wait. A publisher consumes
+ * staging rows synchronously and must not call back into this device. */
+int nvk_images_read(const NvkImageRead *reads,unsigned count);
 /* Reads return tightly packed float/stencil tuples at (x*read_step,y*read_step).
  * Image dimensions must be divisible by read_step; uploads require step 1. */
 int nvk_depth_transfer(NvkImage *image,void *pixels,int upload,unsigned read_step);
@@ -46,8 +64,9 @@ int nvk_image_copy_rect(NvkImage *source,NvkImage *destination,
 NvkShader *nvk_shader_create(const char *source,const char *entry,
                              VkShaderStageFlagBits stage);
 void nvk_shader_destroy(NvkShader *shader);
-unsigned nvk_shader_inputs(const NvkShader *shader,unsigned *locations,
-                            unsigned *attributes,unsigned capacity);
+/* Packed NV2A vertex rows follow the decoded input mask in ascending order. */
+unsigned nvk_shader_vertex_attributes(NvkShader *shader,uint32_t input_mask,
+                                      VkVertexInputAttributeDescription attributes[16]);
 
 typedef struct NvkUniform {
     const void *data;
@@ -88,6 +107,9 @@ typedef struct NvkDraw {
     VkColorComponentFlags color_mask;
     NvkQuery *query;
 } NvkDraw;
+/* For a filled strip whose vertices snap to one guest X column, check the
+ * actual viewport and raster sample positions before omitting the draw. */
+int nvk_fill_column_misses_samples(const NvkImage *color,unsigned guest_width,unsigned column_x16);
 int nvk_draw(NvkDraw *draw);
 /* Read the actual host-visible upload selected by its existing range identity. */
 int nvk_read_upload(uint64_t generation,uint32_t offset,void *output,size_t bytes);

@@ -327,6 +327,17 @@ static inline uint32_t d3d8_format_dxt_block_bytes(uint32_t fmt)
  * Xbox formats with "LIN_" prefix are linear; DXT formats are block-compressed.
  * All other uncompressed formats are swizzled by default.
  */
+/* DXT palette endpoints use exact floor expansion of RGB565 channels. */
+static inline uint32_t d3d8_dxt_rgb565(uint32_t rgb)
+{
+    uint32_t r = (rgb >> 11) & 0x1Fu;
+    uint32_t g = (rgb >> 5) & 0x3Fu;
+    uint32_t blue = rgb & 0x1Fu;
+    return (((r * 1053u) >> 7) << 16)
+         | ((((g * 259u) + 3u) >> 6) << 8)
+         | ((blue * 1053u) >> 7);
+}
+
 /* Decode the top-left rectangle of a block, with 1 to 4 columns and rows.
  * Texture upload and the CPU sampler use the same palette and selectors. */
 static
@@ -363,36 +374,36 @@ int d3d8_dxt_decode_block_rect(const uint8_t *block, uint32_t fmt,
     }
     c0 = (uint32_t)b[0] | ((uint32_t)b[1] << 8);
     c1 = (uint32_t)b[2] | ((uint32_t)b[3] << 8);
+    uint32_t color_bits = (uint32_t)b[4] | ((uint32_t)b[5] << 8)
+        | ((uint32_t)b[6] << 16) | ((uint32_t)b[7] << 24);
+    /* A full DXT1 block with a single selected endpoint has identical rows. */
+    if (block_bytes == 8 && color_bits == 0x55555555u && columns == 4 && rows == 4) {
+        uint32_t pixel = 0xFF000000u | d3d8_dxt_rgb565(c1);
+        const uint32_t row[4] = {pixel, pixel, pixel, pixel};
+        for (uint32_t y = 0; y < 4; y++)
+            memcpy((uint8_t *)pixels + y * pitch, row, sizeof row);
+        return 1;
+    }
     /* DXT1 opacity depends only on the palette entry. */
     uint32_t color_alpha = block_bytes == 8 ? 0xFF000000u : 0;
-    for (i = 0; i < 2; i++) {
-        uint32_t rgb = i ? c1 : c0;
-        uint32_t r = (rgb >> 11) & 0x1Fu;
-        uint32_t g = (rgb >> 5) & 0x3Fu;
-        uint32_t b5 = rgb & 0x1Fu;
-        /* Exact floor(channel * 255 / max) over the masked 5/6-bit ranges. */
-        c[i] = color_alpha | (((r * 1053u) >> 7) << 16)
-             | ((((g * 259u) + 3u) >> 6) << 8)
-             | ((b5 * 1053u) >> 7);
-    }
+    c[0] = color_alpha | d3d8_dxt_rgb565(c0);
+    c[1] = color_alpha | d3d8_dxt_rgb565(c1);
     /* Only DXT1 uses the three-colour, transparent-selector mode. */
     c[2] = color_alpha;
     if (c0 > c1 || block_bytes == 16) {
         c[3] = color_alpha;
         for (i = 0; i < 3; i++) {
             uint32_t sh = i * 8, m0 = (c[0] >> sh) & 0xFFu, m1 = (c[1] >> sh) & 0xFFu;
-            c[2] = (c[2] & ~(0xFFu << sh)) | (((2 * m0 + m1) / 3) << sh);
-            c[3] = (c[3] & ~(0xFFu << sh)) | (((m0 + 2 * m1) / 3) << sh);
+            /* 683 / 2048 gives exact floor(v / 3) for 0 <= v <= 765. */
+            c[2] |= (((2 * m0 + m1) * 683u) >> 11) << sh;
+            c[3] |= (((m0 + 2 * m1) * 683u) >> 11) << sh;
         }
     } else {
-        for (i = 0; i < 3; i++) {
-            uint32_t sh = i * 8, m0 = (c[0] >> sh) & 0xFFu, m1 = (c[1] >> sh) & 0xFFu;
-            c[2] = (c[2] & ~(0xFFu << sh)) | (((m0 + m1) / 2) << sh);
-        }
+        /* Average each byte independently, dropping each lane's low bit
+         * before shifting so it cannot carry into the adjacent colour. */
+        c[2] = (c[0] & c[1]) + (((c[0] ^ c[1]) & 0xFEFEFEFEu) >> 1);
         c[3] = 0;
     }
-    uint32_t color_bits = (uint32_t)b[4] | ((uint32_t)b[5] << 8)
-        | ((uint32_t)b[6] << 16) | ((uint32_t)b[7] << 24);
     for (uint32_t y = 0; y < rows; y++) {
         uint8_t *row = (uint8_t *)pixels + y * pitch;
         uint32_t row_colors = color_bits;

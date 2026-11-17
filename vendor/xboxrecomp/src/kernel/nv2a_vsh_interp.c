@@ -44,6 +44,11 @@ static uint32_t s_cxt_write;
 static Nv2aVshInstruction s_decoded[NV2A_VSH_SLOTS];
 static uint8_t s_decoded_dirty[NV2A_VSH_SLOTS];
 static uint32_t s_decoded_first=NV2A_VSH_SLOTS, s_decoded_limit;
+static struct {
+    uint32_t start, inputs;
+    int length, writes_constants, valid;
+    uint64_t revision;
+} s_program_info;
 typedef struct VshCheckpoint {
     uint32_t program[NV2A_VSH_SLOTS][4];float constants[NV2A_VSH_CONSTANTS][4];
     uint32_t load_slot,load_word,start_slot,const_load,const_word,cxt_write;
@@ -68,6 +73,7 @@ void nv2a_vsh_apply_checkpoint(const void *prepared) {
     for(unsigned i=0;i<NV2A_VSH_SLOTS;i++) nv2a_vsh_decode_instruction(s_program[i],&s_decoded[i]);
     memset(s_decoded_dirty,0,sizeof s_decoded_dirty);
     s_decoded_first=NV2A_VSH_SLOTS;s_decoded_limit=0;
+    s_program_info.valid=0;
     s_load_slot=saved->load_slot;s_load_word=saved->load_word;s_start_slot=saved->start_slot;
     s_const_load=saved->const_load;s_const_word=saved->const_word;s_cxt_write=saved->cxt_write;
 }
@@ -129,6 +135,8 @@ void nv2a_vsh_decode_instruction(const uint32_t ins[4], Nv2aVshInstruction *d)
  * including a consumer in the middle of a partial upload. */
 static void update_decoded(void)
 {
+    if(s_decoded_first>=s_decoded_limit)return;
+    s_program_info.valid=0;
     for (uint32_t slot=s_decoded_first;slot<s_decoded_limit;slot++) {
         if (!s_decoded_dirty[slot]) continue;
         nv2a_vsh_decode_instruction(s_program[slot],&s_decoded[slot]);
@@ -138,33 +146,43 @@ static void update_decoded(void)
 }
 
 
-uint32_t nv2a_vsh_inputs_used(void)
+static void update_program_info(void)
 {
     update_decoded();
-    uint32_t inputs = 0;
-    for (uint32_t slot = s_start_slot; slot < NV2A_VSH_SLOTS; ++slot) {
-        const Nv2aVshInstruction *ins = &s_decoded[slot];
-        inputs |= ins->inputs_read;
-        if (ins->final) break;
-    }
-    return inputs;
-}
-
-const uint32_t *nv2a_vsh_program(int *length, uint32_t *inputs)
-{
-    update_decoded();
-    uint32_t used=0;
-    for (uint32_t slot=s_start_slot; slot<NV2A_VSH_SLOTS; ++slot) {
+    if(s_program_info.valid && s_program_info.start==s_start_slot)return;
+    uint32_t inputs=0;
+    int length=0,writes_constants=0;
+    for(uint32_t slot=s_start_slot;slot<NV2A_VSH_SLOTS;++slot) {
         const Nv2aVshInstruction *ins=&s_decoded[slot];
-        if(s_cxt_write && ins->out_mask && !ins->out_to_register && ins->out_address<NV2A_VSH_CONSTANTS) return NULL;
-        if(inputs) used |= ins->inputs_read;
+        inputs|=ins->inputs_read;
+        writes_constants|=ins->out_mask && !ins->out_to_register && ins->out_address<NV2A_VSH_CONSTANTS;
         if(ins->final) {
-            *length=(int)(slot-s_start_slot+1);
-            if(inputs) *inputs=used;
-            return s_program[s_start_slot];
+            length=(int)(slot-s_start_slot+1);
+            break;
         }
     }
-    return NULL;
+    s_program_info.start=s_start_slot;
+    s_program_info.inputs=inputs;
+    s_program_info.length=length;
+    s_program_info.writes_constants=writes_constants;
+    ++s_program_info.revision;
+    s_program_info.valid=1;
+}
+
+uint32_t nv2a_vsh_inputs_used(void)
+{
+    update_program_info();
+    return s_program_info.inputs;
+}
+
+const uint32_t *nv2a_vsh_program(int *length, uint32_t *inputs, uint64_t *revision)
+{
+    update_program_info();
+    if(!s_program_info.length || (s_cxt_write && s_program_info.writes_constants))return NULL;
+    *length=s_program_info.length;
+    if(inputs)*inputs=s_program_info.inputs;
+    if(revision)*revision=s_program_info.revision;
+    return s_program[s_start_slot];
 }
 
 /* ---- uploads ------------------------------------------------------------ */
@@ -235,6 +253,7 @@ void nv2a_vsh_set_instruction(uint32_t slot, const uint32_t words[4])
         memcpy(s_program[slot], words, sizeof s_program[slot]);
         nv2a_vsh_decode_instruction(s_program[slot], &s_decoded[slot]);
         s_decoded_dirty[slot]=0;
+        s_program_info.valid=0;
     }
 }
 

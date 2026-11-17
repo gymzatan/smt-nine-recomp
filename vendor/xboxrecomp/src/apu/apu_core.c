@@ -85,11 +85,26 @@ static void update_irq(MCPXAPUState *d)
         ((d->regs[NV_PAPU_ISTS] & ~NV_PAPU_ISTS_GINTSTS) &
          d->regs[NV_PAPU_IEN])) {
         qatomic_or(&d->regs[NV_PAPU_ISTS], NV_PAPU_ISTS_GINTSTS);
+        int rising = !ReadAcquire(&s_irq_line);
         WriteRelease(&s_irq_line, 1);
+        if (rising && d->parent_obj.irq_notify)
+            d->parent_obj.irq_notify(d->parent_obj.irq_opaque, 1);
     } else {
         qatomic_and(&d->regs[NV_PAPU_ISTS], ~NV_PAPU_ISTS_GINTSTS);
         WriteRelease(&s_irq_line, 0);
     }
+}
+
+void mcpx_apu_set_irq_wake(void (*notify)(void *, int), void *opaque)
+{
+    MCPXAPUState *d = g_state;
+    if (!d) return;
+    qemu_mutex_lock(&d->lock);
+    d->parent_obj.irq_notify = notify;
+    d->parent_obj.irq_opaque = opaque;
+    if (notify && ReadAcquire(&s_irq_line))
+        notify(opaque, 1);
+    qemu_mutex_unlock(&d->lock);
 }
 
 int mcpx_apu_irqs_pending(void)
@@ -136,16 +151,10 @@ uint64_t mcpx_apu_read(void *opaque, hwaddr addr, unsigned int size)
     MCPXAPUState *d = (MCPXAPUState *)opaque;
     uint64_t r = 0;
 
-    switch (addr) {
-    case NV_PAPU_XGSCNT:
-        r = (uint64_t)(qemu_clock_get_ns(s_apu_clock_frequency.QuadPart) / 100);
-        break;
-    default:
-        if (addr < 0x20000) {
-            r = qatomic_read(&d->regs[addr]);
-        }
-        break;
-    }
+    if (addr == NV_PAPU_XGSCNT)
+        r = (uint32_t)ReadAcquire((const volatile LONG *)&d->regs[addr]);
+    else if (addr < 0x20000)
+        r = qatomic_read(&d->regs[addr]);
 
     /* Uncomment for register tracing:
      * fprintf(stderr, "[APU] read  [0x%05llX] size=%u -> 0x%08llX\n",
@@ -167,6 +176,9 @@ void mcpx_apu_write(void *opaque, hwaddr addr, uint64_t val,
     (void)size;
 
     switch (addr) {
+    case NV_PAPU_XGSCNT:
+        WriteRelease((volatile LONG *)&d->regs[addr], (LONG)(uint32_t)val);
+        break;
     case NV_PAPU_ISTS:
         qatomic_and(&d->regs[NV_PAPU_ISTS], ~(uint32_t)val);
         update_irq(d);
@@ -387,6 +399,13 @@ static void se_frame(MCPXAPUState *d)
 
     mcpx_apu_vp_frame(d, mixbins);
     mcpx_apu_dsp_frame(d, mixbins);
+
+    /* The global sequencer count advances by one produced sample block.
+     * MMIO writes share the device lock and can set a new starting value. */
+    volatile LONG *sample_count = (volatile LONG *)&d->regs[NV_PAPU_XGSCNT];
+    uint32_t next_sample = (uint32_t)ReadAcquire(sample_count) + NUM_SAMPLES_PER_FRAME;
+    WriteRelease(sample_count, (LONG)next_sample);
+
     /* The analog AC97 descriptor consumer sends the DSP output to the DAC. */
 
     mcpx_debug_end_frame();
@@ -401,23 +420,27 @@ static void *mcpx_apu_frame_thread(void *arg)
     MCPXAPUState *d = MCPX_APU_DEVICE(arg);
     xbox_CheckpointDeviceEnter(XBOX_CHECKPOINT_APU);
     xbox_CheckpointDeviceLeave(XBOX_CHECKPOINT_APU);
-    qemu_mutex_lock(&d->lock);
-
-    while (!qatomic_read(&d->exiting)) {
+    for (;;) {
+        xbox_CheckpointDeviceEnter(XBOX_CHECKPOINT_APU);
+        qemu_mutex_lock(&d->lock);
         if (d->pause_requested && !g_test_tone.active && !g_mixer_active_count) {
+            /* Idle cannot retain the device checkpoint gate. Keep the APU
+             * mutex through the idle signal and condition wait. */
+            xbox_CheckpointDeviceLeave(XBOX_CHECKPOINT_APU);
             d->is_idle = true;
             qemu_cond_signal(&d->idle_cond);
             qemu_cond_wait(&d->cond, &d->lock);
             d->is_idle = false;
+            if (qatomic_read(&d->exiting)) break;
+            qemu_mutex_unlock(&d->lock);
             continue;
         }
 
-        qemu_mutex_unlock(&d->lock);
-        xbox_CheckpointDeviceEnter(XBOX_CHECKPOINT_APU);
-        qemu_mutex_lock(&d->lock);
         if (g_apu_checkpoint_restart) {
-            g_apu_checkpoint_restart=0;qemu_mutex_unlock(&d->lock);
-            xbox_CheckpointDeviceLeave(XBOX_CHECKPOINT_APU);qemu_mutex_lock(&d->lock);continue;
+            g_apu_checkpoint_restart = 0;
+            qemu_mutex_unlock(&d->lock);
+            xbox_CheckpointDeviceLeave(XBOX_CHECKPOINT_APU);
+            continue;
         }
         /* Always run the audio output loop — the software mixer and test tone
          * need continuous frame delivery regardless of APU register state.
@@ -482,7 +505,6 @@ static void *mcpx_apu_frame_thread(void *arg)
         qemu_mutex_unlock(&d->lock);
         xbox_CheckpointDeviceLeave(XBOX_CHECKPOINT_APU);
         SwitchToThread();
-        qemu_mutex_lock(&d->lock);
     }
 
     qemu_mutex_unlock(&d->lock);
@@ -812,6 +834,23 @@ void mcpx_apu_mmio_write(MCPXAPUState *d, uint64_t addr, uint64_t val, unsigned 
         mcpx_apu_dispatch_mmio(d, (hwaddr)addr, val, size, true);
         qemu_mutex_unlock(&d->lock);
     }
+}
+
+void mcpx_apu_mmio_write_vp_sequence(MCPXAPUState *d, const uint32_t writes[][2], unsigned count)
+{
+    if (!count) return;
+    for (unsigned i = 0; i < count; ++i) {
+        uint32_t addr = writes[i][0];
+        if (!d || addr < 0x20000 || addr >= 0x30000 || (addr & 3)) {
+            fprintf(stderr, "[STOP] unsupported APU VP write: offset=%05X value=%08X\n",
+                    addr, writes[i][1]);
+            exit(5);
+        }
+    }
+    qemu_mutex_lock(&d->lock);
+    for (unsigned i = 0; i < count; ++i)
+        mcpx_apu_dispatch_mmio(d, writes[i][0], writes[i][1], 4, true);
+    qemu_mutex_unlock(&d->lock);
 }
 
 /* ============================================================

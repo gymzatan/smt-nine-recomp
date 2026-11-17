@@ -651,19 +651,32 @@ static HRESULT __stdcall dev_GetTransform(IDirect3DDevice8 *self, D3DTRANSFORMST
     return S_OK;
 }
 
-static HRESULT __stdcall dev_SetRenderState(IDirect3DDevice8 *self, D3DRENDERSTATETYPE State, DWORD Value)
+/* Both entry points update the same D3D8 state and combiner invalidation. */
+static inline void set_render_state(D3DRENDERSTATETYPE State, DWORD Value)
 {
-    (void)self;
-    g_d3d_setrs_count++;
     if ((DWORD)State < MAX_RENDER_STATES) {
-        if (g_device_state.render_states[(DWORD)State] == Value) return S_OK;
+        if (g_device_state.render_states[(DWORD)State] == Value) return;
         g_device_state.render_states[(DWORD)State] = Value;
     }
     /* Mark combiner state dirty if any PS register combiner state changed */
     if ((DWORD)State >= D3DRS_PSALPHAINPUTS0 && (DWORD)State <= D3DRS_PSINPUTTEXTURE) {
         d3d8_combiners_mark_dirty();
     }
+}
+
+static HRESULT __stdcall dev_SetRenderState(IDirect3DDevice8 *self, D3DRENDERSTATETYPE State, DWORD Value)
+{
+    (void)self;
+    g_d3d_setrs_count++;
+    set_render_state(State, Value);
     return S_OK;
+}
+
+void d3d8_SetRenderStates(const D3D8RenderStateUpdate *updates, unsigned count)
+{
+    g_d3d_setrs_count += count;
+    for (unsigned i = 0; i < count; ++i)
+        set_render_state(updates[i].state, updates[i].value);
 }
 
 static HRESULT __stdcall dev_GetRenderState(IDirect3DDevice8 *self, D3DRENDERSTATETYPE State, DWORD *pValue)
@@ -673,6 +686,20 @@ static HRESULT __stdcall dev_GetRenderState(IDirect3DDevice8 *self, D3DRENDERSTA
         *pValue = g_device_state.render_states[(DWORD)State];
     }
     return S_OK;
+}
+
+void d3d8_SetNV2ATextureSampling(DWORD stage, DWORD address_u, DWORD address_v,
+                                 DWORD address_w, DWORD border, DWORD filter)
+{
+    if (stage >= MAX_TEXTURE_STAGES) return;
+    DWORD *state = g_device_state.tss[stage];
+    state[D3DTSS_ADDRESSU] = address_u;
+    state[D3DTSS_ADDRESSV] = address_v;
+    state[D3DTSS_NV2AADDRESSW] = address_w;
+    state[D3DTSS_BORDERCOLOR] = border;
+    state[D3DTSS_MINFILTER] = filter;
+    state[D3DTSS_MAGFILTER] = filter;
+    state[D3DTSS_MIPFILTER] = D3DTEXF_NONE;
 }
 
 static HRESULT __stdcall dev_SetTextureStageState(IDirect3DDevice8 *self, DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value)

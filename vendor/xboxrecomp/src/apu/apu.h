@@ -34,9 +34,13 @@ uint64_t mcpx_apu_mmio_read(MCPXAPUState *d, uint64_t addr, unsigned int size);
 /* MMIO write to APU register space (addr is offset from 0xFE800000). */
 void mcpx_apu_mmio_write(MCPXAPUState *d, uint64_t addr, uint64_t val, unsigned int size);
 
+/* Publish consecutive VP method writes under a single device lock. */
+void mcpx_apu_mmio_write_vp_sequence(MCPXAPUState *d, const uint32_t writes[][2], unsigned count);
+
 void mcpx_ac97_init(void);
 void mcpx_ac97_frame(void);
 int mcpx_ac97_irq_pending(void);
+void mcpx_apu_set_irq_wake(void (*notify)(void *, int), void *opaque);
 int mcpx_apu_irqs_pending(void);
 void mcpx_apu_service_irqs(int (*deliver)(uint32_t));
 uint64_t mcpx_ac97_read(void *device, uint32_t offset, unsigned size);

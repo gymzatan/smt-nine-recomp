@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-typedef struct {
+typedef struct Nv2aCombiner {
     uint32_t color_icw[8], alpha_icw[8];    /* SET_COMBINER_COLOR/ALPHA_ICW */
     uint32_t color_ocw[8], alpha_ocw[8];    /* SET_COMBINER_COLOR/ALPHA_OCW */
     uint32_t factor0[8], factor1[8];        /* SET_COMBINER_FACTOR0/1 (ARGB) */
@@ -28,6 +28,21 @@ typedef struct {
     uint32_t control;                       /* SET_COMBINER_CONTROL */
     uint32_t stage_program;                 /* SET_SHADER_STAGE_PROGRAM */
 } Nv2aCombiner;
+
+/* Return the combiner register number plus one, or zero for another method. */
+static inline unsigned nv2a_combiner_register(uint32_t method)
+{
+    uint32_t offset = method - 0x0a60u;
+    if (offset < 128) return 1 + offset / 4; /* factor0, factor1, alpha OCW, color ICW */
+    offset = method - 0x0260u;
+    if (offset < 32) return 33 + offset / 4; /* alpha ICW */
+    offset = method - 0x1e40u;
+    if (offset < 32) return 41 + offset / 4; /* color OCW */
+    return 0;
+}
+
+void nv2a_pb_exec_combiner_register(uint32_t subchannel, uint32_t method,
+                                    uint32_t param, unsigned reg);
 
 /* One pixel. Colours are r,g,b,a in [0,1]; `fog` is (fog colour, factor).
  * t[i] is what texture stage i produced. The result is clamped to [0,1]. */

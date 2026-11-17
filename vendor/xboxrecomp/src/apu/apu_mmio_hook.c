@@ -36,7 +36,7 @@ uint64_t apu_read_adapter(void *device, uint32_t offset, unsigned size)
     return value;
 }
 
-void apu_write_adapter(void *device, uint32_t offset, uint64_t value, unsigned size)
+static void apu_trace_write(uint32_t offset, uint64_t value)
 {
     if (g_dbg.ssl_trace_enabled &&
         (offset == NV_PAPU_VPSGEADDR || offset == NV_PAPU_GPSADDR ||
@@ -51,7 +51,20 @@ void apu_write_adapter(void *device, uint32_t offset, uint64_t value, unsigned s
             (offset >= 0x20100 && offset <= 0x20140))
             fprintf(stderr, "  [APUMMIO] write 0x%05X = %08X\n", offset, (uint32_t)value);
     }
+}
+
+void apu_write_adapter(void *device, uint32_t offset, uint64_t value, unsigned size)
+{
+    apu_trace_write(offset, value);
     mcpx_apu_mmio_write(device, offset, value, size);
+}
+
+void apu_write_vp_sequence(void *device, const uint32_t writes[][2], unsigned count)
+{
+    if (g_dbg.trace_enabled || g_dbg.ssl_trace_enabled)
+        for (unsigned i = 0; i < count; ++i)
+            apu_trace_write(writes[i][0], writes[i][1]);
+    mcpx_apu_mmio_write_vp_sequence(device, writes, count);
 }
 
 bool apu_hook_handle_mmio(PCONTEXT ctx, uintptr_t fault_addr,

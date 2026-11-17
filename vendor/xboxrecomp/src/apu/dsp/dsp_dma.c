@@ -128,16 +128,16 @@ static void dsp_dma_run(DSPDMAState *s)
             assert(!"Dsp dma space address out of range");
         }
 
-        uint32_t next_block = s->mem_read(s->mem_opaque, block_space, block_addr);
-        uint32_t control = s->mem_read(s->mem_opaque, block_space, block_addr+1);
-        uint32_t count = s->mem_read(s->mem_opaque, block_space, block_addr+2);
+        uint32_t descriptor[7];
+        s->mem_read_words(s->mem_opaque, block_space, block_addr, descriptor, 7);
+        uint32_t control = descriptor[1];
+        uint32_t count = descriptor[2];
+        uint32_t dsp_offset = descriptor[3];
+        uint32_t scratch_offset = descriptor[4];
+        uint32_t scratch_base = descriptor[5];
+        uint32_t scratch_size = descriptor[6] + 1;
 
-        uint32_t dsp_offset = s->mem_read(s->mem_opaque, block_space, block_addr+3);
-        uint32_t scratch_offset = s->mem_read(s->mem_opaque, block_space, block_addr+4);
-        uint32_t scratch_base = s->mem_read(s->mem_opaque, block_space, block_addr+5);
-        uint32_t scratch_size = s->mem_read(s->mem_opaque, block_space, block_addr+6)+1;
-
-        s->next_block = next_block;
+        s->next_block = descriptor[0];
         if (s->next_block & NODE_POINTER_EOL) {
             s->eol = true;
         }
@@ -265,9 +265,8 @@ static void dsp_dma_run(DSPDMAState *s)
                 for (uint32_t i = 0; i < count; ++i)
                     samples[i] = s->mem_read(s->mem_opaque, mem_space, mem_address + i) >> 8;
             } else if (item_size == 4) {
-                uint32_t *samples = (uint32_t *)scratch_buf;
-                for (uint32_t i = 0; i < count; ++i)
-                    samples[i] = s->mem_read(s->mem_opaque, mem_space, mem_address + i);
+                s->mem_read_words(s->mem_opaque, mem_space, mem_address,
+                                  (uint32_t *)scratch_buf, count);
             } else {
                 for (uint32_t i = 0; i < count; ++i) {
                     s->mem_read(s->mem_opaque, mem_space, mem_address + i);

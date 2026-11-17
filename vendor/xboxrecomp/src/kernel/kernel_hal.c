@@ -146,8 +146,8 @@ void xbox_CpuLeaveInterrupt(int saved)
  * so a deferred interrupt is delivered on the next poll rather than lost. */
 int xbox_IrqlBlocksInterrupts(void)
 {
-    return InterlockedCompareExchange(&g_irql_raised_count, 0, 0) != 0 ||
-           InterlockedCompareExchange(&g_cpu_irq_mask_count, 0, 0) != 0;
+    return ReadAcquire(&g_irql_raised_count) != 0 ||
+           ReadAcquire(&g_cpu_irq_mask_count) != 0;
 }
 
 /* The raw depth, for callers that want to report it. A count that only ever
@@ -155,7 +155,7 @@ int xbox_IrqlBlocksInterrupts(void)
  * where a yes/no cannot. */
 int xbox_IrqlRaisedCount(void)
 {
-    return (int)InterlockedCompareExchange(&g_irql_raised_count, 0, 0);
+    return (int)ReadAcquire(&g_irql_raised_count);
 }
 
 static int  s_trace = -1;
@@ -189,6 +189,8 @@ static struct {
     void *ra;
     uint32_t guest_ra, guest_esp;   /* the host ra only ever names the bridge */
 } s_holders[IRQL_HOLDERS];
+/* Zero means this host thread never claimed a slot for its current raise. */
+static XBOX_THREAD_LOCAL unsigned s_holder_slot;
 #include "recomp_gpr_state.h"
 extern RECOMP_TLS RecompGprState g_gpr;
 
@@ -203,22 +205,18 @@ static void irql_holder_add(void *ra)
             s_holders[i].guest_esp = g_esp;
             s_holders[i].guest_ra = g_esp
                 ? *(uint32_t *)((uintptr_t)g_xbox_mem_offset + g_esp) : 0;
+            s_holder_slot = i + 1;
             return;
         }
 }
 
 static void irql_holder_drop(void)
 {
-    LONG me = (LONG)GetCurrentThreadId();
-    int i;
-
-    for (i = 0; i < IRQL_HOLDERS; i++) {
-        if (ReadAcquire(&s_holders[i].tid) != me)
-            continue;
-        /* Other threads can claim only an empty slot. Only its owner clears it. */
-        WriteRelease(&s_holders[i].tid, 0);
+    const unsigned slot = s_holder_slot;
+    if (!slot)
         return;
-    }
+    s_holder_slot = 0;
+    WriteRelease(&s_holders[slot - 1].tid, 0);
 }
 
 void xbox_IrqlDumpHolders(void)
@@ -440,7 +438,7 @@ LARGE_INTEGER __stdcall xbox_KeQueryPerformanceFrequency(void)
 
 static LONGLONG s_time_anchor_100ns;
 static LONGLONG s_time_anchor_counts;
-static LONGLONG s_time_freq_counts;
+static volatile LONG64 s_time_freq_counts;
 static INIT_ONCE s_time_once = INIT_ONCE_STATIC_INIT;
 
 static BOOL CALLBACK anchor_system_time(PINIT_ONCE once, PVOID param, PVOID *ctx)
@@ -451,9 +449,9 @@ static BOOL CALLBACK anchor_system_time(PINIT_ONCE once, PVOID param, PVOID *ctx
     QueryPerformanceFrequency(&f);
     GetSystemTimeAsFileTime(&ft);
     xbox_RuntimePerformanceCounter(&now);
-    s_time_freq_counts = f.QuadPart ? f.QuadPart : 1;
     s_time_anchor_100ns = ((LONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
     s_time_anchor_counts = now.QuadPart;
+    WriteRelease64(&s_time_freq_counts, f.QuadPart ? f.QuadPart : 1);
     return TRUE;
 }
 
@@ -482,12 +480,23 @@ VOID __stdcall xbox_KeQuerySystemTime(PLARGE_INTEGER CurrentTime)
     if (!CurrentTime)
         return;
 
-    InitOnceExecuteOnce(&s_time_once, anchor_system_time, NULL, NULL);
+    /* The initialized frequency publishes both anchor values. */
+    LONGLONG frequency = ReadAcquire64(&s_time_freq_counts);
+    if (!frequency) {
+        InitOnceExecuteOnce(&s_time_once, anchor_system_time, NULL, NULL);
+        frequency = ReadAcquire64(&s_time_freq_counts);
+    }
     xbox_RuntimePerformanceCounter(&now);
     delta = now.QuadPart - s_time_anchor_counts;
+    if (frequency == 10000000LL) {
+        /* At 10 MHz each counter tick is already 100 ns. */
+        CurrentTime->QuadPart = s_time_anchor_100ns + delta;
+        return;
+    }
+
     CurrentTime->QuadPart = s_time_anchor_100ns
-        + (delta / s_time_freq_counts) * 10000000LL
-        + (delta % s_time_freq_counts) * 10000000LL / s_time_freq_counts;
+        + (delta / frequency) * 10000000LL
+        + (delta % frequency) * 10000000LL / frequency;
 }
 
 /* ============================================================================
@@ -1216,7 +1225,8 @@ void xbox_ApplyRuntimeClock(const void *prepared)
     const RuntimeClockCheckpoint *saved=prepared;
     InitOnceExecuteOnce(&s_time_once,anchor_system_time,NULL,NULL);
     s_clock_frozen_tick=saved->tick;s_clock_frozen_qpc=saved->qpc;
-    s_time_anchor_100ns=saved->system_anchor;s_time_anchor_counts=saved->system_counts;s_time_freq_counts=saved->system_frequency;
+    s_time_anchor_100ns=saved->system_anchor;s_time_anchor_counts=saved->system_counts;
+    WriteRelease64(&s_time_freq_counts, saved->system_frequency);
     s_tsc_freq.QuadPart=saved->tsc_frequency;s_tsc_origin.QuadPart=saved->tsc_origin;xbox_KeTickCount=saved->exported_tick;
     s_gpio_field_pin=saved->gpio_field_pin;
 }

@@ -47,44 +47,48 @@ static const wchar_t s_title_subdir[] = L"\\TitleData";
 typedef struct {
     const char* prefix;     /* Xbox path prefix (backslash form)         */
     int         to_save;    /* 0 = game, 1 = runtime, 2 = Partition1, 3 = U: */
+    unsigned    prefix_length;
     const wchar_t *sub_win; /* sub-directory, Win32 backslash form    */
     const char* sub_posix;  /* sub-directory, POSIX slash form           */
 } path_rule;
 
+#define PATH_RULE(prefix, root, win, posix) {prefix, root, sizeof(prefix) - 1, win, posix}
+
 static const path_rule s_rules[] = {
-    { "\\Device\\CdRom0\\",                   0, NULL,         NULL          },
-    { "\\Device\\CdRom0",                     0, NULL,         NULL          },
-    { "\\Device\\Harddisk0\\Partition1\\",    2, NULL,         NULL          },
-    { "\\Device\\Harddisk0\\Partition1",      2, NULL,         NULL          },
+    PATH_RULE("\\Device\\CdRom0\\",                   0, NULL,         NULL),
+    PATH_RULE("\\Device\\CdRom0",                     0, NULL,         NULL),
+    PATH_RULE("\\Device\\Harddisk0\\Partition1\\",    2, NULL,         NULL),
+    PATH_RULE("\\Device\\Harddisk0\\Partition1",      2, NULL,         NULL),
     /* Xbox volume paths use ordinary PC directories. Root system-volume
      * access uses SystemData; paths below it retain the game asset mapping. */
-    { "\\Device\\Harddisk0\\Partition2\\",    0, NULL,         NULL          },
-    { "C:\\",                                 0, NULL,         NULL          },
-    { "\\??\\C:\\",                           0, NULL,         NULL          },
-    { "\\Device\\Harddisk0\\Partition2",     1, L"\\SystemData", "/SystemData" },
-    { "\\Device\\Harddisk0\\Partition3",     1, s_cache_subdir,   "/Cache"      },
-    { "\\Device\\Harddisk0\\Partition4",     1, s_cache_subdir,   "/Cache"      },
-    { "\\Device\\Harddisk0\\Partition5",     1, s_cache_subdir,   "/Cache"      },
-    { "D:\\",                                 0, NULL,         NULL          },
-    { "d:\\",                                 0, NULL,         NULL          },
+    PATH_RULE("\\Device\\Harddisk0\\Partition2\\",    0, NULL,         NULL),
+    PATH_RULE("C:\\",                                 0, NULL,         NULL),
+    PATH_RULE("\\??\\C:\\",                           0, NULL,         NULL),
+    PATH_RULE("\\Device\\Harddisk0\\Partition2",     1, L"\\SystemData", "/SystemData"),
+    PATH_RULE("\\Device\\Harddisk0\\Partition3",     1, s_cache_subdir,   "/Cache"),
+    PATH_RULE("\\Device\\Harddisk0\\Partition4",     1, s_cache_subdir,   "/Cache"),
+    PATH_RULE("\\Device\\Harddisk0\\Partition5",     1, s_cache_subdir,   "/Cache"),
+    PATH_RULE("D:\\",                                 0, NULL,         NULL),
+    PATH_RULE("d:\\",                                 0, NULL,         NULL),
     /* Y: is the Xbox dashboard partition; the dashboard opens its assets
      * (e.g. "Y:\default.xip") from there. Map it to the game dir. */
-    { "Y:\\",                                 0, NULL,         NULL          },
-    { "y:\\",                                 0, NULL,         NULL          },
-    { "T:\\",                                 1, s_title_subdir,"/TitleData"  },
-    { "U:\\",                                 3, L"\\UserData", "/UserData"   },
-    { "Z:\\",                                 1, s_cache_subdir,    "/Cache"      },
-    { "\\??\\D:\\",                           0, NULL,         NULL          },
-    { "\\??\\Y:\\",                           0, NULL,         NULL          },
-    { "\\??\\y:\\",                           0, NULL,         NULL          },
-    { "\\??\\T:\\",                           1, s_title_subdir,"/TitleData"  },
+    PATH_RULE("Y:\\",                                 0, NULL,         NULL),
+    PATH_RULE("y:\\",                                 0, NULL,         NULL),
+    PATH_RULE("T:\\",                                 1, s_title_subdir,"/TitleData"),
+    PATH_RULE("U:\\",                                 3, L"\\UserData", "/UserData"),
+    PATH_RULE("Z:\\",                                 1, s_cache_subdir,    "/Cache"),
+    PATH_RULE("\\??\\D:\\",                           0, NULL,         NULL),
+    PATH_RULE("\\??\\Y:\\",                           0, NULL,         NULL),
+    PATH_RULE("\\??\\y:\\",                           0, NULL,         NULL),
+    PATH_RULE("\\??\\T:\\",                           1, s_title_subdir,"/TitleData"),
 };
+#undef PATH_RULE
 #define PATH_RULE_COUNT ((int)(sizeof(s_rules) / sizeof(s_rules[0])))
 
-static size_t path_rule_device_name_length(const char *prefix)
+static size_t path_rule_device_name_length(const path_rule *rule)
 {
-    size_t length=strlen(prefix);
-    return length && prefix[length-1]=='\\' ? length-1 : length;
+    size_t length=rule->prefix_length;
+    return length - (rule->prefix[length-1]=='\\');
 }
 
 /* Physical device identities are drawn from this same path table. The rule
@@ -94,9 +98,9 @@ int xbox_path_device_rule(unsigned rule,char *name,DWORD capacity,ULONG *type) {
     if(!rule || rule>PATH_RULE_COUNT)return 0;
     const char *prefix=s_rules[rule-1].prefix;
     if(!match_prefix(prefix,"\\Device\\"))return 0;
-    size_t length=path_rule_device_name_length(prefix);
+    size_t length=path_rule_device_name_length(&s_rules[rule-1]);
     for(unsigned i=0;i+1<rule;i++) {
-        size_t earlier=path_rule_device_name_length(s_rules[i].prefix);
+        size_t earlier=path_rule_device_name_length(&s_rules[i]);
         if(earlier==length) {
             size_t j=0;while(j<length && tolower((unsigned char)prefix[j])==tolower((unsigned char)s_rules[i].prefix[j]))++j;
             if(j==length)return 0;
@@ -111,7 +115,7 @@ BOOL xbox_translate_device_path(unsigned rule,const char *rest,xbox_host_char *o
     if(!rest || !rule || rule>PATH_RULE_COUNT)return FALSE;
     /* The caller uses a device rule validated at publication or restore. */
     const char *name=s_rules[rule-1].prefix;
-    size_t head=path_rule_device_name_length(name),tail=strlen(rest);
+    size_t head=path_rule_device_name_length(&s_rules[rule-1]),tail=strlen(rest);
     if(head+tail+1>UINT16_MAX)return FALSE;
     char *path=malloc(head+tail+2);if(!path)return FALSE;
     memcpy(path,name,head);if(tail)path[head++]='\\';memcpy(path+head,rest,tail+1);
@@ -306,7 +310,7 @@ static void xbox_remember_host_path(const wchar_t *p)
 
 
 static void translate_matched_path(const path_rule *rule, const char *remainder,
-                                   unsigned leading_separator,
+                                   int remainder_bytes, unsigned leading_separator,
                                    xbox_host_char *host_path_buf, DWORD buf_size)
 {
     static const WCHAR *const roots[]={s_game_dir,s_save_dir,s_partition1_dir,s_user_dir};
@@ -322,7 +326,7 @@ static void translate_matched_path(const path_rule *rule, const char *remainder,
 
     WCHAR remainder_wide[MAX_PATH];
     if (leading_separator) remainder_wide[0]=L'\\';
-    MultiByteToWideChar(CP_ACP, 0, remainder, -1, remainder_wide+leading_separator,
+    MultiByteToWideChar(CP_ACP, 0, remainder, remainder_bytes, remainder_wide+leading_separator,
                         MAX_PATH-leading_separator);
 
     for (WCHAR* p = remainder_wide; *p; p++) {
@@ -377,7 +381,7 @@ static BOOL xbox_translate_path_impl(const char* xbox_path, xbox_host_char* host
         if(skip && s_rules[i].prefix[skip-1]!='\\' && xbox_path[skip] && xbox_path[skip]!='\\' && xbox_path[skip]!='/')skip=0;
         if (skip) {
             xbox_log(XBOX_LOG_TRACE, XBOX_LOG_PATH, "%s", xbox_path);
-            translate_matched_path(&s_rules[i],xbox_path+skip,0,host_path_buf,buf_size);
+            translate_matched_path(&s_rules[i],xbox_path+skip,-1,0,host_path_buf,buf_size);
             XBOX_TRACE(XBOX_LOG_PATH, "%s -> %S", xbox_path, host_path_buf);
             return TRUE;
         }
@@ -396,7 +400,7 @@ BOOL xbox_translate_device_path(unsigned rule,const char *rest,xbox_host_char *o
 
     const path_rule *resolved=&s_rules[rule-1];
     const char *name=resolved->prefix;
-    size_t head=path_rule_device_name_length(name);
+    size_t head=path_rule_device_name_length(resolved);
     size_t tail=strlen(rest);
     if (head+tail+1>UINT16_MAX) return FALSE;
     if (!tail) {
@@ -412,7 +416,8 @@ BOOL xbox_translate_device_path(unsigned rule,const char *rest,xbox_host_char *o
      * Its original remainder began with the join separator. */
     unsigned leading_separator=name[head]=='\0';
     xbox_log(XBOX_LOG_TRACE,XBOX_LOG_PATH,"%.*s\\%s",(int)head,name,rest);
-    translate_matched_path(resolved,rest,leading_separator,output,capacity);
+    /* The checked byte count includes the terminator for the same ACP conversion. */
+    translate_matched_path(resolved,rest,(int)(tail+1),leading_separator,output,capacity);
     XBOX_TRACE(XBOX_LOG_PATH,"%.*s\\%s -> %S",(int)head,name,rest,output);
     return TRUE;
 }

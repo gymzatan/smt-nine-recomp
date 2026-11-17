@@ -21,7 +21,7 @@ typedef struct HwColor {
     HwMemory *memory;
     size_t memory_offset;
     int upload_needed;
-    int dirty;
+    int dirty,uniform_clear;
     RECT dirty_bounds;
     struct HwColor *next;
 } HwColor;
@@ -96,45 +96,132 @@ static RECT s_hw_bounds;
 static int s_hw_program_active, s_hw_fixed_active, s_hw_output_active;
 static uint32_t s_hw_polygon_info[NV_MAX_INDICES];
 static D3D11_PRIMITIVE_TOPOLOGY s_hw_topology;
+static unsigned s_hw_fill_column_x16;
 static uint32_t s_hw_program_vertex_count, s_hw_program_vertex_stride;
 static uint32_t s_hw_program_inputs;
 /* Valid only during raster_batch_vertices and its immediate flush. */
 static const uint32_t *s_hw_program;
 static int s_hw_program_length;
+static uint64_t s_hw_program_revision;
 static uint32_t s_hw_program_vertex_rows[NV_MAX_INDICES];
+/* Bound by the original command consumer for the duration of primitive assembly. */
+static const uint32_t *s_hw_program_row_view;
 static struct { float vertex[NV_MAX_INDICES*16][4]; uint32_t indices[NV_MAX_INDICES*6]; } s_hw_program_upload;
-static int hw_polygon_modes_active(void)
+/* A three-component input has a packed w of exactly 1. The caller has already
+ * selected unskinned fixed-function fill, unlit, with one color pair per row.
+ * This function checks the two colors and proves the positional bounds. */
+static int hw_direct_fill_bounds(const float (*rows)[4], unsigned count,
+                                 unsigned row_attributes, const float constants[192][4],
+                                 unsigned *column_x16)
 {
-    return s_gpu.prim>NV_PRIM_LINE_STRIP && (nv2a_get_state()->pgraph.regs[NV_PGRAPH_SETUPRASTER]&
-        (NV_PGRAPH_SETUPRASTER_FRONTFACEMODE|NV_PGRAPH_SETUPRASTER_BACKFACEMODE))!=0;
+    const __m128 sign = _mm_set1_ps(-0.0f);
+    const __m128i diffuse = _mm_castps_si128(_mm_loadu_ps(rows[3]));
+    const __m128i specular = _mm_castps_si128(_mm_loadu_ps(rows[4]));
+    const __m128i exponent = _mm_set1_epi32(0x7f800000);
+    if (_mm_movemask_epi8(_mm_cmpeq_epi32(_mm_and_si128(diffuse, exponent), exponent)) ||
+        _mm_movemask_epi8(_mm_cmpeq_epi32(_mm_and_si128(specular, exponent), exponent)))
+        return 0;
+    __m128i difference = _mm_setzero_si128();
+    __m128 maximum = _mm_setzero_ps();
+    __m128 invalid = _mm_setzero_ps();
+    for (unsigned i = 0; i < count; ++i, rows += row_attributes) {
+        const __m128 vertex = _mm_loadu_ps(rows[0]);
+        invalid = _mm_or_ps(invalid, _mm_cmpunord_ps(vertex, vertex));
+        maximum = _mm_max_ps(maximum, _mm_andnot_ps(sign, vertex));
+        difference = _mm_or_si128(difference, _mm_xor_si128(diffuse, _mm_castps_si128(_mm_loadu_ps(rows[3]))));
+        difference = _mm_or_si128(difference, _mm_xor_si128(specular, _mm_castps_si128(_mm_loadu_ps(rows[4]))));
+    }
+    if (_mm_movemask_ps(invalid) || _mm_movemask_epi8(_mm_cmpeq_epi8(difference, _mm_setzero_si128())) != 0xffff)
+        return 0;
+    float extent[4];
+    _mm_storeu_ps(extent, maximum);
+
+    /* Bound the dot, including its rounding and any flushed denormal products.
+     * The w check precedes the division and excludes the geometry clip plane. */
+    double max_abs_dot[4], dot_error[4];
+    double lower_w = 0;
+    for (unsigned row = 0; row < 4; ++row) {
+        const float *coeff = constants[row];
+        /* CPU and GPU may flush denormal operands differently. Bound any
+         * lost input before estimating dot rounding and the clip range. */
+        const double radius = (fabs((double)coeff[0]) + FLT_MIN) * ((double)extent[0] + FLT_MIN) +
+                              (fabs((double)coeff[1]) + FLT_MIN) * ((double)extent[1] + FLT_MIN) +
+                              (fabs((double)coeff[2]) + FLT_MIN) * ((double)extent[2] + FLT_MIN);
+        const double bias = coeff[3];
+        const double magnitude = fabs(bias) + radius;
+        const double allowance = magnitude * (8.0 * FLT_EPSILON) + 8.0 * FLT_MIN;
+        max_abs_dot[row] = magnitude + allowance;
+        dot_error[row] = allowance;
+        if (row == 3)
+            lower_w = bias - radius - allowance;
+    }
+    if (!(lower_w > (double)0.001f && max_abs_dot[3] < 0x1p64))
+        return 0;
+    /* Screen conversion snaps by 16 before dividing the output coordinate by
+     * a positive screen size, and multiplies the signed clip coordinate by w. */
+    for (unsigned axis = 0; axis < 2; ++axis) {
+        const double screen_position = max_abs_dot[axis] / lower_w + fabs((double)constants[59][axis]);
+        const double clip = (screen_position * 2 + 1) * max_abs_dot[3];
+        if (!(screen_position < FLT_MAX / 32.0 && clip < FLT_MAX / 2.0))
+            return 0;
+    }
+    if (!(max_abs_dot[2] / lower_w < FLT_MAX / 2.0))
+        return 0;
+    if (column_x16) {
+        /* Bound X/W around the translation ratio without losing the
+         * correlation between the two dot products. */
+        const double ratio = (double)constants[0][3] / constants[3][3];
+        const double center = ratio + constants[59][0];
+        double residual = dot_error[0] + fabs(ratio) * dot_error[3];
+        const double operand_error = (1.0 + fabs(ratio)) * FLT_MIN;
+        for (unsigned axis = 0; axis < 4; ++axis) {
+            const double term = ratio * constants[3][axis];
+            const double coefficient = constants[0][axis];
+            const double error = (fabs(term) + fabs(coefficient)) * (8.0 * DBL_EPSILON);
+            const double limit = axis == 3 ? 1.0 : (double)extent[axis] + FLT_MIN;
+            residual += (fabs(coefficient - term) + error + operand_error) * limit;
+        }
+        double radius = residual / lower_w;
+        radius += (fabs(ratio) + fabs((double)constants[59][0]) + radius + 1.0) * (8.0 * FLT_EPSILON);
+        const double low = (center - radius) * 16.0;
+        const double high = (center + radius) * 16.0;
+        if (low >= 1.0 && high < 16384.0 * 16.0 && (unsigned)low == (unsigned)high)
+            *column_x16 = (unsigned)low;
+    }
+    return 1;
 }
+
 static void hw_program_triangle(uint32_t a,uint32_t b,uint32_t c,uint32_t p)
 {
     uint32_t *indices=s_hw_program_upload.indices+s_hw_count;
-    indices[0]=s_hw_program_vertex_rows[a];indices[1]=s_hw_program_vertex_rows[p];
-    indices[2]=s_hw_program_vertex_rows[b];indices[3]=s_hw_program_vertex_rows[p];
-    indices[4]=s_hw_program_vertex_rows[c];indices[5]=s_hw_program_vertex_rows[p];
+    const uint32_t *rows=s_hw_program_row_view;
+    const uint32_t provoking_row=rows[p];
+    indices[0]=rows[a];indices[1]=provoking_row;
+    indices[2]=rows[b];indices[3]=provoking_row;
+    indices[4]=rows[c];indices[5]=provoking_row;
     if(!s_hw_count) note_drawn();
     s_hw_count+=6;
 }
 static void hw_program_quad(uint32_t a,uint32_t b,uint32_t c,uint32_t d,uint32_t p)
 {
     hw_program_triangle(a,b,c,p);
-    s_hw_program_upload.indices[s_hw_count-3]=s_hw_program_vertex_rows[d];
+    s_hw_program_upload.indices[s_hw_count-3]=s_hw_program_row_view[d];
     s_hw_polygon_info[s_hw_count/6-1]=primitive_polygon_info(a,b,c,d,4);
 }
 static void hw_program_line(uint32_t a,uint32_t b,uint32_t p)
 {
     uint32_t *indices=s_hw_program_upload.indices+s_hw_count;
-    indices[0]=s_hw_program_vertex_rows[p];indices[1]=s_hw_program_vertex_rows[a];
-    indices[2]=s_hw_program_vertex_rows[b];indices[3]=s_hw_program_vertex_rows[p];
+    const uint32_t *rows=s_hw_program_row_view;
+    const uint32_t provoking_row=rows[p];
+    indices[0]=provoking_row;indices[1]=rows[a];
+    indices[2]=rows[b];indices[3]=provoking_row;
     if(!s_hw_count) note_drawn();
     s_hw_count+=4;
 }
 static void hw_program_point(uint32_t i)
 {
     if(!s_hw_count) note_drawn();
-    s_hw_program_upload.indices[s_hw_count++]=s_hw_program_vertex_rows[i];
+    s_hw_program_upload.indices[s_hw_count++]=s_hw_program_row_view[i];
 }
 static ID3D11Buffer *s_hw_ps_cb;
 typedef struct HwPixelState {
@@ -142,7 +229,7 @@ typedef struct HwPixelState {
     float depth[4];
     uint32_t flags[4],bounds[4];
     float depth_offset[4];
-    uint32_t stipple_flags[4],stipple_pattern[32];
+    uint32_t stipple_enabled,window_covers_surface,skip_xy_clipping,pixel_padding,stipple_pattern[32];
 } HwPixelState;
 static HwPixelState s_hw_ps_value;
 static int s_hw_ps_value_valid;
@@ -214,6 +301,23 @@ static HwMemory *hw_memory(const XboxSharedMemoryViews *views)
     m->write_guard_protections=calloc(((views->view_size+4095)/4096)*views->view_count,sizeof *m->write_guard_protections);
     if(!m->write_guard_protections) hw_check(E_OUTOFMEMORY,"CPU write protection ownership");
     m->next=s_hw_memories;s_hw_memories=m;return m;
+}
+/* The caller holds the hardware lock. CPU views are disjoint host
+ * ranges, including the distinct aliases of the same shared section. */
+static inline HwMemory *hw_find_cpu_view(uintptr_t address,size_t bytes,size_t *offset,unsigned *view)
+{
+    for(HwMemory *m=s_hw_memories;m;m=m->next) {
+        for(unsigned i=0;i<m->views.view_count;i++) {
+            uintptr_t base=(uintptr_t)m->views.cpu_views[i];
+            if(address>=base && address-base<m->views.view_size &&
+               bytes<=m->views.view_size-(address-base)) {
+                *offset=address-base;
+                if(view)*view=i;
+                return m;
+            }
+        }
+    }
+    return NULL;
 }
 static void hw_texture_invalidate(HwTexture *texture)
 {
@@ -393,9 +497,15 @@ static void hw_initialize(void);
 static void hw_defer_output(uint8_t *output,uint32_t value)
 {
     hw_initialize();hw_enter();uint64_t start=gpu_timing_clock();
-    XboxSharedMemoryViews views;
-    if(!xbox_GetSharedMemoryViews(output,4,&views)) hw_check(E_INVALIDARG,"semaphore shared output identity");
-    HwQuery query={0};query.memory=hw_memory(&views);query.offset=views.offset;query.value=value;
+    HwQuery query={0};
+    query.memory=hw_find_cpu_view((uintptr_t)output,4,&query.offset,NULL);
+    if(!query.memory) {
+        XboxSharedMemoryViews views;
+        if(!xbox_GetSharedMemoryViews(output,4,&views)) hw_check(E_INVALIDARG,"semaphore shared output identity");
+        query.memory=hw_memory(&views);
+        query.offset=views.offset;
+    }
+    query.value=value;
     if(d3d8_IsNativeVulkan()) query.native_serial=nvk_fence();
     else {
     /* Transfer the existing idle EVENT; pending entries keep sole ownership. */
@@ -481,10 +591,16 @@ static void hw_release_cpu_write_range(HwMemory *memory,size_t offset,size_t byt
             }
         }
         for(unsigned i=0;i<memory->views.view_count;i++) if(permissions[i]) {
+            size_t end=page+4096;
+            unsigned views=memory->views.view_count;
+            if(owners==HW_WRITE_OWNER_FREE)
+                while(end<hi && memory->write_guard_protections[(end/4096)*views+i]==permissions[i])
+                    end+=4096;
             DWORD previous;
-            if(!VirtualProtect((uint8_t *)memory->views.cpu_views[i]+page,4096,protection?protection:permissions[i],&previous))
+            if(!VirtualProtect((uint8_t *)memory->views.cpu_views[i]+page,end-page,protection?protection:permissions[i],&previous))
                 hw_check(HRESULT_FROM_WIN32(GetLastError()),"texture protection release");
-            if(!output)permissions[i]=0;
+            if(!output) for(size_t restored=page;restored<end;restored+=4096)
+                memory->write_guard_protections[(restored/4096)*views+i]=0;
         }
     }
 }
@@ -537,7 +653,6 @@ static HwVertexBatch *hw_vertex_batch_begin(uint32_t inputs,unsigned attribute_c
            !memcmp(entry->attr,attributes,sizeof attributes) && !memcmp(entry->current,current,sizeof current) && !memcmp(entry->data,s_gpu.idx,n*4)) {
             entry->used=++s_hw_vertex_cache_clock;
             if(entry->valid) {
-                memcpy(s_hw_program_vertex_rows,entry->data+n*4,n*4);
                 s_hw_program_vertex_count=entry->vertices;
                 s_gpu.vertices_reused+=n-entry->vertices;
                 ++s_hw_vertex_cache_hits;*hit=1;return entry;
@@ -655,10 +770,15 @@ enum HwCpuWriteSurface {
 };
 static unsigned hw_preserve_cpu_write(HwMemory *memory,size_t offset,size_t bytes,int overwrite,
                                       int check_clean);
-static void hw_collect_queries_locked(int wait);
+enum HwCompletionMode {
+    HW_COMPLETION_POLL,
+    HW_COMPLETION_WAIT,
+    HW_COMPLETION_RETIRE_READY
+};
+static void hw_collect_queries_locked(enum HwCompletionMode mode);
 static void hw_upload_native_color(HwColor *color)
 {
-    if(hw_pending_output(color->memory,color->memory_offset,hw_color_bytes(color))) hw_collect_queries_locked(1);
+    if(hw_pending_output(color->memory,color->memory_offset,hw_color_bytes(color))) hw_collect_queries_locked(HW_COMPLETION_WAIT);
     hw_preserve_cpu_write(color->memory,color->memory_offset,hw_color_bytes(color),0,0);
     hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_READONLY,HW_PROTECT_NORMAL);
     const uint8_t *memory=color->memory->host_view+color->memory_offset;
@@ -685,7 +805,7 @@ static void hw_upload_native_color(HwColor *color)
     } else if(color->native_surface)hw_vk_check(nvk_image_upload(color->native_surface,memory,color->pitch),"colour upload");
     else ID3D11DeviceContext_UpdateSubresource(d3d8_GetD3D11Context(),
         (ID3D11Resource *)((D3D8Surface *)color->surface)->d3d11_texture,0,NULL,memory,color->pitch,0);
-    color->upload_needed=0;++s_gpu.hardware_color_uploads;
+    color->upload_needed=0;color->uniform_clear=0;++s_gpu.hardware_color_uploads;
 }
 static void hw_clear_color_image(HwColor *color)
 {
@@ -707,7 +827,7 @@ static void hw_upload_color(HwColor *color,uint32_t cleared_channels)
     if((cleared_channels&NV097_CLEAR_COLOR_MASK)==NV097_CLEAR_COLOR_MASK &&
        !bounds.x0 && !bounds.y0 && bounds.x1==color->width && bounds.y1==color->height) {
         /* The original CPU clear has already written every target byte. */
-        if(hw_pending_output(color->memory,color->memory_offset,hw_color_bytes(color))) hw_collect_queries_locked(1);
+        if(hw_pending_output(color->memory,color->memory_offset,hw_color_bytes(color))) hw_collect_queries_locked(HW_COMPLETION_WAIT);
         hw_protect(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_READONLY,HW_PROTECT_NORMAL);
         hw_clear_color_image(color);
         color->upload_needed=0;
@@ -723,84 +843,136 @@ static void hw_resolve_color(HwColor *color)
     if(color->native_host)hw_vk_check(nvk_image_copy(color->native_host,color->native_surface,NULL,1),"guest colour resolve");
     if(color->host_surface)hw_check(d3d8_surface_resample(color->host_surface,color->surface),"guest colour resolve");
 }
-static void hw_copy_color_to_memory(HwColor *color)
+static void hw_write_color_pixels(HwColor *color,const void *pixels,size_t pitch)
 {
-    if(!color->dirty) return;
-    uint64_t timing_start=gpu_timing_clock();
-    hw_resolve_color(color);
     const RECT *bounds=&color->dirty_bounds;
     uint8_t *mem=color->memory->host_view+color->memory_offset;
-    size_t row_bytes=(size_t)(bounds->right-bounds->left)*color->bpp;
-    int swizzled=color_swizzled(color->format);
-    if(color->native_surface && !swizzled && color->bpp==4 &&
-       !bounds->left && !bounds->top && bounds->right==(LONG)color->width &&
-       bounds->bottom==(LONG)color->height && color->pitch>=row_bytes) {
-        /* The existing readback copies only the pixel bytes of each row. */
-        hw_vk_check(nvk_image_read(color->native_surface,mem,color->pitch),"colour readback");
+    const size_t row_bytes=(size_t)(bounds->right-bounds->left)*color->bpp;
+    const size_t rows=(size_t)(bounds->bottom-bounds->top);
+    if(color_swizzled(color->format)) {
+        /* Seed the existing masked walk once at this dirty rectangle's origin. */
+        uint32_t mask_x,mask_y;
+        xbox_swizzle_masks(color_width(color->format,color->pitch,color->bpp),color_height(color->format,0),&mask_x,&mask_y);
+        uint32_t first_x=swizzle_deposit((uint32_t)bounds->left,mask_x);
+        uint32_t off_y=swizzle_deposit((uint32_t)bounds->top,mask_y);
+        uint32_t pair_mask=mask_x&~1u;
+        for(LONG y=bounds->top;y<bounds->bottom;y++) {
+            const uint8_t *row=(const uint8_t *)pixels+(size_t)(y-bounds->top)*pitch;
+            uint32_t off_x=first_x;
+            LONG x=bounds->left;
+            if((x&1) && x<bounds->right) {
+                *(uint32_t *)(mem+(size_t)(off_x|off_y)*color->bpp)=
+                    ((const uint32_t *)row)[x-bounds->left];
+                off_x=(off_x-mask_x)&mask_x;
+                ++x;
+            }
+            /* The original Morton mask assigns bit zero to X whenever a
+             * row has a pair. Copy both raw pixels before advancing X by two. */
+            for(;x+1<bounds->right;x+=2) {
+                memcpy(mem+(size_t)(off_x|off_y)*color->bpp,
+                       row+(size_t)(x-bounds->left)*color->bpp,8);
+                off_x=(off_x-pair_mask)&pair_mask;
+            }
+            if(x<bounds->right)
+                *(uint32_t *)(mem+(size_t)(off_x|off_y)*color->bpp)=
+                    ((const uint32_t *)row)[x-bounds->left];
+            off_y=(off_y-mask_y)&mask_y;
+        }
+    } else {
+        uint8_t *dst=mem+(size_t)bounds->top*color->pitch+(size_t)bounds->left*color->bpp;
+        if(pitch==row_bytes && color->pitch==row_bytes) memcpy(dst,pixels,row_bytes*rows);
+        else for(size_t y=0;y<rows;++y)
+            memcpy(dst+y*color->pitch,(const uint8_t *)pixels+y*pitch,row_bytes);
+    }
+}
+static void hw_finish_color_readback(HwColor *color)
+{
+    const RECT *bounds=&color->dirty_bounds;
+    s_gpu.hardware_color_readback_bytes+=(size_t)(bounds->right-bounds->left)*color->bpp*(size_t)(bounds->bottom-bounds->top);
+    hw_invalidate_texture_range(color->memory,color->memory_offset,hw_color_bytes(color));
+    color->dirty=0;++s_gpu.hardware_color_readbacks;
+}
+static void hw_publish_vk_color(void *destination,const void *pixels,size_t pitch)
+{
+    HwColor *color=destination;
+    hw_write_color_pixels(color,pixels,pitch);
+    hw_finish_color_readback(color);
+}
+static NvkImageRead hw_prepare_vk_color(HwColor *color)
+{
+    hw_resolve_color(color);
+    const RECT *r=&color->dirty_bounds;
+    const NvkImageRead read={color->native_surface,{r->left,r->top,r->right,r->bottom},color,0,hw_publish_vk_color};
+    return read;
+}
+static void hw_copy_color_to_memory(HwColor *color)
+{
+    if(!color->dirty)return;
+    const uint64_t started=gpu_timing_clock();
+    if(color->native_surface) {
+        const NvkImageRead read=hw_prepare_vk_color(color);
+        hw_vk_check(nvk_images_read(&read,1),"colour readback");
     } else {
         D3DLOCKED_RECT locked;
-        uint8_t *native_pixels=NULL;
-        if(color->native_surface) {
-            native_pixels=malloc((size_t)color->width*color->height*4);
-            if(!native_pixels)hw_check(E_OUTOFMEMORY,"colour readback storage");
-            hw_vk_check(nvk_image_read(color->native_surface,native_pixels,color->width*4),"colour readback");
-            locked.Pitch=color->width*4;locked.pBits=native_pixels+(size_t)bounds->top*locked.Pitch+bounds->left*4;
-        } else hw_check(color->surface->lpVtbl->LockRect(color->surface,&locked,bounds,D3DLOCK_READONLY),"surface readback");
-        /* Seed the existing masked walk once at this dirty rectangle's origin. */
-        uint32_t mask_x=0,mask_y=0,first_x=0,off_y=0;
-        if(swizzled) {
-            xbox_swizzle_masks(color_width(color->format,color->pitch,color->bpp),color_height(color->format,0),&mask_x,&mask_y);
-            first_x=swizzle_deposit((uint32_t)bounds->left,mask_x);
-            off_y=swizzle_deposit((uint32_t)bounds->top,mask_y);
-        }
-        for(LONG y=bounds->top;y<bounds->bottom;y++) {
-            const uint8_t *row=(uint8_t *)locked.pBits+(size_t)(y-bounds->top)*locked.Pitch;
-            if(swizzled) {
-                uint32_t off_x=first_x;
-                LONG x=bounds->left;
-                if((x&1) && x<bounds->right) {
-                    *(uint32_t *)(mem+(size_t)(off_x|off_y)*color->bpp)=
-                        ((const uint32_t *)row)[x-bounds->left];
-                    off_x=(off_x-mask_x)&mask_x;
-                    ++x;
-                }
-                /* The original Morton mask assigns bit zero to X whenever a
-                 * row has a pair. Copy both raw pixels before advancing X by two. */
-                uint32_t pair_mask=mask_x&~1u;
-                for(;x+1<bounds->right;x+=2) {
-                    memcpy(mem+(size_t)(off_x|off_y)*color->bpp,
-                           row+(size_t)(x-bounds->left)*color->bpp,8);
-                    off_x=(off_x-pair_mask)&pair_mask;
-                }
-                if(x<bounds->right)
-                    *(uint32_t *)(mem+(size_t)(off_x|off_y)*color->bpp)=
-                        ((const uint32_t *)row)[x-bounds->left];
-                off_y=(off_y-mask_y)&mask_y;
-            } else {
-                size_t at=(size_t)y*color->pitch+(size_t)bounds->left*color->bpp;
-                memcpy(mem+at,row,row_bytes);
-            }
-        }
-        if(native_pixels)free(native_pixels);
-        else hw_check(color->surface->lpVtbl->UnlockRect(color->surface),"surface unlock");
+        hw_resolve_color(color);
+        hw_check(color->surface->lpVtbl->LockRect(color->surface,&locked,&color->dirty_bounds,D3DLOCK_READONLY),"surface readback");
+        hw_write_color_pixels(color,locked.pBits,locked.Pitch);
+        hw_check(color->surface->lpVtbl->UnlockRect(color->surface),"surface unlock");
+        hw_finish_color_readback(color);
     }
-    s_gpu.hardware_color_readback_bytes+=row_bytes*(size_t)(bounds->bottom-bounds->top);
-    hw_invalidate_texture_range(color->memory,color->memory_offset,hw_color_bytes(color));
-    color->dirty=0;++s_gpu.hardware_color_readbacks;gpu_timing_finish(timing_start,&s_gpu.hardware_publish_ticks);
+    gpu_timing_finish(started,&s_gpu.hardware_publish_ticks);
+}
+/* Full-span protection changes affect every owner of the rounded pages. */
+static int hw_isolated_dirty_color(const HwColor *color)
+{
+    if(!color->dirty || hw_pending_output(NULL,0,0)) return 0;
+    size_t lo=color->memory_offset&~(size_t)4095;
+    size_t hi=(color->memory_offset+hw_color_bytes(color)+4095)&~(size_t)4095;
+    for(HwColor *other=s_hw_colors;other;other=other->next)
+        if(other!=color && other->memory==color->memory && other->dirty &&
+           hw_ranges_overlap(lo,hi-lo,other->memory_offset,hw_color_bytes(other))) return 0;
+    for(HwDepth *depth=s_hw_depths;depth;depth=depth->next)
+        if(depth->memory==color->memory && depth->dirty &&
+           hw_ranges_overlap(lo,hi-lo,depth->memory_offset,hw_depth_bytes(depth))) return 0;
+    return 1;
+}
+static void hw_publish_isolated_color(HwColor *color)
+{
+    hw_copy_color_to_memory(color);
+    hw_protect_views(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_READONLY,HW_PROTECT_NORMAL);
+}
+static void hw_flush_color_readbacks(const NvkImageRead *reads,unsigned *count,uint64_t started)
+{
+    if(!*count)return;
+    hw_vk_check(nvk_images_read(reads,*count),"colour readback");
+    *count=0;
+    gpu_timing_finish(started,&s_gpu.hardware_publish_ticks);
 }
 /* The draw and clear paths already hold PFIFO and the graphics lock. */
 static void hw_publish_all_locked(void)
 {
     int output_pending=hw_pending_output(NULL,0,0);
-    if(output_pending) hw_collect_queries_locked(1);
+    if(output_pending) hw_collect_queries_locked(HW_COMPLETION_WAIT);
     /* Readbacks below do not append memory outputs under this lock. */
     enum HwProtectMode protection_mode=output_pending && s_hw_query_count?
                                        HW_PROTECT_NORMAL:HW_PROTECT_OUTPUT_CLEAR;
     int protection_needed=output_pending;
+    NvkImageRead reads[NVK_COLOR_READ_COUNT];
+    unsigned count=0;
+    uint64_t started=0;
     for(HwColor *color=s_hw_colors;color;color=color->next) {
         if(color->dirty || color->upload_needed) protection_needed=1;
-        hw_copy_color_to_memory(color);
+        if(!color->dirty)continue;
+        if(color->native_surface) {
+            if(!count)started=gpu_timing_clock();
+            reads[count++]=hw_prepare_vk_color(color);
+            if(count==NVK_COLOR_READ_COUNT)hw_flush_color_readbacks(reads,&count,started);
+        } else {
+            hw_flush_color_readbacks(reads,&count,started);
+            hw_copy_color_to_memory(color);
+        }
     }
+    hw_flush_color_readbacks(reads,&count,started);
     for(HwDepth *depth=s_hw_depths;depth;depth=depth->next) if(depth->memory && depth->dirty) {
         hw_copy_depth_to_memory(depth);
         hw_protect(depth->memory,depth->memory_offset,hw_depth_bytes(depth),depth->upload_needed?PAGE_READWRITE:PAGE_READONLY,protection_mode);
@@ -846,7 +1018,7 @@ static void hw_cpu_write_begin(uint32_t address,size_t bytes,int overwrite)
 {
     if(!s_hw_initialized) return;
     hw_enter();
-    if(hw_pending_output(NULL,0,0))hw_collect_queries_locked(1);
+    if(hw_pending_output(NULL,0,0))hw_collect_queries_locked(HW_COMPLETION_WAIT);
     uintptr_t p=(uintptr_t)xbox_GetMemoryOffset()+address;
     for(HwMemory *m=s_hw_memories;m;m=m->next) for(unsigned i=0;i<m->views.view_count;i++) {
         uintptr_t b=(uintptr_t)m->views.cpu_views[i];
@@ -868,7 +1040,7 @@ int nv2a_pb_host_write_begin(void *address,size_t bytes)
         if(p>=b && p-b<m->views.view_size && bytes<=m->views.view_size-(p-b)) {
             size_t lo=(p-b)&~(size_t)4095,hi=(p-b+bytes+4095)&~(size_t)4095;
             int pending=hw_pending_output(m,lo,hi-lo);
-            if(pending)hw_collect_queries_locked(1);
+            if(pending)hw_collect_queries_locked(HW_COMPLETION_WAIT);
             /* Host reads may be short or fail: preserve every dirty owner on
              * pages made writable, without publishing unrelated surfaces.
              * Preservation adds no outputs while this lock is held. */
@@ -905,52 +1077,40 @@ int nv2a_pb_handle_memory_fault(uintptr_t address,int is_write)
 {
     hw_enter();
     if(!s_hw_initialized || !hw_enabled()) {hw_leave();return 0;}
-    HwColor *owner=NULL;HwMemory *memory=NULL;size_t offset=0;int texture_fault=0;
-    for(HwColor *c=s_hw_colors;c && !owner;c=c->next) {
+    size_t offset;
+    unsigned view;
+    HwMemory *memory=hw_find_cpu_view(address,1,&offset,&view);
+    if(!memory) {hw_leave();return 0;}
+
+    /* A colour owner still takes precedence over depth, output and the
+     * texture guard. Test against the same rounded pages in each list. */
+    HwColor *owner=NULL;
+    for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==memory) {
         size_t lo=c->memory_offset&~(size_t)4095,hi=(c->memory_offset+hw_color_bytes(c)+4095)&~(size_t)4095;
-        for(unsigned i=0;i<c->memory->views.view_count;i++) {
-            uintptr_t b=(uintptr_t)c->memory->views.cpu_views[i];
-            if(address>=b+lo && address<b+hi) { owner=c;offset=address-b;break; }
-        }
+        if(offset>=lo && offset<hi) {owner=c;break;}
     }
     int depth_owner=0;
-    if(owner) memory=owner->memory;
-    for(HwDepth *d=s_hw_depths;d && !memory;d=d->next) {
+    if(!owner) for(HwDepth *d=s_hw_depths;d;d=d->next) if(d->memory==memory) {
         size_t lo=d->memory_offset&~(size_t)4095,hi=(d->memory_offset+hw_depth_bytes(d)+4095)&~(size_t)4095;
-        for(unsigned i=0;i<d->memory->views.view_count;i++) {
-            uintptr_t b=(uintptr_t)d->memory->views.cpu_views[i];
-            if(address>=b+lo && address<b+hi){memory=d->memory;offset=address-b;depth_owner=1;break;}
-        }
+        if(offset>=lo && offset<hi) {depth_owner=1;break;}
     }
+    int output_owner=0;
     size_t query_count=(size_t)s_hw_query_count;
-    for(size_t n=0;n<query_count && !memory;n++) {
-        HwQuery *q=&s_hw_queries[n];if(!q->memory) continue;
+    if(!owner && !depth_owner) for(size_t n=0;n<query_count;n++) {
+        HwQuery *q=&s_hw_queries[n];if(q->memory!=memory) continue;
         size_t lo=q->offset&~(size_t)4095,hi=(q->offset+4+4095)&~(size_t)4095;
-        for(unsigned i=0;i<q->memory->views.view_count;i++) {
-            uintptr_t b=(uintptr_t)q->memory->views.cpu_views[i];
-            if(address>=b+lo && address<b+hi) {memory=q->memory;offset=address-b;break;}
-        }
+        if(offset>=lo && offset<hi) {output_owner=1;break;}
     }
-    if(is_write) for(HwMemory *m=s_hw_memories;m && !memory;m=m->next)
-        for(unsigned i=0;i<m->views.view_count;i++) {
-            uintptr_t b=(uintptr_t)m->views.cpu_views[i];
-            if(address>=b && address-b<m->views.view_size &&
-               m->write_guard_protections[((address-b)/4096)*m->views.view_count+i]) {
-                memory=m;offset=address-b;texture_fault=1;break;
-            }
-        }
-    if(!memory) {
+    int texture_fault=!owner && !depth_owner && !output_owner && is_write &&
+        memory->write_guard_protections[(offset/4096)*memory->views.view_count+view];
+    if(!owner && !depth_owner && !output_owner && !texture_fault) {
         /* Another CPU access may have collected the output while this fault
          * was waiting for the original memory lock. Recheck the owned view. */
-        for(HwMemory *m=s_hw_memories;m;m=m->next) for(unsigned i=0;i<m->views.view_count;i++) {
-            uintptr_t b=(uintptr_t)m->views.cpu_views[i];
-            if(address>=b && address-b<m->views.view_size) {
-                MEMORY_BASIC_INFORMATION page;
-                if(VirtualQuery((void *)address,&page,sizeof page) &&
-                   (page.Protect==PAGE_READWRITE || (!is_write && page.Protect==PAGE_READONLY))) {hw_leave();return 1;}
-            }
-        }
-        hw_leave();return 0;
+        MEMORY_BASIC_INFORMATION page;
+        int accessible=VirtualQuery((void *)address,&page,sizeof page) &&
+            (page.Protect==PAGE_READWRITE || (!is_write && page.Protect==PAGE_READONLY));
+        hw_leave();
+        return accessible;
     }
     uint64_t started=gpu_timing_clock();
     size_t write_offset=0,write_bytes=0;
@@ -962,12 +1122,16 @@ int nv2a_pb_handle_memory_fault(uintptr_t address,int is_write)
     }
     if(owner || depth_owner) {
         if(is_write) {
-            if(hw_pending_output(NULL,0,0))hw_collect_queries_locked(1);
+            if(hw_pending_output(NULL,0,0))hw_collect_queries_locked(HW_COMPLETION_WAIT);
             /* A fault supplies no overwrite extent. Preserve every owner of
              * the original marked pages before making those pages writable. */
             hw_preserve_cpu_write(memory,write_offset,write_bytes,0,0);
-        } else hw_publish_all();
-    } else if(!texture_fault) hw_collect_queries_locked(1);
+        } else if(owner && !owner->upload_needed && hw_isolated_dirty_color(owner)) {
+            /* The fault can retry as soon as its owner is visible. Disjoint
+             * GPU owners stay guarded until their own read or publication. */
+            hw_publish_isolated_color(owner);
+        } else hw_publish_all_locked();
+    } else if(!texture_fault) hw_collect_queries_locked(HW_COMPLETION_WAIT);
     if(is_write) {
         if(texture_fault) hw_release_cpu_write_range(memory,offset&~(size_t)4095,4096,HW_WRITE_OWNER_FREE);
         else hw_mark_cpu_write(memory,write_offset,write_bytes,NULL,0,HW_PROTECT_NORMAL);
@@ -1002,7 +1166,7 @@ void nv2a_pb_release_memory_views(void)
     for(unsigned i=0;i<4;i++) if(s_hw_clear_ds[i]) { ID3D11DepthStencilState_Release(s_hw_clear_ds[i]);s_hw_clear_ds[i]=NULL; }
     hw_leave();
 }
-static HwColor *hw_color_target(void)
+static HwColor *hw_color_target_with_clear(const ClearBounds *overwrite)
 {
     hw_initialize();
     uint32_t bpp=surface_bpp(),width=color_width(s_gpu.format,s_gpu.pitch,bpp),height=color_height(s_gpu.format,s_gpu.clip_y+s_gpu.clip_h);
@@ -1028,34 +1192,32 @@ static HwColor *hw_color_target(void)
             color->next=s_hw_colors;s_hw_colors=color;
         }
     }
-    if(hw_pending_output(color->memory,color->memory_offset,(size_t)height*pitch)) hw_collect_queries_locked(1);
-    int isolated_layout_publication=0;
-    if((color->format^s_gpu.format)&0xFFFF0F00u) {
+    if(hw_pending_output(color->memory,color->memory_offset,(size_t)height*pitch)) hw_collect_queries_locked(HW_COMPLETION_WAIT);
+    int isolated_layout=0;
+    const uint32_t format_change=color->format^s_gpu.format;
+    if(format_change&0xFFFF0F00u) {
+        int retain_uniform=0;
         if(color->dirty || color->height!=height || color->width!=width ||
            hw_pending_output(NULL,0,0)) {
-            int isolated=color->dirty && color->height==height && color->width==width &&
-                !hw_pending_output(NULL,0,0);
-            size_t lo=color->memory_offset&~(size_t)4095;
-            size_t hi=(color->memory_offset+hw_color_bytes(color)+4095)&~(size_t)4095;
-            for(HwColor *other=s_hw_colors;other && isolated;other=other->next)
-                if(other!=color && other->memory==color->memory && other->dirty &&
-                   hw_ranges_overlap(lo,hi-lo,other->memory_offset,hw_color_bytes(other)))isolated=0;
-            for(HwDepth *depth=s_hw_depths;depth && isolated;depth=depth->next)
-                if(depth->memory==color->memory && depth->dirty &&
-                   hw_ranges_overlap(lo,hi-lo,depth->memory_offset,hw_depth_bytes(depth)))isolated=0;
-            if(isolated) {
-                /* Preserve the old layout without publishing disjoint owners. */
-                hw_copy_color_to_memory(color);
-                /* No output can require refreshing page guards under this lock. */
-                hw_protect_views(color->memory,color->memory_offset,hw_color_bytes(color),PAGE_READONLY,HW_PROTECT_NORMAL);
-                isolated_layout_publication=1;
+            if(color->height==height && color->width==width && hw_isolated_dirty_color(color)) {
+                const int packed=pitch==(uint64_t)width*bpp;
+                const int replaces_dirty=packed && overwrite && !overwrite->x0 && !overwrite->y0 &&
+                    overwrite->x1==width && overwrite->y1==height;
+                /* A layout permutation leaves the full clear's bytes intact. */
+                retain_uniform=packed && color->uniform_clear && !color->upload_needed &&
+                    !(format_change&~NV097_SET_SURFACE_FORMAT_TYPE) &&
+                    color_swizzled(color->format)!=color_swizzled(s_gpu.format);
+                if(!replaces_dirty && !retain_uniform) hw_publish_isolated_color(color);
+                /* Keep deferred pixels and their guards until the clear or the
+                 * next reader. The extent has no other dirty surface or output. */
+                isolated_layout=1;
             } else hw_publish_all_locked();
         }
-        color->upload_needed=1;
+        if(!retain_uniform)color->upload_needed=1;
     }
     color->format=s_gpu.format;
     /* The isolated path already excluded dirty owners across the unchanged extent. */
-    if(!isolated_layout_publication)
+    if(!isolated_layout)
         for(HwColor *other=s_hw_colors;other;other=other->next) if(other!=color && other->memory==color->memory && other->dirty && hw_ranges_overlap(other->memory_offset,hw_color_bytes(other),color->memory_offset,(size_t)height*pitch)) { hw_publish_all_locked();break; }
     if(color->height<height || color->width!=width) {
         hw_publish_all_locked();if(color->host_surface){color->host_surface->lpVtbl->Release(color->host_surface);color->host_surface=NULL;}
@@ -1080,6 +1242,10 @@ static HwColor *hw_color_target(void)
         color->upload_needed=1;
     }
     return color;
+}
+static HwColor *hw_color_target(void)
+{
+    return hw_color_target_with_clear(NULL);
 }
 static HwColor *hw_color(uint32_t cleared_channels)
 {
@@ -1162,7 +1328,7 @@ static void hw_finish_native_frame(uint32_t address,uint32_t pitch)
      * RAM publication remains demand driven by the existing memory guards. */
     hw_complete_commands_locked();
     /* The completed Vulkan fence already covers the queued output serials. */
-    hw_collect_queries_locked(!native_vulkan);hw_leave();
+    hw_collect_queries_locked(native_vulkan?HW_COMPLETION_POLL:HW_COMPLETION_WAIT);hw_leave();
 }
 static int hw_display_native(void *window,unsigned width,unsigned height,const int32_t bounds[4])
 {
@@ -1432,6 +1598,7 @@ static void hw_apply_depths(HwDepth *depths,HwColor *colors) {
     hw_free_vertex_batches();
     hw_free_textures();
     s_hw_count=0;s_hw_program_active=0;s_hw_fixed_active=0;s_hw_output_active=0;
+    s_hw_fill_column_x16=0;
 }
 static void hw_clear_depth_rect(HwDepth *depth,ClearBounds bounds,UINT flags,float z,UINT8 stencil)
 {
@@ -1549,6 +1716,7 @@ static void hw_clear_depth(uint32_t param)
 }
 static void hw_begin_color_write(HwColor *color)
 {
+    color->uniform_clear=0;
     for(HwDepth *d=s_hw_depths;d;d=d->next)if(d->memory==color->memory && hw_ranges_overlap(d->memory_offset,hw_depth_bytes(d),color->memory_offset,hw_color_bytes(color))) {
         if(d->dirty)hw_copy_depth_to_memory(d);d->upload_needed=1;
     }
@@ -1572,21 +1740,56 @@ static int hw_clear_full_color(void)
 {
     hw_enter();
     /* Keep the original full clear's completion boundary before changing ownership. */
-    if(hw_pending_output(NULL,0,0))hw_collect_queries_locked(1);
-    HwColor *color=hw_color_target();
+    if(hw_pending_output(NULL,0,0))hw_collect_queries_locked(HW_COMPLETION_WAIT);
     ClearBounds bounds=clear_bounds();
+    HwColor *color=hw_color_target_with_clear(&bounds);
     /* A retained taller target still needs its untouched rows. */
     if(bounds.x1!=color->width || bounds.y1!=color->height) {hw_leave();return 0;}
     hw_begin_color_write(color);
     hw_clear_color_image(color);
     color->upload_needed=0;
     hw_end_color_write(color,(RECT){0,0,(LONG)color->width,(LONG)color->height});
+    color->uniform_clear=1;
     hw_leave();return 1;
 }
 static void hw_colour_cleared(uint32_t param)
 {
     if(!s_hw_initialized) return;
     hw_enter();(void)hw_color(param);hw_leave();
+}
+static
+#if defined(_MSC_VER)
+__forceinline
+#else
+inline
+#endif
+void hw_decode_dxt_image(uint32_t format,unsigned width,unsigned height,
+                         const uint8_t *blocks,uint8_t *pixels,size_t pitch)
+{
+    unsigned block_bytes=d3d8_format_dxt_block_bytes(format);
+    unsigned blocks_per_row=(width+3)/4;
+    for(unsigned by=0;by<height;by+=4) for(unsigned bx=0;bx<width;bx+=4) {
+        unsigned columns=width-bx;if(columns>4)columns=4;
+        unsigned rows=height-by;if(rows>4)rows=4;
+        const uint8_t *block=blocks+((size_t)(by/4)*blocks_per_row+bx/4)*block_bytes;
+        uint8_t *destination=pixels+(size_t)by*pitch+bx*4;
+        d3d8_dxt_decode_block_rect(block,format,destination,pitch,columns,rows);
+    }
+}
+static void hw_decode_dxt(const Texture *source,const uint8_t *blocks,uint8_t *pixels,size_t pitch)
+{
+    hw_decode_dxt_image(source->color,source->width,source->height,blocks,pixels,pitch);
+}
+static void hw_write_dxt_upload(void *destination,size_t pitch,const void *opaque)
+{
+    const HwTexture *entry=(const HwTexture *)opaque;
+    if (entry->identity.color==D3DFMT_DXT1) {
+        hw_decode_dxt_image(D3DFMT_DXT1,entry->identity.width,entry->identity.height,
+                            entry->raw,(uint8_t *)destination,pitch);
+    } else {
+        hw_decode_dxt_image(D3DFMT_DXT5,entry->identity.width,entry->identity.height,
+                            entry->raw,(uint8_t *)destination,pitch);
+    }
 }
 static void hw_texture_bind(unsigned stage,HwColor *current_target)
 {
@@ -1701,7 +1904,7 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
         ? hw_pending_output_ranges(entry->memory,entry->memory_offset,bytes,
                                    entry->palette_memory,entry->palette_offset,sizeof entry->palette)
         : hw_pending_output(entry->memory,entry->memory_offset,bytes);
-    if(pending) hw_collect_queries_locked(1);
+    if(pending) hw_collect_queries_locked(HW_COMPLETION_WAIT);
     int changed=created;
     if(!entry->content_valid) {
         hw_guard_cpu_write_range(entry->memory,entry->memory_offset,bytes);
@@ -1729,12 +1932,21 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
         size_t native_row=(size_t)width*4;
         int direct_upload=entry->native && !volume && !source->cube &&
             (asset || (!float_texture && source->color==D3DFMT_LIN_A8R8G8B8 && source->pitch>=native_row));
+        const int write_dxt=entry->native && !asset && !volume && !source->cube &&
+            !float_texture && (source->color==D3DFMT_DXT1 ||
+            (source->color==D3DFMT_DXT5 && width>=128 && height>=128));
         uint8_t *native_pixels=NULL;
-        if(entry->native && !direct_upload) {
+        if(entry->native && !direct_upload && !write_dxt) {
             native_pixels=malloc((size_t)width*height*4*(volume?depth:source->cube?6:1));
             if(!native_pixels)hw_check(E_OUTOFMEMORY,"native texture pixels");
         }
-        if(direct_upload) {
+        if(write_dxt) {
+            /* Capture the guarded guest bytes before Vulkan reserves a range.
+             * The writer only reads this cache copy and cannot fault back
+             * into graphics publication while filling the upload range. */
+            memcpy(entry->raw,raw,bytes);
+            hw_vk_check(nvk_image_upload_written(entry->native,hw_write_dxt_upload,entry),"DXT texture upload");
+        } else if(direct_upload) {
             hw_vk_check(nvk_image_upload(entry->native,asset?asset:raw,asset?native_row:source->pitch),"texture upload");
         } else if(volume) {
             D3DLOCKED_BOX locked;IDirect3DVolumeTexture8 *texture=(IDirect3DVolumeTexture8 *)entry->texture;
@@ -1769,16 +1981,7 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
                         raw+(size_t)face*stride+(size_t)y*source->pitch,
                         (uint8_t *)locked.pBits+(size_t)y*locked.Pitch,0);
             } else if(!float_texture && d3d8_format_dxt_block_bytes(source->color)) {
-                unsigned block_bytes=d3d8_format_dxt_block_bytes(source->color);
-                unsigned blocks_per_row=(source->width+3)/4;
-                const uint8_t *face_raw=raw+(size_t)face*stride;
-                for(unsigned by=0;by<source->height;by+=4) for(unsigned bx=0;bx<source->width;bx+=4) {
-                    unsigned columns=source->width-bx;if(columns>4)columns=4;
-                    unsigned rows=source->height-by;if(rows>4)rows=4;
-                    const uint8_t *block=face_raw+((size_t)(by/4)*blocks_per_row+bx/4)*block_bytes;
-                    uint8_t *pixels=(uint8_t *)locked.pBits+(size_t)by*locked.Pitch+bx*4;
-                    d3d8_dxt_decode_block_rect(block,source->color,pixels,locked.Pitch,columns,rows);
-                }
+                hw_decode_dxt(source,raw+(size_t)face*stride,(uint8_t *)locked.pBits,locked.Pitch);
             } else for(uint32_t y=0;y<source->height;y++) for(uint32_t x=0;x<source->width;x++) {
                 uint32_t pixel;
                 if(float_texture) {
@@ -1794,7 +1997,7 @@ static void hw_texture_bind(unsigned stage,HwColor *current_target)
             else { IDirect3DTexture8 *texture=(IDirect3DTexture8 *)entry->texture; hw_check(texture->lpVtbl->UnlockRect(texture,0),"texture upload"); }
         }
         if(native_pixels){hw_vk_check(nvk_image_upload(entry->native,native_pixels,width*4),"texture upload");free(native_pixels);}
-        memcpy(entry->raw,raw,bytes);
+        if(!write_dxt)memcpy(entry->raw,raw,bytes);
         if(palette) memcpy(entry->palette,palette,1024);
     }
     if(!entry->content_valid) {
@@ -1818,19 +2021,28 @@ static DWORD hw_blend_enum(uint32_t value)
     default:hw_check(E_NOTIMPL,"blend factor");return 0;
     }
 }
-static void hw_collect_queries_locked(int wait)
+static void hw_collect_queries_locked(enum HwCompletionMode mode)
 {
+    const int wait=mode==HW_COMPLETION_WAIT;
     size_t consumed=0,count=(size_t)s_hw_query_count;
+    if(!count)return;
+    const int native_vulkan=d3d8_IsNativeVulkan();
+    uint64_t completed_output_serial=0;
+    HwMemory *empty_page_memory=NULL;
+    size_t empty_page_lo=0,empty_page_hi=0;
     for(;consumed<count;consumed++) {
         HwQuery *q=&s_hw_queries[consumed];uint64_t pixels=0;HRESULT hr;
         uint64_t start=q->memory?gpu_timing_clock():0;
-        if(d3d8_IsNativeVulkan()) {
+        if(native_vulkan) {
             int result;
             if(q->memory) {
-                if(wait) {
-                    hw_vk_check(nvk_wait(q->native_serial),"output completion");
-                    result=1;
-                } else result=nvk_completed(q->native_serial);
+                result=1;
+                /* Later writes can belong to the same completed submission. */
+                if(q->native_serial>completed_output_serial) {
+                    if(wait) hw_vk_check(nvk_wait(q->native_serial),"output completion");
+                    else result=nvk_completed(q->native_serial,mode!=HW_COMPLETION_RETIRE_READY);
+                    if(result>0)completed_output_serial=q->native_serial;
+                }
             } else result=nvk_query_result(q->native_query,&pixels,wait);
             hw_vk_check(result>=0,"query output result");hr=result?S_OK:S_FALSE;
         } else do {
@@ -1844,35 +2056,49 @@ static void hw_collect_queries_locked(int wait)
         hw_check(hr,"query output result");
         if(q->memory) gpu_timing_finish(start,&s_gpu.hardware_gpu_completion_ticks);
         if(hr==S_FALSE) break;
-        if(d3d8_IsNativeVulkan()){if(q->native_query)nvk_query_destroy(q->native_query);}
+        if(native_vulkan){if(q->native_query)nvk_query_destroy(q->native_query);}
         else if(q->memory && !s_hw_completion) s_hw_completion=q->query;
         else ID3D11Query_Release(q->query);
         q->query=NULL;q->pending=0;
         if(q->memory) {
             ++s_gpu.hardware_gpu_completions;
             size_t lo=q->offset&~(size_t)4095,hi=(q->offset+4+4095)&~(size_t)4095;
+            /* Another completion on these pages still publishes its value.
+             * Without an aliased surface the first completion only invalidated
+             * caches, which cannot be repopulated during this locked pass. */
+            int already_invalidated=q->memory==empty_page_memory && lo==empty_page_lo && hi==empty_page_hi;
             int surface_empty=1;
-            for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==q->memory) {
-                if(surface_empty && hw_ranges_overlap(lo,hi-lo,c->memory_offset,hw_color_bytes(c)))surface_empty=0;
-                if(hw_ranges_overlap(c->memory_offset,hw_color_bytes(c),q->offset,4)) hw_copy_color_to_memory(c);
-            }
-            for(HwDepth *d=s_hw_depths;d;d=d->next)if(d->memory==q->memory) {
-                if(surface_empty && hw_ranges_overlap(lo,hi-lo,d->memory_offset,hw_depth_bytes(d)))surface_empty=0;
-                if(hw_ranges_overlap(d->memory_offset,hw_depth_bytes(d),q->offset,4))hw_copy_depth_to_memory(d);
+            if(!already_invalidated) {
+                for(HwColor *c=s_hw_colors;c;c=c->next) if(c->memory==q->memory) {
+                    if(surface_empty && hw_ranges_overlap(lo,hi-lo,c->memory_offset,hw_color_bytes(c)))surface_empty=0;
+                    if(hw_ranges_overlap(c->memory_offset,hw_color_bytes(c),q->offset,4)) hw_copy_color_to_memory(c);
+                }
+                for(HwDepth *d=s_hw_depths;d;d=d->next)if(d->memory==q->memory) {
+                    if(surface_empty && hw_ranges_overlap(lo,hi-lo,d->memory_offset,hw_depth_bytes(d)))surface_empty=0;
+                    if(hw_ranges_overlap(d->memory_offset,hw_depth_bytes(d),q->offset,4))hw_copy_depth_to_memory(d);
+                }
             }
             memcpy(q->memory->host_view+q->offset,&q->value,4);
-            hw_mark_cpu_write(q->memory,q->offset,4,q,surface_empty,HW_PROTECT_COMPLETION);
-        } else s_gpu.zpass_count+=(uint32_t)pixels;
+            if(!already_invalidated) {
+                hw_mark_cpu_write(q->memory,q->offset,4,q,surface_empty,HW_PROTECT_COMPLETION);
+                empty_page_memory=surface_empty?q->memory:NULL;
+                empty_page_lo=lo;empty_page_hi=hi;
+            }
+        } else {
+            s_gpu.zpass_count+=(uint32_t)pixels;
+            empty_page_memory=NULL;
+        }
     }
     if(consumed) {
-        memmove(s_hw_queries,s_hw_queries+consumed,(count-consumed)*sizeof *s_hw_queries);
-        InterlockedExchange64(&s_hw_query_count,(LONG64)(count-consumed));
+        const size_t remaining=count-consumed;
+        if(remaining)memmove(s_hw_queries,s_hw_queries+consumed,remaining*sizeof *s_hw_queries);
+        InterlockedExchange64(&s_hw_query_count,(LONG64)remaining);
     }
 }
 static void hw_collect_queries(int wait)
 {
     hw_enter();
-    hw_collect_queries_locked(wait);
+    hw_collect_queries_locked(wait?HW_COMPLETION_WAIT:HW_COMPLETION_POLL);
     hw_leave();
 }
 
@@ -1931,11 +2157,8 @@ static void hw_fixed_line(const Nv2aVshOutput *a,const Nv2aVshOutput *b)
     s_hw_bounds=(RECT){(LONG)s_gpu.clip_x,(LONG)s_gpu.clip_y,(LONG)(s_gpu.clip_x+s_gpu.clip_w),(LONG)(s_gpu.clip_y+s_gpu.clip_h)};
     s_hw_topology=D3D11_PRIMITIVE_TOPOLOGY_LINELIST;note_drawn();
 }
-static uint32_t hw_reverse_inputs(uint32_t word)
-{
-    return (word>>24)|((word>>8)&0xFF00)|((word<<8)&0xFF0000)|(word<<24);
-}
-static NvkShader *s_hw_vk_geometry[9],*s_hw_vk_fixed,*s_hw_vk_outputs;
+enum { HW_VK_GEOMETRY_DEPTH_GUARD=9, HW_VK_GEOMETRY_SMOOTH_TRIANGLE };
+static NvkShader *s_hw_vk_geometry[HW_VK_GEOMETRY_SMOOTH_TRIANGLE+1],*s_hw_vk_fixed[2],*s_hw_vk_outputs;
 static NvkShader *hw_vk_shader(NvkShader *shader,const char *operation)
 { hw_vk_check(shader!=NULL,operation);return shader; }
 static VkPrimitiveTopology hw_vk_topology(D3D11_PRIMITIVE_TOPOLOGY topology)
@@ -1944,6 +2167,7 @@ static VkPrimitiveTopology hw_vk_topology(D3D11_PRIMITIVE_TOPOLOGY topology)
     case D3D11_PRIMITIVE_TOPOLOGY_POINTLIST:return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
     case D3D11_PRIMITIVE_TOPOLOGY_LINELIST:return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
     case D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST:return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    case D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP:return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
     case D3D11_PRIMITIVE_TOPOLOGY_LINELIST_ADJ:return VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY;
     case D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ:return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST_WITH_ADJACENCY;
     default:hw_check(E_INVALIDARG,"native topology");return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -2004,8 +2228,22 @@ static unsigned hw_geometry_kind(unsigned mode)
 }
 static NvkShader *hw_vk_geometry_shader(unsigned kind)
 {
-    static const char *entries[]={"main","main_line","main_point","main_polygon_line","main_polygon_point","main_output","main_output_line","main_output_polygon_line","main_output_polygon_point"};
-    if(!s_hw_vk_geometry[kind])s_hw_vk_geometry[kind]=hw_vk_shader(nvk_shader_create(d3d8_vsh_geometry_source(),entries[kind],VK_SHADER_STAGE_GEOMETRY_BIT),"geometry shader");
+    static const char *entries[]={"main","main_line","main_point","main_polygon_line","main_polygon_point",
+        "main_output","main_output_line","main_output_polygon_line","main_output_polygon_point","main_depth_guard","main"};
+    if(!s_hw_vk_geometry[kind]) {
+        const char *source=d3d8_vsh_geometry_source();
+        char *depth_guard=NULL;
+        if(kind==HW_VK_GEOMETRY_DEPTH_GUARD) {
+            depth_guard=d3d8_vsh_depth_guard_source();
+            hw_check(depth_guard?S_OK:E_OUTOFMEMORY,"depth guard geometry source");
+            source=depth_guard;
+        } else if(kind==HW_VK_GEOMETRY_SMOOTH_TRIANGLE) {
+            source=d3d8_vsh_smooth_triangle_source();
+        }
+        NvkShader *shader=nvk_shader_create(source,entries[kind],VK_SHADER_STAGE_GEOMETRY_BIT);
+        free(depth_guard);
+        s_hw_vk_geometry[kind]=hw_vk_shader(shader,"geometry shader");
+    }
     return s_hw_vk_geometry[kind];
 }
 static int hw_outputs_have_constant_w(void)
@@ -2027,7 +2265,7 @@ static int hw_outputs_have_constant_w(void)
 static void hw_polygon_offset(HwPixelState *native,unsigned mode,int constant_w)
 {
     struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
-    native->stipple_flags[0]=mode==0 && (pg->regs[NV_PGRAPH_SETUPRASTER]&NV_PGRAPH_SETUPRASTER_STIPPLEENABLE)!=0;
+    native->stipple_enabled=mode==0 && (pg->regs[NV_PGRAPH_SETUPRASTER]&NV_PGRAPH_SETUPRASTER_STIPPLEENABLE)!=0;
     native->depth_offset[0]=native->depth_offset[1]=0;
     native->depth_offset[2]=mode!=0;
     uint32_t enabled=mode==1?NV_PGRAPH_SETUPRASTER_POFFSETPOINTENABLE:mode==2?NV_PGRAPH_SETUPRASTER_POFFSETLINEENABLE:NV_PGRAPH_SETUPRASTER_POFFSETFILLENABLE;
@@ -2068,26 +2306,58 @@ static unsigned hw_line_copies(const NV2ANativeGeometry *geometry)
 }
 static void hw_issue_geometry_draw(ID3D11DeviceContext *ctx,NvkDraw *draw,NV2ANativeGeometry *geometry,const HwPixelState *native,unsigned kind,unsigned first,unsigned count)
 {
+    const int vulkan=d3d8_IsNativeVulkan();
+    if(vulkan && kind==0 && !geometry->polygon[0] && !geometry->polygon[1] &&
+       draw->depth && draw->depth_test && draw->depth_write &&
+       (!draw->color_mask || (draw->blend && draw->blend_op==VK_BLEND_OP_ADD &&
+        draw->source_blend==VK_BLEND_FACTOR_ZERO && draw->destination_blend==VK_BLEND_FACTOR_ONE)))
+        kind=HW_VK_GEOMETRY_DEPTH_GUARD;
+    else if(vulkan && kind==0 && draw->depth && draw->depth_test && draw->depth_write &&
+            draw->topology==VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST_WITH_ADJACENCY &&
+            s_hw_program_active && !s_hw_fixed_active && !s_hw_output_active &&
+            !geometry->polygon[0] && !geometry->polygon[1] && (geometry->polygon[3]&255u)!=4 &&
+            !geometry->flags[0] && !geometry->flags[1] && !geometry->point_flags[2])
+        kind=HW_VK_GEOMETRY_SMOOTH_TRIANGLE;
     int lines=kind==1 || kind==3 || kind==6 || kind==7;
     unsigned copies=lines?hw_line_copies(geometry):1;
     for(unsigned copy=0;copy<copies;copy+=32) {
         geometry->raster[2]=(float)copy;
-        if(d3d8_IsNativeVulkan())draw->geometry=hw_vk_geometry_shader(kind);
+        if(vulkan)draw->geometry=hw_vk_geometry_shader(kind);
         else {hw_bind_pixel_state(ctx,native);hw_check(d3d8_vsh_bind_geometry(nv2a_vsh_constant(0),geometry,kind),"raster geometry state");}
         hw_issue_draw(ctx,draw,first,count);
     }
 }
+static unsigned hw_fixed_fill_empty_prefix(const unsigned char *vertices,unsigned stride,unsigned count)
+{
+    if(count<4)return 0;
+    const __m128i even=_mm_loadu_si128((const __m128i *)vertices);
+    const __m128i odd=_mm_loadu_si128((const __m128i *)(vertices+stride));
+    unsigned first=0;
+    for(;first+3<count;first+=2) {
+        const unsigned char *next=vertices+(size_t)(first+2)*stride;
+        const __m128i even_equal=_mm_cmpeq_epi32(even,_mm_loadu_si128((const __m128i *)next));
+        const __m128i odd_equal=_mm_cmpeq_epi32(odd,_mm_loadu_si128((const __m128i *)(next+stride)));
+        if(_mm_movemask_epi8(_mm_and_si128(even_equal,odd_equal))!=0xffff)break;
+    }
+    return first;
+}
+
 static void hw_flush_batch(void)
 {
+    const unsigned fill_column_x16=s_hw_fill_column_x16;
+    s_hw_fill_column_x16=0;
     if(!s_hw_count) { s_hw_program_active=s_hw_output_active=0;return; }
     hw_enter();
     uint64_t timing_start=gpu_timing_clock();
     HwColor *color=hw_color(0);
-    HwDepth *depth=(s_gpu.depth_test || (nv2a_get_state()->pgraph.regs[NV_PGRAPH_CONTROL_1]&NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE))?hw_depth():NULL;
+    struct PGRAPHState *const draw_pgraph=&nv2a_get_state()->pgraph;
+    HwDepth *depth=(s_gpu.depth_test || (draw_pgraph->regs[NV_PGRAPH_CONTROL_1]&NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE))?hw_depth():NULL;
     ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
+    const int direct_fill=s_hw_topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
     NvkDraw native_draw={0};NV2ANativeGeometry geometry={0};NV2ANativeFixed fixed;
+    unsigned vertex_constant_count=NV2A_VS_MAX_CONSTANTS;
     int constant_w=0;
-    struct PGRAPHState *offset_pg=&nv2a_get_state()->pgraph;
+    struct PGRAPHState *offset_pg=draw_pgraph;
     if(s_gpu.prim>=NV_PRIM_TRIANGLES && (offset_pg->regs[NV_PGRAPH_CONTROL_0]&NV_PGRAPH_CONTROL_0_Z_PERSPECTIVE_ENABLE)) {
         float factor;memcpy(&factor,&offset_pg->regs[NV_PGRAPH_ZOFFSETFACTOR],4);
         if(factor!=0 && isfinite(factor)) {
@@ -2098,7 +2368,8 @@ static void hw_flush_batch(void)
         }
     }
     float output_screen[4]={(float)color->width,(float)color->height,0,1};
-    if(!d3d8_IsNativeVulkan()) {
+    const int native_vulkan=d3d8_IsNativeVulkan();
+    if(!native_vulkan) {
     ID3D11RenderTargetView *view=((D3D8Surface *)hw_render_surface(color))->rtv;
     ID3D11DeviceContext_OMSetRenderTargets(ctx,1,&view,depth?depth->view:NULL);
     D3D11_VIEWPORT vp={0,0,(FLOAT)(color->width*d3d8_RenderScale()),(FLOAT)(color->height*d3d8_RenderScale()),0,1};
@@ -2106,71 +2377,51 @@ static void hw_flush_batch(void)
     }
     gpu_timing_finish(timing_start,&s_gpu.hardware_surface_ticks);
     timing_start=gpu_timing_clock();
-    IDirect3DDevice8 *device=d3d8_GetDevice();
-    const IDirect3DDevice8Vtbl *v=device->lpVtbl;
-    v->SetRenderState(device,D3DRS_CULLMODE,D3DCULL_NONE);
     DWORD fill_mode=D3DFILL_SOLID;
-    int polygon_modes=s_hw_topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ && hw_polygon_modes_active();
-    v->SetRenderState(device,D3DRS_FILLMODE,fill_mode);
-    v->SetRenderState(device,D3DRS_ZENABLE,s_gpu.depth_test);
-    v->SetRenderState(device,D3DRS_ZFUNC,s_gpu.depth_test?s_gpu.depth_func-0x1FF:D3DCMP_ALWAYS);
-    v->SetRenderState(device,D3DRS_ZWRITEENABLE,s_gpu.depth_test && s_gpu.depth_mask);
-    uint32_t logic_state=nv2a_get_state()->pgraph.regs[NV_PGRAPH_BLEND];
-    v->SetRenderState(device,D3DRS_NV2ALOGICOP,(logic_state&NV_PGRAPH_BLEND_LOGICOP_ENABLE)?
-        0x1500|GET_MASK(logic_state,NV_PGRAPH_BLEND_LOGICOP):0);
-    v->SetRenderState(device,D3DRS_ALPHABLENDENABLE,s_gpu.blend_enable);
-    v->SetRenderState(device,D3DRS_SRCBLEND,hw_blend_enum(s_gpu.blend_sfactor));
-    v->SetRenderState(device,D3DRS_DESTBLEND,hw_blend_enum(s_gpu.blend_dfactor));
+    int polygon_modes=s_hw_topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ && polygon_modes_active(offset_pg);
+    uint32_t logic_state=draw_pgraph->regs[NV_PGRAPH_BLEND];
     DWORD equation;
     switch(s_gpu.blend_equation) { case 0:case 0x8006:equation=1;break;case 0x800A:equation=2;break;case 0x800B:equation=3;break;case 0x8007:equation=4;break;case 0x8008:equation=5;break;default:hw_check(E_NOTIMPL,"blend equation");equation=0; }
-    v->SetRenderState(device,D3DRS_BLENDOP,equation);
     uint32_t mask=s_gpu.color_mask;
-    v->SetRenderState(device,D3DRS_COLORWRITEENABLE,((mask>>16)&1)|(((mask>>8)&1)<<1)|((mask&1)<<2)|(((mask>>24)&1)<<3));
-    uint32_t stencil=nv2a_get_state()->pgraph.regs[NV_PGRAPH_CONTROL_1];
-    v->SetRenderState(device,D3DRS_STENCILENABLE,(stencil&NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE)!=0);
-    v->SetRenderState(device,D3DRS_STENCILFUNC,GET_MASK(stencil,NV_PGRAPH_CONTROL_1_STENCIL_FUNC)+1);
-    v->SetRenderState(device,D3DRS_STENCILREF,GET_MASK(stencil,NV_PGRAPH_CONTROL_1_STENCIL_REF));
-    v->SetRenderState(device,D3DRS_STENCILMASK,GET_MASK(stencil,NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ));
-    uint32_t stencil_ops=nv2a_get_state()->pgraph.regs[NV_PGRAPH_CONTROL_2];
-    uint32_t stencil_write=nv2a_get_state()->pgraph.regs[NV_PGRAPH_CONTROL_0]&NV_PGRAPH_CONTROL_0_STENCIL_WRITE_ENABLE;
-    v->SetRenderState(device,D3DRS_STENCILWRITEMASK,stencil_write?GET_MASK(stencil,NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE):0);
-    v->SetRenderState(device,D3DRS_STENCILFAIL,GET_MASK(stencil_ops,NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL));
-    v->SetRenderState(device,D3DRS_STENCILZFAIL,GET_MASK(stencil_ops,NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL));
-    v->SetRenderState(device,D3DRS_STENCILPASS,GET_MASK(stencil_ops,NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS));
-    unsigned combiner_count=s_gpu.rc.control&255;if(combiner_count>8)combiner_count=8;
-    DWORD states[256]={0};
-    for(unsigned stage=0;stage<(combiner_count?combiner_count:1);stage++) {
-        states[D3DRS_PSRGBINPUTS0+stage]=hw_reverse_inputs(s_gpu.rc.color_icw[stage]);
-        states[D3DRS_PSALPHAINPUTS0+stage]=hw_reverse_inputs(s_gpu.rc.alpha_icw[stage]);
-        uint32_t rgb=s_gpu.rc.color_ocw[stage],alpha=s_gpu.rc.alpha_ocw[stage];
-        states[D3DRS_PSRGBOUTPUTS0+stage]=(rgb&~255)|((rgb&15)<<4)|((rgb>>4)&15);
-        states[D3DRS_PSALPHAOUTPUTS0+stage]=(alpha&~255)|((alpha&15)<<4)|((alpha>>4)&15);
-    }
-    for(unsigned stage=0;stage<8;stage++) {
-        states[D3DRS_PSCONSTANT0_0+stage]=s_gpu.rc.factor0[(s_gpu.rc.control&0x1000)?stage:0];
-        states[D3DRS_PSCONSTANT1_0+stage]=s_gpu.rc.factor1[(s_gpu.rc.control&0x10000)?stage:0];
-    }
-    states[D3DRS_PSFINALCOMBINERINPUTSABCD]=hw_reverse_inputs(s_gpu.rc.final0);
-    states[D3DRS_PSFINALCOMBINERINPUTSEFG]=hw_reverse_inputs(s_gpu.rc.final1)>>0;
+    uint32_t stencil=draw_pgraph->regs[NV_PGRAPH_CONTROL_1];
+    uint32_t stencil_ops=draw_pgraph->regs[NV_PGRAPH_CONTROL_2];
+    uint32_t stencil_write=draw_pgraph->regs[NV_PGRAPH_CONTROL_0]&NV_PGRAPH_CONTROL_0_STENCIL_WRITE_ENABLE;
+
+    const D3D8RenderStateUpdate raster_states[]={
+        {D3DRS_CULLMODE, D3DCULL_NONE},
+        {D3DRS_FILLMODE, fill_mode},
+        {D3DRS_ZENABLE, s_gpu.depth_test},
+        {D3DRS_ZFUNC, s_gpu.depth_test?s_gpu.depth_func-0x1FF:D3DCMP_ALWAYS},
+        {D3DRS_ZWRITEENABLE, s_gpu.depth_test && s_gpu.depth_mask},
+        {D3DRS_NV2ALOGICOP, (logic_state&NV_PGRAPH_BLEND_LOGICOP_ENABLE)?
+        0x1500|GET_MASK(logic_state,NV_PGRAPH_BLEND_LOGICOP):0},
+        {D3DRS_ALPHABLENDENABLE, s_gpu.blend_enable},
+        {D3DRS_SRCBLEND, hw_blend_enum(s_gpu.blend_sfactor)},
+        {D3DRS_DESTBLEND, hw_blend_enum(s_gpu.blend_dfactor)},
+        {D3DRS_BLENDOP, equation},
+        {D3DRS_COLORWRITEENABLE, ((mask>>16)&1)|(((mask>>8)&1)<<1)|((mask&1)<<2)|(((mask>>24)&1)<<3)},
+        {D3DRS_STENCILENABLE, (stencil&NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE)!=0},
+        {D3DRS_STENCILFUNC, GET_MASK(stencil,NV_PGRAPH_CONTROL_1_STENCIL_FUNC)+1},
+        {D3DRS_STENCILREF, GET_MASK(stencil,NV_PGRAPH_CONTROL_1_STENCIL_REF)},
+        {D3DRS_STENCILMASK, GET_MASK(stencil,NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ)},
+        {D3DRS_STENCILWRITEMASK, stencil_write?GET_MASK(stencil,NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE):0},
+        {D3DRS_STENCILFAIL, GET_MASK(stencil_ops,NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL)},
+        {D3DRS_STENCILZFAIL, GET_MASK(stencil_ops,NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL)},
+        {D3DRS_STENCILPASS, GET_MASK(stencil_ops,NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS)},
+    };
+    d3d8_SetRenderStates(raster_states, sizeof raster_states/sizeof raster_states[0]);
     NV2ACombinerState combiner={0};
-    combiner.num_stages=(int)combiner_count;
-    d3d8_combiners_from_render_states(states,&combiner);
-    combiner.num_stages=(int)combiner_count;
-    combiner.native_coordinates=1; combiner.final_enabled=s_gpu.rc.final0 || s_gpu.rc.final1;
-    combiner.final_flags=s_gpu.rc.final1&255; combiner.flags=(s_gpu.rc.control>>8)&1;
+    d3d8_combiners_from_nv2a(&s_gpu.rc,&combiner);
+    unsigned combiner_count=(unsigned)combiner.num_stages;
     combiner.clip_plane_mode=s_gpu.clip_plane_mode;
     NV2APSConstants constants={0};
     for(unsigned stage=0;stage<(combiner_count?combiner_count:1);stage++) {
-        nv2a_rc_unpack(states[D3DRS_PSCONSTANT0_0+stage],constants.c0[stage]);
-        nv2a_rc_unpack(states[D3DRS_PSCONSTANT1_0+stage],constants.c1[stage]);
-        combiner.stages[stage].rgb_output.ab_blue_alpha=(s_gpu.rc.color_ocw[stage]>>19)&1;
-        combiner.stages[stage].rgb_output.cd_blue_alpha=(s_gpu.rc.color_ocw[stage]>>18)&1;
-        if(((s_gpu.rc.color_ocw[stage]>>15)&7)==6) combiner.stages[stage].rgb_output.output_map=NV2A_OUT_SHIFTRIGHT_1;
-        if(((s_gpu.rc.alpha_ocw[stage]>>15)&7)==6) combiner.stages[stage].alpha_output.output_map=NV2A_OUT_SHIFTRIGHT_1;
+        nv2a_rc_unpack(combiner.c0[stage],constants.c0[stage]);
+        nv2a_rc_unpack(combiner.c1[stage],constants.c1[stage]);
     }
     nv2a_rc_unpack(s_gpu.rc.final_c0,constants.final_c0); nv2a_rc_unpack(s_gpu.rc.final_c1,constants.final_c1);
     nv2a_rc_unpack(s_gpu.fog_color,constants.fog_color); float red=constants.fog_color[0];constants.fog_color[0]=constants.fog_color[2];constants.fog_color[2]=red;
-    constants.alpha_ref=(s_gpu.alpha_ref&255)/255.0f;constants.alpha_func=s_gpu.alpha_func-0x1FF;constants.alpha_test_enable=s_gpu.alpha_test;
+    if(s_gpu.alpha_test) d3d8_combiners_set_alpha_test(&constants,s_gpu.alpha_func-0x1FF,s_gpu.alpha_ref&255);
     if(!s_gpu.rc_seen) hw_check(E_NOTIMPL,"unprogrammed combiner state");
     for(unsigned stage=0;stage<4;stage++) {
         unsigned mode=(s_gpu.rc.stage_program>>(stage*5))&31;
@@ -2205,31 +2456,32 @@ static void hw_flush_batch(void)
         if(shadow && (mode==1 || mode==2)) {
             combiner.shadow_bits[stage]=shadow;combiner.shadow_mask|=1u<<stage;
             if(mode==2)combiner.shadow_project_mask|=1u<<stage;
-            combiner.shadow_function=nv2a_get_state()->pgraph.regs[NV_PGRAPH_SHADOWCTL]&7;
+            combiner.shadow_function=draw_pgraph->regs[NV_PGRAPH_SHADOWCTL]&7;
         }
         if(texture_stage_samples(mode) && texture_alpha_kill_enabled(stage)) combiner.alpha_kill_mask|=1u<<stage;
         if(texture_stage_samples(mode)) {
             combiner.color_key_mode[stage]=texture_color_key_mode(stage);
-            constants.color_key[stage]=nv2a_get_state()->pgraph.regs[NV_PGRAPH_COLORKEYCOLOR0+stage*4];
+            constants.color_key[stage]=draw_pgraph->regs[NV_PGRAPH_COLORKEYCOLOR0+stage*4];
             constants.color_key_mask[stage]=texture_color_key_mask(stage);
         }
         hw_texture_bind(stage,color);
         Texture *texture=&s_gpu.texs[stage];
         DWORD address_u=texture->addr_u,address_v=texture->addr_v;
         if(address_u>5 || address_v>5) hw_check(E_NOTIMPL,"texture address mode");
-        v->SetTextureStageState(device,stage,D3DTSS_ADDRESSU,address_u);
-        v->SetTextureStageState(device,stage,D3DTSS_ADDRESSV,address_v);
-        v->SetTextureStageState(device,stage,D3DTSS_NV2AADDRESSW,texture_volume(texture) && texture_stage_samples(mode)?texture_address_w(stage):D3DTADDRESS_WRAP);
-        v->SetTextureStageState(device,stage,D3DTSS_BORDERCOLOR,texture->border_color);
+        DWORD address_w=texture_volume(texture) && texture_stage_samples(mode)?texture_address_w(stage):D3DTADDRESS_WRAP;
         uint32_t mag=(texture->filter>>24)&15,min=(texture->filter>>16)&255;
         int linear=mag==2 || mag==4 || min==2 || min==4 || min==6;
-        v->SetTextureStageState(device,stage,D3DTSS_MINFILTER,linear?D3DTEXF_LINEAR:D3DTEXF_POINT);
-        v->SetTextureStageState(device,stage,D3DTSS_MAGFILTER,linear?D3DTEXF_LINEAR:D3DTEXF_POINT);
-        v->SetTextureStageState(device,stage,D3DTSS_MIPFILTER,D3DTEXF_NONE);
+        d3d8_SetNV2ATextureSampling(stage,address_u,address_v,address_w,texture->border_color,
+                                     linear?D3DTEXF_LINEAR:D3DTEXF_POINT);
     }
+    if(native_vulkan && combiner.num_stages && s_hw_vk_textures[0] &&
+       combiner.tex_mode[0]==NV2A_TEXMODE_2D && (combiner.projected_mask&1u) &&
+       !(combiner.luma_mask&1u) && !(combiner.shadow_mask&1u) &&
+       nvk_image_format(s_hw_vk_textures[0])==VK_FORMAT_B8G8R8A8_UNORM)
+        combiner.texture0_unorm=1;
     gpu_timing_finish(timing_start,&s_gpu.hardware_texture_ticks);
     timing_start=gpu_timing_clock();
-    if(!d3d8_IsNativeVulkan())hw_check(d3d8_states_apply_checked(),"render state binding");
+    if(!native_vulkan)hw_check(d3d8_states_apply_checked(),"render state binding");
     if(s_hw_program_active) {
         geometry.screen[0]=(float)color->width;geometry.screen[1]=(float)color->height;
         geometry.screen[2]=(float)s_gpu.clip_x;geometry.screen[3]=(float)s_gpu.clip_y;
@@ -2241,12 +2493,12 @@ static void hw_flush_batch(void)
             }
         }
         geometry.fog[0]=s_gpu.fog_param[0];geometry.fog[1]=s_gpu.fog_param[1];geometry.fog[2]=(float)s_gpu.fog_mode;geometry.fog[3]=(float)s_gpu.fog_enable;
-        uint32_t raster=nv2a_get_state()->pgraph.regs[NV_PGRAPH_SETUPRASTER];
-        geometry.flags[0]=(nv2a_get_state()->pgraph.regs[NV_PGRAPH_CONTROL_3]&NV_PGRAPH_CONTROL_3_SHADEMODE)==0;
+        uint32_t raster=draw_pgraph->regs[NV_PGRAPH_SETUPRASTER];
+        geometry.flags[0]=(draw_pgraph->regs[NV_PGRAPH_CONTROL_3]&NV_PGRAPH_CONTROL_3_SHADEMODE)==0;
         geometry.flags[1]=(raster&NV_PGRAPH_SETUPRASTER_CULLENABLE)!=0;
         geometry.flags[2]=(raster&NV_PGRAPH_SETUPRASTER_FRONTFACE)!=0;
         geometry.flags[3]=GET_MASK(raster,NV_PGRAPH_SETUPRASTER_CULLCTRL);
-        struct PGRAPHState *point_pg=&nv2a_get_state()->pgraph;
+        struct PGRAPHState *point_pg=draw_pgraph;
         memcpy(geometry.point_params,point_pg->point_params,sizeof geometry.point_params);
         float point_size=point_pg->regs[NV_PGRAPH_POINTSIZE]/8.0f;
         geometry.point_size[0]=point_size<=0?1.0f:point_size;
@@ -2268,14 +2520,25 @@ static void hw_flush_batch(void)
          * the same native sampler for both rectangle and swizzled images. */
         if(s_hw_output_active) {
             output_screen[2]=1;
-            if(d3d8_IsNativeVulkan()) {
+            if(native_vulkan) {
                 if(!s_hw_vk_outputs)s_hw_vk_outputs=hw_vk_shader(nvk_shader_create(d3d8_shaders_nv2a_output_source(),"main",VK_SHADER_STAGE_VERTEX_BIT),"vertex outputs");
                 native_draw.vertex=s_hw_vk_outputs;
             } else hw_check(d3d8_shaders_bind_nv2a_outputs((float)color->width,(float)color->height,1),"screen output binding");
         } else if(!s_hw_fixed_active) {
             const DWORD *program=(const DWORD *)s_hw_program;int length=s_hw_program_length;
-            if(d3d8_IsNativeVulkan())native_draw.vertex=hw_vk_shader(d3d8_vsh_vulkan_program(program,length,&s_hw_program_inputs),"vertex program");
-            else hw_check(d3d8_vsh_bind_native(program,length,nv2a_vsh_constant(0),&geometry,s_hw_topology,&s_hw_program_inputs),"native vertex program binding");
+            if(native_vulkan) {
+                unsigned diffuse_constant;
+                native_draw.vertex=hw_vk_shader(d3d8_vsh_vulkan_program(program,length,s_hw_program_revision,
+                    &s_hw_program_inputs,&vertex_constant_count,&diffuse_constant),"vertex program");
+                if(diffuse_constant && combiner.num_stages==1 && combiner.texture0_unorm &&
+                   s_hw_topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ &&
+                   geometry.flags[0] && !geometry.point_flags[2] && !geometry.polygon[0] && !geometry.polygon[1]) {
+                    uint32_t bits[4];memcpy(bits,nv2a_vsh_constant(diffuse_constant-1),sizeof bits);
+                    if(bits[0]==0x3f800000u && bits[1]==0x3f800000u && bits[2]==0x3f800000u)
+                        combiner.white_diffuse=bits[3]==0x3f800000u?2:1;
+                }
+            }
+            else hw_check(d3d8_vsh_bind_native(program,length,s_hw_program_revision,nv2a_vsh_constant(0),&geometry,s_hw_topology,&s_hw_program_inputs),"native vertex program binding");
         } else {
             struct PGRAPHState *pg=point_pg;
             memset(&fixed,0,sizeof fixed);
@@ -2284,11 +2547,18 @@ static void hw_flush_batch(void)
             fixed.flags[1]=(c&NV_PGRAPH_CSV0_C_NORMALIZATION_ENABLE)!=0;
             fixed.flags[2]=(c&NV_PGRAPH_CSV0_C_LOCALEYE)!=0;
             fixed.flags[3]=(c&NV_PGRAPH_CSV0_C_SEPARATE_SPECULAR)!=0;
+            const uint32_t texgen[2]={pg->regs[NV_PGRAPH_CSV1_A],pg->regs[NV_PGRAPH_CSV1_B]};
+            const uint32_t texgen_mask=NV_PGRAPH_CSV1_A_T0_S|NV_PGRAPH_CSV1_A_T0_T|
+                                       NV_PGRAPH_CSV1_A_T0_R|NV_PGRAPH_CSV1_A_T0_Q;
+            const int generate_texcoords=((texgen[0]|texgen[1])&(texgen_mask|(texgen_mask<<16)))!=0;
+            unsigned texture_matrix_enabled=0;
             for(unsigned stage=0;stage<4;stage++) {
                 fixed.texture_matrix[stage]=pg->texture_matrix_enable[stage];
+                texture_matrix_enabled|=fixed.texture_matrix[stage];
+                if(!generate_texcoords) continue;
                 for(unsigned component=0;component<4;component++) {
                     uint32_t mask=NV_PGRAPH_CSV1_A_T0_S<<(component*3+(stage%2)*16);
-                    fixed.texgen[stage][component]=GET_MASK(pg->regs[stage<2?NV_PGRAPH_CSV1_A:NV_PGRAPH_CSV1_B],mask);
+                    fixed.texgen[stage][component]=GET_MASK(texgen[stage/2],mask);
                 }
             }
             if(fixed.flags[0]) {
@@ -2312,6 +2582,9 @@ static void hw_flush_batch(void)
             }
             fixed.skinning[0]=GET_MASK(d,NV_PGRAPH_CSV0_D_SKIN);
             fixed.skinning[1]=GET_MASK(d,NV_PGRAPH_CSV0_D_TEXGEN_REF);
+            /* Without an eye-space consumer, pass the texture attributes straight through. */
+            fixed.direct_attributes=!fixed.flags[0] && !fixed.skinning[0] && !geometry.point_flags[0] &&
+                                    !s_gpu.fog_enable && !generate_texcoords && !texture_matrix_enabled;
             for(unsigned i=0;i<8;i++) {
                 unsigned mode=GET_MASK(d,NV_PGRAPH_CSV0_D_LIGHT0<<(i*2));
                 fixed.light_modes[i/4][i%4]=mode;
@@ -2332,25 +2605,26 @@ static void hw_flush_batch(void)
                 memcpy(fixed.spot_falloff[i],pg->ltctxa[NV_IGRAPH_XF_LTCTXA_L0_K+i*2],16);
                 memcpy(fixed.spot_direction[i],pg->ltctxa[NV_IGRAPH_XF_LTCTXA_L0_SPT+i*2],16);
             }
-            if(d3d8_IsNativeVulkan()) {
-                if(!s_hw_vk_fixed) {
-                    char *source=d3d8_vsh_fixed_source();if(!source)hw_check(E_OUTOFMEMORY,"fixed shader source");
-                    s_hw_vk_fixed=hw_vk_shader(nvk_shader_create(source,"main_fixed",VK_SHADER_STAGE_VERTEX_BIT),"fixed vertex shader");free(source);
+            if(native_vulkan) {
+                if(!s_hw_vk_fixed[direct_fill]) {
+                    char *source=d3d8_vsh_fixed_source(direct_fill);
+                    if(!source)hw_check(E_OUTOFMEMORY,"fixed shader source");
+                    const char *entry=direct_fill?"main_fixed_fill":"main_fixed";
+                    s_hw_vk_fixed[direct_fill]=hw_vk_shader(nvk_shader_create(source,entry,VK_SHADER_STAGE_VERTEX_BIT),"fixed vertex shader");
+                    free(source);
                 }
-                native_draw.vertex=s_hw_vk_fixed;
+                native_draw.vertex=s_hw_vk_fixed[direct_fill];
             } else hw_check(d3d8_vsh_bind_fixed(nv2a_vsh_constant(0),&geometry,&fixed,s_hw_topology),"native fixed vertex binding");
         }
-    } else if(d3d8_IsNativeVulkan()) {
+    } else if(native_vulkan) {
         if(!s_hw_vk_outputs)s_hw_vk_outputs=hw_vk_shader(nvk_shader_create(d3d8_shaders_nv2a_output_source(),"main",VK_SHADER_STAGE_VERTEX_BIT),"vertex outputs");
         native_draw.vertex=s_hw_vk_outputs;
     } else hw_check(d3d8_shaders_bind_nv2a_outputs((float)color->width,(float)color->height,0),"vertex output binding");
-    if(d3d8_IsNativeVulkan())native_draw.pixel=hw_vk_shader(d3d8_combiners_vulkan_shader(&combiner),"combiner shader");
-    else hw_check(d3d8_combiners_bind(&combiner,&constants),"original combiner shader binding");
+    if(!native_vulkan)hw_check(d3d8_combiners_bind(&combiner,&constants),"original combiner shader binding");
     HwPixelState native={0};
-    struct PGRAPHState *pg=&nv2a_get_state()->pgraph;
+    struct PGRAPHState *pg=draw_pgraph;
     if(!polygon_modes && (s_hw_topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST || s_hw_topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ))hw_polygon_offset(&native,0,constant_w);
     memcpy(native.stipple_pattern,pg->polygon_stipple,sizeof native.stipple_pattern);
-    for(unsigned i=0;i<8;i++) { native.cx[i]=pg->regs[NV_PGRAPH_WINDOWCLIPX0+i*4];native.cy[i]=pg->regs[NV_PGRAPH_WINDOWCLIPY0+i*4]; }
     memcpy(&native.depth[0],&pg->regs[NV_PGRAPH_ZCLIPMIN],4);memcpy(&native.depth[1],&pg->regs[NV_PGRAPH_ZCLIPMAX],4);
     native.depth[2]=1.0f/(((s_gpu.format>>4)&15)==1?65536.0f:16777216.0f);
     if(pg->regs[NV_PGRAPH_SETUPRASTER]&NV_PGRAPH_SETUPRASTER_Z_FORMAT)
@@ -2360,15 +2634,34 @@ static void hw_flush_batch(void)
     native.flags[2]=(pg->regs[NV_PGRAPH_CONTROL_0]&NV_PGRAPH_CONTROL_0_Z_PERSPECTIVE_ENABLE)!=0;
     native.flags[3]=d3d8_RenderScale();
     native.bounds[0]=s_gpu.clip_x;native.bounds[1]=s_gpu.clip_y;native.bounds[2]=s_gpu.clip_x+s_gpu.clip_w;native.bounds[3]=s_gpu.clip_y+s_gpu.clip_h;
-    if(d3d8_IsNativeVulkan()) {
+    for(unsigned i=0;i<8;i++) {
+        uint32_t cx=pg->regs[NV_PGRAPH_WINDOWCLIPX0+i*4],cy=pg->regs[NV_PGRAPH_WINDOWCLIPY0+i*4];
+        native.cx[i]=cx;native.cy[i]=cy;
+        /* The shader tests surface bounds before the inclusive clip-window edges. */
+        if(!native.window_covers_surface)
+            native.window_covers_surface=(cx&4095u)<=native.bounds[0] &&
+                (cy&4095u)<=native.bounds[1] &&
+                ((cx>>16)&4095u)+1>=native.bounds[2] &&
+                ((cy>>16)&4095u)+1>=native.bounds[3];
+    }
+    /* The color target already clips the same rectangle in this case. */
+    native.skip_xy_clipping=native.window_covers_surface && !native.flags[0] &&
+        !native.bounds[0] && !native.bounds[1] &&
+        native.bounds[2]==color->width && native.bounds[3]==color->height;
+    if(native_vulkan) {
         native_draw.uniforms[native_draw.uniform_count++]=(NvkUniform){&constants,sizeof constants,16};
         native_draw.uniforms[native_draw.uniform_count++]=(NvkUniform){&native,sizeof native,17};
         if(s_hw_program_active) {
-            native_draw.geometry=hw_vk_geometry_shader(hw_geometry_kind(0));
             if(s_hw_output_active)native_draw.uniforms[native_draw.uniform_count++]=(NvkUniform){output_screen,sizeof output_screen,0};
-            native_draw.uniforms[native_draw.uniform_count++]=(NvkUniform){nv2a_vsh_constant(0),192*16,1};
-            native_draw.uniforms[native_draw.uniform_count++]=(NvkUniform){nv2a_vsh_constant(0),192*16,9};
-            native_draw.uniforms[native_draw.uniform_count++]=(NvkUniform){&geometry,sizeof geometry,10};
+            /* The geometry shader uses c[58] and c[59] for W clipping.
+             * Keep both bindings on the same upload to share its range. */
+            unsigned constant_bytes=(vertex_constant_count<60?60:vertex_constant_count)*16;
+            const float *vertex_constants=nv2a_vsh_constant(0);
+            native_draw.uniforms[native_draw.uniform_count++]=(NvkUniform){vertex_constants,constant_bytes,1};
+            if(!direct_fill) {
+                native_draw.uniforms[native_draw.uniform_count++]=(NvkUniform){vertex_constants,constant_bytes,9};
+                native_draw.uniforms[native_draw.uniform_count++]=(NvkUniform){&geometry,sizeof geometry,10};
+            }
             if(s_hw_fixed_active) {
                 native_draw.uniforms[native_draw.uniform_count++]=(NvkUniform){&geometry,sizeof geometry,2};
                 native_draw.uniforms[native_draw.uniform_count++]=(NvkUniform){&fixed,sizeof fixed,3};
@@ -2377,14 +2670,8 @@ static void hw_flush_batch(void)
                 const unsigned output_locations[]={2,0,1,7,3,4,5,6};native_draw.attribute_count=8;
                 for(unsigned i=0;i<8;i++)native_draw.attributes[i]=(VkVertexInputAttributeDescription){output_locations[i],0,VK_FORMAT_R32G32B32A32_SFLOAT,i*16};
             } else {
-                unsigned locations[16],attributes[16];
-                native_draw.attribute_count=nvk_shader_inputs(native_draw.vertex,locations,attributes,16);
+                native_draw.attribute_count=nvk_shader_vertex_attributes(native_draw.vertex,s_hw_program_inputs,native_draw.attributes);
                 if(native_draw.attribute_count>16)hw_check(E_INVALIDARG,"vertex shader inputs");
-                for(unsigned i=0;i<native_draw.attribute_count;i++) {
-                    unsigned offset=0,mask=s_hw_program_inputs&((1u<<attributes[i])-1);
-                    while(mask){offset+=16;mask&=mask-1;}
-                    native_draw.attributes[i]=(VkVertexInputAttributeDescription){locations[i],0,VK_FORMAT_R32G32B32A32_SFLOAT,offset};
-                }
             }
         } else {
             native_draw.uniforms[native_draw.uniform_count++]=(NvkUniform){output_screen,sizeof output_screen,0};
@@ -2392,6 +2679,19 @@ static void hw_flush_batch(void)
             for(unsigned i=0;i<8;i++)native_draw.attributes[i]=(VkVertexInputAttributeDescription){locations[i],0,VK_FORMAT_R32G32B32A32_SFLOAT,i*16};
         }
         hw_vk_draw_state(&native_draw,color,depth);
+        /* Per-polygon passes can still change depth offset and stipple. */
+        if(!polygon_modes && !native_draw.depth && !native_draw.depth_test && !native_draw.stencil &&
+           native.skip_xy_clipping && !native.stipple_enabled && native.flags[1] && !native.flags[2] &&
+           native.depth_offset[0]==0.0f && native.depth_offset[1]==0.0f) {
+            combiner.native_clip_mode=constants.alpha_test_mode ? NV2A_NATIVE_CLIP_FULLSCREEN_Z_WITH_ALPHA_TEST :
+                NV2A_NATIVE_CLIP_FULLSCREEN_Z;
+            if (combiner.alpha_kill_mask & 1u)
+                d3d8_combiners_merge_alpha_kill(&combiner, &constants);
+            if (!constants.alpha_test_mode && !(s_gpu.fog_color & 0x00ffffffu) &&
+                s_hw_program_active && !s_hw_fixed_active && !s_hw_output_active && !direct_fill)
+                d3d8_combiners_use_black_fog(&combiner);
+        }
+        native_draw.pixel=hw_vk_shader(d3d8_combiners_vulkan_shader(&combiner),"combiner shader");
     } else if(!s_hw_program_active) {
         hw_bind_pixel_state(ctx,&native);
     }
@@ -2400,7 +2700,7 @@ static void hw_flush_batch(void)
     UINT vertex_stride=sizeof *s_hw_vertices;
     if(s_hw_program_active)vertex_stride=s_hw_program_vertex_stride;
     uint32_t vertex_bytes=s_hw_program_active?s_hw_program_vertex_count*vertex_stride:s_hw_count*sizeof *s_hw_vertices;
-    uint32_t index_bytes=s_hw_program_active?s_hw_count*sizeof(uint32_t):0;
+    uint32_t index_bytes=s_hw_program_active && !direct_fill?s_hw_count*sizeof(uint32_t):0;
     uint32_t bytes=vertex_bytes+index_bytes;
     ID3D11Buffer *vertices_buffer=NULL;
     UINT offset=0;
@@ -2408,10 +2708,10 @@ static void hw_flush_batch(void)
     /* Both backends consume the original cached rows without staging a copy. */
     const void *vertex_data=s_hw_program_active?(entry?(const void *)(entry->data+entry->count*8):(const void *)s_hw_program_upload.vertex):(const void *)s_hw_vertices;
     uint32_t provoking=pg->regs[NV_PGRAPH_CONTROL_3]&NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX;
-    if(d3d8_IsNativeVulkan()) {
+    if(native_vulkan) {
         native_draw.vertices=vertex_data;
         native_draw.vertex_bytes=vertex_bytes;native_draw.stride=vertex_stride;native_draw.count=s_hw_count;
-        if(s_hw_program_active)native_draw.indices=s_hw_program_upload.indices;
+        if(index_bytes)native_draw.indices=s_hw_program_upload.indices;
         if(entry && entry->valid) {
             if(entry->upload_primitive!=s_gpu.prim || entry->upload_provoking!=provoking || entry->upload_indices!=s_hw_count)
                 entry->upload_generation=0;
@@ -2433,14 +2733,14 @@ static void hw_flush_batch(void)
             entry->upload_primitive=s_gpu.prim;entry->upload_provoking=provoking;entry->upload_indices=s_hw_count;
         }
     }
-    if(!d3d8_IsNativeVulkan()) {
+    if(!native_vulkan) {
     ID3D11DeviceContext_IASetVertexBuffers(ctx,0,1,&vertices_buffer,&vertex_stride,&offset);
     ID3D11DeviceContext_IASetPrimitiveTopology(ctx,s_hw_topology);
     if(s_hw_program_active) ID3D11DeviceContext_IASetIndexBuffer(ctx,vertices_buffer,DXGI_FORMAT_R32_UINT,offset+vertex_bytes);
     }
     ID3D11Query *query=NULL;
     if(s_gpu.zpass_enable) {
-        if(!d3d8_IsNativeVulkan()) {
+        if(!native_vulkan) {
         D3D11_QUERY_DESC desc={D3D11_QUERY_OCCLUSION,0};
         hw_check(ID3D11Device_CreateQuery(d3d8_GetD3D11Device(),&desc,&query),"visibility query");
         ID3D11DeviceContext_Begin(ctx,(ID3D11Asynchronous *)query);
@@ -2452,7 +2752,7 @@ static void hw_flush_batch(void)
         /* Keep original primitive order. Face-specific modes are separate
          * native raster consumers of each primitive, never reordered batches. */
         uint64_t upload_generation=0;uint32_t upload_offset=0;
-        if(d3d8_IsNativeVulkan() && !native_draw.upload_generation){native_draw.upload_generation=&upload_generation;native_draw.upload_offset=&upload_offset;}
+        if(native_vulkan && !native_draw.upload_generation){native_draw.upload_generation=&upload_generation;native_draw.upload_offset=&upload_offset;}
         for(unsigned first=0;first<s_hw_count;first+=6) {
             geometry.polygon[3]=s_hw_polygon_info[first/6];
             for(unsigned mode=0;mode<3;mode++) {
@@ -2465,11 +2765,27 @@ static void hw_flush_batch(void)
                 }
             }
         }
-    } else if(s_hw_program_active) {
+    } else if(s_hw_program_active && !direct_fill) {
         if(s_hw_topology==D3D11_PRIMITIVE_TOPOLOGY_LINELIST_ADJ && hw_line_copies(&geometry)>32) {
             for(unsigned first=0;first<s_hw_count;first+=4)hw_issue_geometry_draw(ctx,&native_draw,&geometry,&native,hw_geometry_kind(0),first,4);
         } else hw_issue_geometry_draw(ctx,&native_draw,&geometry,&native,hw_geometry_kind(0),0,s_hw_count);
-    } else hw_issue_draw(ctx,&native_draw,0,s_hw_count);
+    } else if(!fill_column_x16 || s_gpu.zpass_enable || !native_vulkan || !direct_fill ||
+              !nvk_fill_column_misses_samples(native_draw.color,color->width,fill_column_x16)) {
+        unsigned count=s_hw_count;
+        if(native_vulkan && direct_fill && !s_gpu.zpass_enable) {
+            /* Repeated leading vertex pairs form degenerate triangles.
+             * Drop whole pairs to keep the original winding. */
+            const unsigned first=hw_fixed_fill_empty_prefix(native_draw.vertices,native_draw.stride,count);
+            if(first) {
+                const size_t bytes=(size_t)first*native_draw.stride;
+                native_draw.vertices=(const unsigned char *)native_draw.vertices+bytes;
+                native_draw.vertex_bytes-=bytes;
+                native_draw.count=count-=first;
+            }
+            if(count<3)count=0;
+        }
+        if(count)hw_issue_draw(ctx,&native_draw,0,count);
+    }
     if(query) {
         ID3D11DeviceContext_End(ctx,(ID3D11Asynchronous *)query);
         HwQuery result={0};result.query=query;hw_append_query(result);
@@ -2486,7 +2802,7 @@ static void hw_flush_batch(void)
     if(bounds.bottom>(LONG)color->height) bounds.bottom=(LONG)color->height;
     hw_end_color_write(color,bounds);
     s_hw_count=0;s_hw_program_active=0;s_hw_fixed_active=0;
-    if(!d3d8_IsNativeVulkan())hw_check(ID3D11Device_GetDeviceRemovedReason(d3d8_GetD3D11Device()),"hardware device status");
+    if(!native_vulkan)hw_check(ID3D11Device_GetDeviceRemovedReason(d3d8_GetD3D11Device()),"hardware device status");
     gpu_timing_finish(timing_start,&s_gpu.hardware_submit_ticks);
     hw_leave();
 }

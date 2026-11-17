@@ -161,10 +161,10 @@ static void voice_off(MCPXAPUState *d, uint16_t v)
     set_notify_status(d, v, notifier, NV1BA0_NOTIFICATION_STATUS_DONE_SUCCESS);
 }
 
+/* FE dispatch owns the APU mutex for the whole method. */
 static void voice_lock(MCPXAPUState *d, uint16_t v, bool lock)
 {
     assert(v < MCPX_HW_MAX_VOICES);
-    qemu_mutex_lock(&d->lock);
 
     uint64_t mask = 1ULL << (v % 64);
     if (lock) {
@@ -174,7 +174,6 @@ static void voice_lock(MCPXAPUState *d, uint16_t v, bool lock)
     }
 
     qemu_cond_signal(&d->cond);
-    qemu_mutex_unlock(&d->lock);
 }
 
 static bool is_voice_locked(MCPXAPUState *d, uint16_t v)
@@ -599,12 +598,13 @@ void mcpx_apu_vp_write(void *opaque, hwaddr addr, uint64_t val,
  * SGE data pointer resolution
  * ============================================================ */
 
-static hwaddr get_data_ptr(hwaddr sge_base, unsigned int max_sge, uint32_t addr,
+static hwaddr get_data_ptr(const MCPXAPUState *d, unsigned int max_sge, uint32_t addr,
                            uint32_t *current_entry, uint32_t *current_base)
 {
     unsigned int entry = addr / TARGET_PAGE_SIZE;
     assert(entry <= max_sge);
     if (entry != *current_entry) {
+        hwaddr sge_base = d->regs[NV_PAPU_VPSGEADDR];
         *current_base =
             ldl_le_phys(address_space_memory, sge_base + entry * 4 * 2);
         *current_entry = entry;
@@ -905,7 +905,7 @@ static int voice_get_samples(MCPXAPUState *d, uint32_t v, float samples[][2],
                     linear_addr += ba;
                     for (unsigned int word_index = 0;
                          word_index < (9 * samples_per_block); word_index++) {
-                        hwaddr addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR],
+                        hwaddr addr = get_data_ptr(d,
                                                    0xFFFFFFFF, linear_addr,
                                                    &current_sge_entry, &current_sge_base);
                         adpcm_block[word_index] =
@@ -930,7 +930,7 @@ static int voice_get_samples(MCPXAPUState *d, uint32_t v, float samples[][2],
                 addr = segment_offset + cbo * block_size;
             } else {
                 uint32_t linear_addr = ba + cbo * (uint32_t)block_size;
-                addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF,
+                addr = get_data_ptr(d, 0xFFFFFFFF,
                                     linear_addr, &current_sge_entry,
                                     &current_sge_base);
             }
@@ -1090,14 +1090,17 @@ static void voice_process(MCPXAPUState *d,
     assert(v < MCPX_HW_MAX_VOICES);
     bool stereo = VOICE_GET_FIXED_MASK(d, v, NV_PAVS_VOICE_CFG_FMT,
                                  NV_PAVS_VOICE_CFG_FMT_STEREO) != 0;
-    unsigned int channels = stereo ? 2 : 1;
+    /* Mono always reads channel zero; stereo alternates left and right. */
+    const unsigned channel_mask = (unsigned)stereo;
     bool paused = VOICE_GET_FIXED_MASK(d, v, NV_PAVS_VOICE_PAR_STATE,
                                  NV_PAVS_VOICE_PAR_STATE_PAUSED) != 0;
 
-    struct McpxApuDebugVoice *dbg = &g_dbg.vp.v[v];
-    dbg->active = true;
-    dbg->stereo = stereo;
-    dbg->paused = paused;
+    struct McpxApuDebugVoice *dbg = g_dbg.trace_enabled ? &g_dbg.vp.v[v] : NULL;
+    if (dbg) {
+        dbg->active = true;
+        dbg->stereo = stereo;
+        dbg->paused = paused;
+    }
 
     if (paused) return;
 
@@ -1116,7 +1119,7 @@ static void voice_process(MCPXAPUState *d,
                                         NV_PAVS_VOICE_CFG_ENV0_EF_PITCHSCALE);
     float pitch = (p + ps * 32 * ef_value) / 4096.0f;
     float rate = pitch == 0.0f ? 1.0f : 1.0f / powf(2.0f, pitch);
-    dbg->rate = rate;
+    if (dbg) dbg->rate = rate;
 
     /* Step amplitude envelope */
     float ea_value = voice_step_envelope(
@@ -1131,13 +1134,13 @@ static void voice_process(MCPXAPUState *d,
 
     bool multipass = VOICE_GET_FIXED_MASK(d, v, NV_PAVS_VOICE_CFG_FMT,
                                     NV_PAVS_VOICE_CFG_FMT_MULTIPASS) != 0;
-    dbg->multipass = multipass;
+    if (dbg) dbg->multipass = multipass;
 
     if (multipass) {
         /* Read from multipass bin */
         int mp_bin = VOICE_GET_FIXED_MASK(d, v, NV_PAVS_VOICE_CFG_FMT,
                                     NV_PAVS_VOICE_CFG_FMT_MULTIPASS_BIN);
-        dbg->multipass_bin = (uint8_t)mp_bin;
+        if (dbg) dbg->multipass_bin = (uint8_t)mp_bin;
         for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
             samples[i][0] = mixbins[mp_bin][i];
             samples[i][1] = mixbins[mp_bin][i];
@@ -1205,9 +1208,11 @@ static void voice_process(MCPXAPUState *d,
     vol[7] |= (uint16_t)(VOICE_GET_FIXED_MASK(d, v, NV_PAVS_VOICE_TAR_VOLB, NV_PAVS_VOICE_TAR_VOLB_VOLUME7_B7_4) << 4);
     vol[7] |= (uint16_t)VOICE_GET_FIXED_MASK(d, v, NV_PAVS_VOICE_TAR_VOLA, NV_PAVS_VOICE_TAR_VOLA_VOLUME7_B3_0);
 
-    for (int i = 0; i < 8; i++) {
-        dbg->bin[i] = (uint8_t)bin[i];
-        dbg->vol[i] = vol[i];
+    if (dbg) {
+        for (int i = 0; i < 8; i++) {
+            dbg->bin[i] = (uint8_t)bin[i];
+            dbg->vol[i] = vol[i];
+        }
     }
 
     if (voice_should_mute(v)) return;
@@ -1223,12 +1228,13 @@ static void voice_process(MCPXAPUState *d,
     }
     if (lpf) {
         for (int ch = 0; ch < 2; ch++) {
+            const unsigned channel = (unsigned)ch & channel_mask;
             int16_t fc = (int16_t)VOICE_GET_FIXED_MASK(
-                d, v, NV_PAVS_VOICE_TAR_FCA + (ch % channels) * 4,
+                d, v, NV_PAVS_VOICE_TAR_FCA + channel * 4,
                 NV_PAVS_VOICE_TAR_FCA_FC0);
             float fc_f = clampf(powf(2, fc / 4096.0f), 0.003906f, 1.0f);
             uint16_t q = (uint16_t)VOICE_GET_FIXED_MASK(
-                d, v, NV_PAVS_VOICE_TAR_FCA + (ch % channels) * 4,
+                d, v, NV_PAVS_VOICE_TAR_FCA + channel * 4,
                 NV_PAVS_VOICE_TAR_FCA_FC1);
             float q_f = clampf(q / (1.0f * 0x8000), 0.079407f, 1.0f);
             sv_filter *filter = &d->vp.filters[v].svf[ch];
@@ -1265,8 +1271,9 @@ static void voice_process(MCPXAPUState *d,
             hr = (float)(1 << d->vp.submix_headroom[bin[b]]);
         }
         g *= attenuate(vol[b]) / hr;
+        const unsigned channel = (unsigned)b & channel_mask;
         for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-            mixbins[bin[b]][i] += g * samples[i][b % channels];
+            mixbins[bin[b]][i] += g * samples[i][channel];
         }
     }
 

@@ -216,6 +216,13 @@ typedef struct NV2ACombinerOutput {
  * shader. Games set this up via SetPixelShader (DWORD token) or by
  * individually setting the D3DRS_PS* render states.
  */
+typedef enum NV2ANativeClipMode {
+    NV2A_NATIVE_CLIP_DYNAMIC = 0,
+    NV2A_NATIVE_CLIP_FULLSCREEN_Z,
+    NV2A_NATIVE_CLIP_FULLSCREEN_Z_WITH_ALPHA_TEST,
+    NV2A_NATIVE_CLIP_FULLSCREEN_Z_BLACK_FOG,
+} NV2ANativeClipMode;
+
 typedef struct NV2ACombinerState {
     /* --- General combiner stages --- */
     int num_stages;  /* Active stage count (1-8) */
@@ -258,6 +265,9 @@ typedef struct NV2ACombinerState {
     DWORD dot_mapping[NV2A_MAX_TEXTURES];
     DWORD dot_2d_mask;
     DWORD volume_mask;
+    int texture0_unorm; /* First projected 2D sample uses a normalized color image. */
+    int white_diffuse; /* 1 for unit RGB, 2 for unit RGBA. */
+    NV2ANativeClipMode native_clip_mode;
 } NV2ACombinerState;
 
 /* ================================================================
@@ -273,9 +283,8 @@ typedef struct NV2APSConstants {
     float final_c0[4];                      /* Final combiner C0 */
     float final_c1[4];                      /* Final combiner C1 */
     float fog_color[4];                     /* Fog color (from D3DRS_FOGCOLOR) */
-    float alpha_ref;                        /* Normalized [0,1] alpha ref */
-    UINT  alpha_func;                       /* D3DCMPFUNC enum value */
-    UINT  alpha_test_enable;                /* 0 or 1 */
+    float alpha_lower,alpha_upper;          /* Half-open range on saturated alpha */
+    UINT  alpha_test_mode;                  /* 0 disabled, 1 inside, 2 outside */
     UINT  fog_enable;                       /* 0 or 1 */
     UINT  alpha_only[NV2A_MAX_TEXTURES];     /* A8 sampling uses white RGB */
     UINT  color_key[NV2A_MAX_TEXTURES], color_key_mask[NV2A_MAX_TEXTURES];
@@ -293,6 +302,11 @@ typedef struct NV2APSConstants {
  * Must be called after D3D11 device creation.
  */
 HRESULT d3d8_combiners_init(void);
+void d3d8_combiners_set_alpha_test(NV2APSConstants *constants, DWORD func, DWORD reference);
+/* Called for native fullscreen color-only draws with stage-zero alpha kill. */
+void d3d8_combiners_merge_alpha_kill(NV2ACombinerState *state, const NV2APSConstants *constants);
+/* Called with finite geometry fog, black fog RGB, and no alpha test. */
+void d3d8_combiners_use_black_fog(NV2ACombinerState *state);
 HRESULT d3d8_combiners_bind(const NV2ACombinerState *state, const NV2APSConstants *constants);
 NvkShader *d3d8_combiners_vulkan_shader(const NV2ACombinerState *state);
 
@@ -332,6 +346,10 @@ void d3d8_combiners_parse_token(DWORD token, const DWORD *rs,
  */
 void d3d8_combiners_from_render_states(const DWORD *rs,
                                        NV2ACombinerState *state);
+
+/* Decode the raw NV2A register words into a zero-initialized shader state. */
+struct Nv2aCombiner;
+void d3d8_combiners_from_nv2a(const struct Nv2aCombiner *rc, NV2ACombinerState *state);
 
 /**
  * Generate HLSL pixel shader source from combiner state.

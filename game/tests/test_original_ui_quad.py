@@ -205,6 +205,44 @@ static void check_original_backdrop_tiles(void) {
     }
     g_esi=0x2000;
 }
+static void check_status_backdrop_tiles(void) {
+    const float bounds[][4]={{0,512,0,512},{512,640,0,512},{232,584,40,424},
+                            {0,512,0,512},{512,640,0,512}};
+    const unsigned ids[]={3,0,0,3,1}, widths[]={512,128,352,512,128};
+    const unsigned heights[]={512,512,384,512,512};
+    for(unsigned kind=0;kind<5;++kind) {
+        memset(ram,0,sizeof ram);
+        g_esi=0x2000;
+        MEM32(g_esp)=0x0014617A;MEM32(g_esp+4)=7;MEM32(g_esp+8)=4;
+        MEM32(g_esp+12)=0x4000;MEM32(g_esp+16)=28;
+        MEM32(g_esp+0x5c)=0x6000;
+        MEM32(0x6004)=kind==3?0x003B21E8:0x003BFE40;
+        MEM32(g_esp+0x13c)=512;MEM32(g_esp+0x140)=512;
+        MEM32(g_esi+4)=ids[kind];MEM32(g_esi+0x1c)=widths[kind];MEM32(g_esi+0x20)=heights[kind];
+        const unsigned u_right[]={0,1,1,0}, v_bottom[]={0,0,1,1};
+        for(unsigned i=0;i<4;++i) {
+            unsigned v=0x4000+i*28;
+            MEMF(v)=bounds[kind][u_right[i]];
+            MEMF(v+4)=bounds[kind][2+v_bottom[i]];
+            MEMF(v+8)=0.00002f;MEMF(v+12)=1;MEM32(v+16)=0xff123400u+i;
+            MEMF(v+20)=u_right[i]?(widths[kind]-1)/511.0f:0;
+            MEMF(v+24)=v_bottom[i]?(heights[kind]-1)/511.0f:0;
+        }
+        unsigned char original[112];
+        memcpy(original,ram+0x4000,sizeof original);
+        prepare_original_ui_quad();
+        for(unsigned i=0;i<4;++i) {
+            unsigned v=0x4000+i*28;
+            float x=bounds[kind][u_right[i]];
+            float mapped=320+(x-320)*((4.0f/3.0f)/aspect);
+            assert(MEMF(v)==(kind<2?x:mapped));
+            assert(!memcmp(original+4+i*28,ram+v+4,16));
+            float inset=0.5f/512;
+            assert(fabsf(MEMF(v+20)-(u_right[i]?(widths[kind]-1)/512.0f-inset:inset))<0.0000001f);
+            assert(fabsf(MEMF(v+24)-(v_bottom[i]?(heights[kind]-1)/512.0f-inset:inset))<0.0000001f);
+        }
+    }
+}
 static void check_original_title_tiles(void) {
     /* The first two original title records share a list with the menu UI.
      * Exercise both the original table and the queue's inline sprite copy. */
@@ -429,6 +467,7 @@ int main(int argc,char **argv) {
     check_settled_portrait(320,479,0);check_settled_portrait(640,480,1);
     check_settled_portrait(360,512,0);check_original_backdrop_tiles();check_original_title_tiles();
     check_original_backdrop_strip();
+    check_status_backdrop_tiles();
     check_original_endchar_portrait();
     check_dialogue_connector();check_speech_anchor();
     check_item_icons();check_font_up();

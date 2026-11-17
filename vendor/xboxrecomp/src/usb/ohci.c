@@ -1176,10 +1176,12 @@ static DWORD WINAPI ohci_thread(LPVOID unused)
         if (xbox_IrqlBlocksInterrupts()) {
             if (!s_worker.held_off_warned) {
                 s_worker.held_off_warned = 1;
-                fprintf(stderr, "  [OHCI%d] irq held off by guest IF/IRQL "
-                        "(depth %d, status=0x%02X)\n",
-                        hc->index, xbox_IrqlRaisedCount(), status);
-                fflush(stderr);
+                if (s_trace) {
+                    fprintf(stderr, "  [OHCI%d] irq held off by guest IF/IRQL "
+                            "(depth %d, status=0x%02X)\n",
+                            hc->index, xbox_IrqlRaisedCount(), status);
+                    fflush(stderr);
+                }
             }
             continue;
         }

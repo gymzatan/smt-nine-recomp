@@ -310,6 +310,19 @@ void dsp56300_invalidate_cache(Dsp56300Jit *dsp);
 uint32_t dsp56300_read_memory(const Dsp56300Jit *dsp, Dsp56300MemSpace space, uint32_t addr);
 
 /**
+ * Read consecutive 24-bit DSP words in increasing address order.
+ *
+ * # Safety
+ * `dsp` must point to a valid `DspJit`. `out` must be writable for `count`
+ * consecutive `u32` values and must not alias storage accessed by the DSP.
+ */
+void dsp56300_read_memory_words(const Dsp56300Jit *dsp,
+                                Dsp56300MemSpace space,
+                                uint32_t addr,
+                                uint32_t *out,
+                                uint32_t count);
+
+/**
  * Write a word to DSP memory.
  *
  * If writing to P-space, automatically marks the dirty bitmap for JIT

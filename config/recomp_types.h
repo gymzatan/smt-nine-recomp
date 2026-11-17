@@ -1132,6 +1132,16 @@ recomp_func_t recomp_lookup_kernel(uint32_t xbox_va);
  * Returns NULL if no manual override exists for this VA.
  */
 recomp_func_t recomp_lookup_manual(uint32_t xbox_va);
+
+/* The synthetic kernel region and the translated image are disjoint.
+ * Keep manual override priority, then use the target's original table. */
+static inline recomp_func_t recomp_resolve_indirect(uint32_t xbox_va)
+{
+    recomp_func_t fn = recomp_lookup_manual(xbox_va);
+    if (fn)
+        return fn;
+    return xbox_va >= 0xFE000000u ? recomp_lookup_kernel(xbox_va) : recomp_lookup(xbox_va);
+}
 #endif
 
 /**
@@ -1194,16 +1204,47 @@ void recomp_call_arguments(uint32_t target);
 #ifndef RECOMP_CALL_ARGUMENT_TARGET9
 #define RECOMP_CALL_ARGUMENT_TARGET9 0u
 #endif
-#define RECOMP_BEFORE_CALL(va) do { if((uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET2 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET3 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET4 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET5 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET6 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET7 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET8 || (uint32_t)(va)==RECOMP_CALL_ARGUMENT_TARGET9) recomp_call_arguments((uint32_t)(va)); } while(0)
+/* Direct targets are constant. Keep their exact test foldable at the call. */
+#define RECOMP_ARGUMENT_TARGET_MATCH(va) \
+    ((va) == RECOMP_CALL_ARGUMENT_TARGET || (va) == RECOMP_CALL_ARGUMENT_TARGET2 || (va) == RECOMP_CALL_ARGUMENT_TARGET3 || \
+     (va) == RECOMP_CALL_ARGUMENT_TARGET4 || (va) == RECOMP_CALL_ARGUMENT_TARGET5 || (va) == RECOMP_CALL_ARGUMENT_TARGET6 || \
+     (va) == RECOMP_CALL_ARGUMENT_TARGET7 || (va) == RECOMP_CALL_ARGUMENT_TARGET8 || (va) == RECOMP_CALL_ARGUMENT_TARGET9)
+#define RECOMP_BEFORE_CALL(va) do { \
+    const uint32_t call_target = (uint32_t)(va); \
+    if (RECOMP_ARGUMENT_TARGET_MATCH(call_target)) \
+        recomp_call_arguments(call_target); \
+} while(0)
+
+/* Dynamic callers share the exact check. The address bits and bucket mask
+ * cheaply reject addresses that cannot name a registered target. */
+void recomp_check_call_arguments(uint32_t target);
+#define RECOMP_ARGUMENT_SLOT(va) (((uint32_t)(va) >> 8) & 63u)
+#define RECOMP_ARGUMENT_SLOT_BIT(va) (UINT64_C(1) << RECOMP_ARGUMENT_SLOT(va))
+#define RECOMP_ARGUMENT_SLOT_MASK \
+    (RECOMP_ARGUMENT_SLOT_BIT(RECOMP_CALL_ARGUMENT_TARGET) | RECOMP_ARGUMENT_SLOT_BIT(RECOMP_CALL_ARGUMENT_TARGET2) | \
+     RECOMP_ARGUMENT_SLOT_BIT(RECOMP_CALL_ARGUMENT_TARGET3) | RECOMP_ARGUMENT_SLOT_BIT(RECOMP_CALL_ARGUMENT_TARGET4) | \
+     RECOMP_ARGUMENT_SLOT_BIT(RECOMP_CALL_ARGUMENT_TARGET5) | RECOMP_ARGUMENT_SLOT_BIT(RECOMP_CALL_ARGUMENT_TARGET6) | \
+     RECOMP_ARGUMENT_SLOT_BIT(RECOMP_CALL_ARGUMENT_TARGET7) | RECOMP_ARGUMENT_SLOT_BIT(RECOMP_CALL_ARGUMENT_TARGET8) | \
+     RECOMP_ARGUMENT_SLOT_BIT(RECOMP_CALL_ARGUMENT_TARGET9))
+#define RECOMP_BEFORE_ICALL(va) do { \
+    const uint32_t call_target = (uint32_t)(va); \
+    const uint32_t target_bits = RECOMP_CALL_ARGUMENT_TARGET | RECOMP_CALL_ARGUMENT_TARGET2 | \
+        RECOMP_CALL_ARGUMENT_TARGET3 | RECOMP_CALL_ARGUMENT_TARGET4 | RECOMP_CALL_ARGUMENT_TARGET5 | \
+        RECOMP_CALL_ARGUMENT_TARGET6 | RECOMP_CALL_ARGUMENT_TARGET7 | RECOMP_CALL_ARGUMENT_TARGET8 | RECOMP_CALL_ARGUMENT_TARGET9; \
+    if (!(call_target & ~target_bits) && \
+        (RECOMP_ARGUMENT_SLOT_MASK & RECOMP_ARGUMENT_SLOT_BIT(call_target))) \
+        recomp_check_call_arguments(call_target); \
+} while(0)
 #else
 #define RECOMP_BEFORE_CALL(va) ((void)0)
+#define RECOMP_BEFORE_ICALL(va) ((void)0)
 #endif
 #ifdef RECOMP_ABI_CHECK
 void recomp_abi_violation_log(uint32_t va, uint32_t ebx0, uint32_t esi0,
                               uint32_t edi0, uint32_t esp0);
-#define RECOMP_ABI_CALL(va, fn) do { \
+#define RECOMP_CHECKED_CALL(va, fn, prepare) do { \
     uint32_t _ab = g_ebx, _as = g_esi, _ad = g_edi, _ap = g_esp; \
-    RECOMP_BEFORE_CALL(va); (fn)(); \
+    prepare(va); (fn)(); \
     if (g_ebx != _ab || g_esi != _as || g_edi != _ad || g_esp < _ap + 4) \
         recomp_abi_violation_log((va), _ab, _as, _ad, _ap); \
 } while(0)
@@ -1212,10 +1253,13 @@ void recomp_abi_violation_log(uint32_t va, uint32_t ebx0, uint32_t esi0,
  * keeps the counts (a project defines recomp_call_profile_hit). Diffing the counts
  * of two situations shows which functions one of them runs and the other does not. */
 void recomp_call_profile_hit(uint32_t va);
-#define RECOMP_ABI_CALL(va, fn) do { RECOMP_BEFORE_CALL(va); recomp_call_profile_hit(va); (fn)(); } while(0)
+#define RECOMP_CHECKED_CALL(va, fn, prepare) do { prepare(va); recomp_call_profile_hit(va); (fn)(); } while(0)
 #else
-#define RECOMP_ABI_CALL(va, fn) do { RECOMP_BEFORE_CALL(va); (fn)(); } while(0)
+#define RECOMP_CHECKED_CALL(va, fn, prepare) do { prepare(va); (fn)(); } while(0)
 #endif
+
+#define RECOMP_ABI_CALL(va, fn) RECOMP_CHECKED_CALL(va, fn, RECOMP_BEFORE_CALL)
+#define RECOMP_ABI_ICALL(va, fn) RECOMP_CHECKED_CALL(va, fn, RECOMP_BEFORE_ICALL)
 
 /* A guarded arm of an indirect call. When a recorded run saw a call site
  * reach only a few translated functions, the lifter compares the target
@@ -1237,7 +1281,7 @@ extern volatile uint64_t g_icall_guard_misses;
  * RECOMP_ICALL - Indirect call through the dispatch table.
  *
  * Looks up the Xbox VA and calls the translated function.
- * Falls back to kernel bridge for kernel thunk synthetic VAs.
+ * Uses the kernel bridge for synthetic kernel addresses.
  * The caller must PUSH32 the guest return address before this macro.
  * If not found, pops it back off to keep the stack balanced.
  *
@@ -1260,11 +1304,9 @@ extern volatile uint64_t g_icall_guard_misses;
         recomp_icall_not_code_log(_va); \
         g_esp += 4; eax = 0; break; \
     } \
-    recomp_func_t _fn = recomp_lookup_manual(_va); \
-    if (!_fn) _fn = recomp_lookup(_va); \
-    if (!_fn) _fn = recomp_lookup_kernel(_va); \
+    recomp_func_t _fn = recomp_resolve_indirect(_va); \
     if (_fn) { RECOMP_ICALL_OBSERVE(_va, RECOMP_ICALL_SEEN_RESOLVED); \
-               RECOMP_ABI_CALL(_va, _fn); } \
+               RECOMP_ABI_ICALL(_va, _fn); } \
     else { RECOMP_ICALL_OBSERVE(_va, RECOMP_ICALL_SEEN_UNRESOLVED); \
            recomp_icall_fail_log(_va); g_esp += 4; eax = 0; } \
 } while(0)
@@ -1286,11 +1328,9 @@ extern volatile uint64_t g_icall_guard_misses;
         recomp_icall_not_code_log(_va); \
         g_esp = (saved_esp); eax = 0; break; \
     } \
-    recomp_func_t _fn = recomp_lookup_manual(_va); \
-    if (!_fn) _fn = recomp_lookup(_va); \
-    if (!_fn) _fn = recomp_lookup_kernel(_va); \
+    recomp_func_t _fn = recomp_resolve_indirect(_va); \
     if (_fn) { RECOMP_ICALL_OBSERVE(_va, RECOMP_ICALL_SEEN_RESOLVED); \
-               RECOMP_ABI_CALL(_va, _fn); } \
+               RECOMP_ABI_ICALL(_va, _fn); } \
     else { RECOMP_ICALL_OBSERVE(_va, RECOMP_ICALL_SEEN_UNRESOLVED); \
            recomp_icall_fail_log(_va); g_esp = (saved_esp); eax = 0; } \
 } while(0)
@@ -1306,11 +1346,9 @@ extern volatile uint64_t g_icall_guard_misses;
         recomp_icall_not_code_log(_va); \
         g_esp += 4; eax = 0; break; \
     } \
-    recomp_func_t _fn = recomp_lookup_manual(_va); \
-    if (!_fn) _fn = recomp_lookup(_va); \
-    if (!_fn) _fn = recomp_lookup_kernel(_va); \
+    recomp_func_t _fn = recomp_resolve_indirect(_va); \
     if (_fn) { RECOMP_ICALL_OBSERVE(_va, RECOMP_ICALL_SEEN_RESOLVED); \
-               RECOMP_ABI_CALL(_va, _fn); } \
+               RECOMP_ABI_ICALL(_va, _fn); } \
     else { RECOMP_ICALL_OBSERVE(_va, RECOMP_ICALL_SEEN_UNRESOLVED); \
            recomp_icall_fail_log(_va); g_esp += 4; eax = 0; } \
 } while(0)
@@ -1333,11 +1371,9 @@ extern volatile uint64_t g_icall_guard_misses;
         g_esp = (saved_esp); eax = 0; break; \
     } \
     RECOMP_ICALL_OBSERVE_SITE((site), _va); \
-    recomp_func_t _fn = recomp_lookup_manual(_va); \
-    if (!_fn) _fn = recomp_lookup(_va); \
-    if (!_fn) _fn = recomp_lookup_kernel(_va); \
+    recomp_func_t _fn = recomp_resolve_indirect(_va); \
     if (_fn) { RECOMP_ICALL_OBSERVE(_va, RECOMP_ICALL_SEEN_RESOLVED); \
-               RECOMP_ABI_CALL(_va, _fn); } \
+               RECOMP_ABI_ICALL(_va, _fn); } \
     else { RECOMP_ICALL_OBSERVE(_va, RECOMP_ICALL_SEEN_UNRESOLVED); \
            recomp_icall_fail_log(_va); g_esp = (saved_esp); eax = 0; } \
 } while(0)
@@ -1354,11 +1390,9 @@ extern volatile uint64_t g_icall_guard_misses;
         g_esp += 4; eax = 0; break; \
     } \
     RECOMP_ICALL_OBSERVE_SITE((site), _va); \
-    recomp_func_t _fn = recomp_lookup_manual(_va); \
-    if (!_fn) _fn = recomp_lookup(_va); \
-    if (!_fn) _fn = recomp_lookup_kernel(_va); \
+    recomp_func_t _fn = recomp_resolve_indirect(_va); \
     if (_fn) { RECOMP_ICALL_OBSERVE(_va, RECOMP_ICALL_SEEN_RESOLVED); \
-               RECOMP_ABI_CALL(_va, _fn); } \
+               RECOMP_ABI_ICALL(_va, _fn); } \
     else { RECOMP_ICALL_OBSERVE(_va, RECOMP_ICALL_SEEN_UNRESOLVED); \
            recomp_icall_fail_log(_va); g_esp += 4; eax = 0; } \
 } while(0)
@@ -1372,11 +1406,9 @@ extern volatile uint64_t g_icall_guard_misses;
  */
 #define RECOMP_ITAIL(xbox_va) do { \
     uint32_t _va = (uint32_t)(xbox_va); \
-    recomp_func_t _fn = recomp_lookup_manual(_va); \
-    if (!_fn) _fn = recomp_lookup(_va); \
-    if (!_fn) _fn = recomp_lookup_kernel(_va); \
+    recomp_func_t _fn = recomp_resolve_indirect(_va); \
     if (_fn) { RECOMP_ICALL_OBSERVE(_va, RECOMP_ICALL_SEEN_RESOLVED); \
-               RECOMP_ABI_CALL(_va, _fn); } \
+               RECOMP_ABI_ICALL(_va, _fn); } \
     else { RECOMP_ICALL_OBSERVE(_va, RECOMP_ICALL_SEEN_UNRESOLVED); \
            recomp_icall_fail_log(_va); g_esp += 4; g_eax = 0; } \
 } while(0)

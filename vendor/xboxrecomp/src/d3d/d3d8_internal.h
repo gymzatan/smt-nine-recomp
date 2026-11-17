@@ -63,7 +63,14 @@ void d3d8_gamma_shutdown(void);
 
 /* Current render state array accessor */
 const DWORD         *d3d8_GetRenderStates(void);
+typedef struct D3D8RenderStateUpdate {
+    D3DRENDERSTATETYPE state;
+    DWORD value;
+} D3D8RenderStateUpdate;
+void d3d8_SetRenderStates(const D3D8RenderStateUpdate *updates, unsigned count);
 const DWORD         *d3d8_GetTSS(DWORD stage);
+void d3d8_SetNV2ATextureSampling(DWORD stage, DWORD address_u, DWORD address_v,
+                                 DWORD address_w, DWORD border, DWORD filter);
 
 /* Base texture currently bound to a texture stage (2D/cube/volume),
  * or NULL if nothing is bound. */

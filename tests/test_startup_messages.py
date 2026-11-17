@@ -35,6 +35,16 @@ def startup_probe(tmp_path_factory, request):
 static void error_game_context(EXCEPTION_POINTERS *exception) {(void)exception;}
 static const char *scenario;
 static unsigned dialog_calls, game_calls;
+static int frame_wait_active;
+int smt9_frame_wait_init(void) {
+    assert(!frame_wait_active);
+    frame_wait_active=1;
+    return 1;
+}
+void smt9_frame_wait_shutdown(void) {
+    assert(frame_wait_active);
+    frame_wait_active=0;
+}
 static wchar_t observed[2048];
 static int observed_message(HWND owner,LPCWSTR message,LPCWSTR title,UINT flags) {
     assert(!wcscmp(title,L"NINE") && (flags&MB_ICONERROR));
@@ -45,6 +55,7 @@ static int startup_environment(const char *name,const char *value) {
     return _putenv_s(name,value);
 }
 int WINAPI WinMain(HINSTANCE a,HINSTANCE b,LPSTR command,int show) {
+    assert(frame_wait_active);
     ++game_calls;
     return !strcmp(scenario,"game-fail");
 }
@@ -69,6 +80,7 @@ int main(int argc,char **argv) {
     if(strcmp(scenario,"redirected"))assert(SetStdHandle(STD_ERROR_HANDLE,INVALID_HANDLE_VALUE));
     char *arguments[]={argv[0],NULL};
     int result=production_main(1,arguments);
+    assert(!frame_wait_active);
     if(held!=INVALID_HANDLE_VALUE)CloseHandle(held);
     if(!strcmp(scenario,"readonly"))assert(SetFileAttributesW(log,FILE_ATTRIBUTE_NORMAL));
     FILE *out=fopen("result.txt","wb");assert(out);

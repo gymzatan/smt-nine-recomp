@@ -65,8 +65,10 @@ void nv2a_vsh_constant_words(const uint32_t *words, uint32_t count);
 void nv2a_vsh_set_cxt_write(uint32_t enable);         /* _CXT_WRITE_EN      */
 uint32_t nv2a_vsh_cxt_write(void);
 uint32_t nv2a_vsh_inputs_used(void);
-/* On success, also return the input mask when requested. */
-const uint32_t *nv2a_vsh_program(int *length, uint32_t *inputs);
+/* On success, return the input mask and program revision when requested.
+ * A revision change requires comparing the program again. A matching revision
+ * guarantees the program returned by this producer has the same bytes. */
+const uint32_t *nv2a_vsh_program(int *length, uint32_t *inputs, uint64_t *revision);
 
 /* Run the program from the start slot on one vertex. Inputs are the sixteen
  * attribute values as floats. Returns 0 if there is no program to run (no

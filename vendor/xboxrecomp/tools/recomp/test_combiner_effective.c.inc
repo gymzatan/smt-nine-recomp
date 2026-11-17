@@ -64,6 +64,7 @@ static void combiner_effective_pixel(uint32_t expected) {
 }
 static void verify_combiner_effective_key(void) {
     seed();method(NV097_SET_BEGIN_END,0);method(NV097_SET_DEPTH_TEST_ENABLE,0);method(NV097_SET_DEPTH_MASK,0);
+    method(NV097_SET_CLEAR_RECT_HORIZONTAL,7u<<16);method(NV097_SET_CLEAR_RECT_VERTICAL,7u<<16);
     verify_combiner_active_parser();
     NV2ACombinerState state={0};state.num_stages=1;state.native_coordinates=1;
     for(unsigned i=0;i<4;i++)state.tex_mode[i]=NV2A_TEXMODE_NONE;
@@ -109,6 +110,21 @@ static void verify_combiner_effective_key(void) {
     /* Same original Kelvin producers -> original native draw -> actual RAM pixels. */
     method(NV097_SET_COMBINER_SPECULAR_FOG_CW0,0);method(NV097_SET_COMBINER_SPECULAR_FOG_CW1,0);
     method(NV097_SET_COMBINER_CONTROL,1);combiner_effective_pixel(0xffff0000);
+    method(NV097_SET_COMBINER_SPECULAR_FOG_CW0,0xc); /* D = R0 RGB */
+    method(NV097_SET_COMBINER_SPECULAR_FOG_CW1,0x2000); /* G = 1 */
+    method(NV097_SET_ALPHA_TEST_ENABLE,1);
+    method(NV097_SET_ALPHA_REF,255);
+    method(NV097_SET_ALPHA_FUNC,0x200); /* NEVER */
+    assert(s_gpu.alpha_test==1 && s_gpu.alpha_ref==255 && s_gpu.alpha_func==0x200);
+    combiner_effective_pixel(0xff010203);
+    method(NV097_SET_ALPHA_FUNC,0x202); /* EQUAL */
+    combiner_effective_pixel(0xffff0000);
+    method(NV097_SET_ALPHA_FUNC,0x205); /* NOTEQUAL */
+    combiner_effective_pixel(0xff010203);
+    method(NV097_SET_ALPHA_FUNC,0x206); /* GEQUAL */
+    combiner_effective_pixel(0xffff0000);
+    method(NV097_SET_ALPHA_TEST_ENABLE,0);
+    method(NV097_SET_COMBINER_SPECULAR_FOG_CW0,0);method(NV097_SET_COMBINER_SPECULAR_FOG_CW1,0);
     unsigned before=combiner_test_shader_count();
     method(NV097_SET_COMBINER_COLOR_ICW+7*4,0x05200000);
     method(NV097_SET_COMBINER_COLOR_OCW+7*4,0xc00);
@@ -134,7 +150,8 @@ static void preparation_draw_check(const char *label,unsigned primitive,unsigned
     method(NV097_SET_COLOR_CLEAR_VALUE,0xff010203);method(NV097_CLEAR_SURFACE,0xf0);
     method(NV097_CLEAR_REPORT_VALUE,0);method(NV097_SET_ZPASS_PIXEL_COUNT_ENABLE,1);
     prep_batch_calls=prep_pixel_calls=prep_geometry_calls=prep_draw_calls=prep_geometry_draws=prep_stage_unpack_calls=prep_gs_cb_calls=prep_vs_cb_calls=0;
-    prep_border_unpack_calls=0;prep_reverse_calls=0;
+    prep_border_unpack_calls=0;
+    combiner_test_input_groups=combiner_test_output_groups=0;
     layout_query_calls=layout_output_draws=0;layout_watch=1;
     prep_watch=1;raster_draw_for_test(primitive,0,count);nv2a_pb_checkpoint_publish();prep_watch=0;layout_watch=0;
     if(d3d8_IsNativeVulkan()) {
@@ -157,9 +174,7 @@ static void preparation_draw_check(const char *label,unsigned primitive,unsigned
         fprintf(stderr,"[PREPARATION COST] %s actual GS/PS %u/%u expected %u/%u finaldraws=%u\n",label,prep_geometry_calls,prep_pixel_calls,geometry,pixel,prep_draw_calls);exit(5);
     }
     unsigned active=s_gpu.rc.control&255;if(active>8)active=8;if(!active)active=1;
-    if(prep_reverse_calls!=(2*active+2)*prep_batch_calls) {
-        fprintf(stderr,"[DRAW STATE PREPARATION] %s reverse=%u expected=%u\n",label,prep_reverse_calls,(2*active+2)*prep_batch_calls);exit(5);
-    }
+    combiner_parse_work(active*prep_batch_calls);
     if(prep_stage_unpack_calls!=active*2*prep_batch_calls) {
         fprintf(stderr,"[PREPARATION COST] %s actual stage-unpack %u expected %u\n",label,prep_stage_unpack_calls,active*2*prep_batch_calls);exit(5);
     }

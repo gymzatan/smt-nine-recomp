@@ -10,6 +10,9 @@
 
 #include "nv2a_state.h"
 #include "nv2a_color_logic.h"
+#include "../kernel/nv2a_combiner.h"
+
+extern int nv2a_pb_exec_method(uint32_t, uint32_t, uint32_t, uint8_t *);
 
 /* ============================================================
  * Global state
@@ -832,16 +835,24 @@ void pgraph_method(NV2AState *d, uint32_t subchannel,
     if (graphics_class == NV_KELVIN_PRIMITIVE &&
         ((method >= NV097_SET_TRANSFORM_PROGRAM && method < NV097_SET_TRANSFORM_CONSTANT + 128) ||
          (method >= NV097_ARRAY_ELEMENT16 && method < NV097_SET_TEXTURE_OFFSET + 256 &&
-          !(method >= NV097_SET_EYE_VECTOR && method < NV097_SET_EYE_VECTOR+12)) ||
-         (!ordinary_notify &&
-          ((method >= 0x0260 && method < 0x0280) ||
-           (method >= 0x0A60 && method < 0x0AE0) ||
-           (method >= 0x1E40 && method < 0x1E60))))) {
+          !(method >= NV097_SET_EYE_VECTOR && method < NV097_SET_EYE_VECTOR+12)))) {
         if (d->pfifo.method_consumer)
             d->pfifo.method_consumer(subchannel, method, param, NULL);
         else
             pgraph_stop(subchannel, graphics_class, method, param);
         return;
+    }
+    if (graphics_class == NV_KELVIN_PRIMITIVE && !ordinary_notify) {
+        unsigned reg = nv2a_combiner_register(method);
+        if (reg) {
+            if (d->pfifo.method_consumer == nv2a_pb_exec_method)
+                nv2a_pb_exec_combiner_register(subchannel, method, param, reg);
+            else if (d->pfifo.method_consumer)
+                d->pfifo.method_consumer(subchannel, method, param, NULL);
+            else
+                pgraph_stop(subchannel, graphics_class, method, param);
+            return;
+        }
     }
     pgraph_class_method(d, subchannel, method, param, graphics_class);
     if(ordinary_notify) {
